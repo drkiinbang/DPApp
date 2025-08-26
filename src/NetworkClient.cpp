@@ -26,12 +26,18 @@ namespace DPApp {
     }
 
     bool NetworkClient::connect(const std::string& server_address, uint16_t port) {
-        if (connected_) return false;
+        if (connected_) {
+            std::cout << "Already connected, returning false" << std::endl;
+            return false;
+        }
+
+        std::cout << "Attempting to connect to " << server_address << ":" << port << std::endl;
 
         server_address_ = server_address;
         server_port_ = port;
 
         if (!initializeSocket()) {
+            std::cout << "Failed to initialize socket" << std::endl;
             return false;
         }
 
@@ -45,21 +51,26 @@ namespace DPApp {
             return false;
         }
 
+        std::cout << "Calling connect()..." << std::endl;
         if (::connect(client_socket_, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr)) < 0) {
             std::cerr << "Failed to connect to server: " << server_address << ":" << port << std::endl;
             cleanupSocket();
             return false;
         }
 
+        std::cout << "Socket connected successfully" << std::endl;
+
         connected_ = true;
         shutdown_requested_ = false;
 
+        std::cout << "Starting client thread..." << std::endl;
         client_thread_ = std::thread(&NetworkClient::clientThread, this);
 
         // 연결 안정화를 위한 대기
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-        // 핸드셰이크 메시지 전송 - 클라이언트가 자신의 ID를 서버에 알림
+        std::cout << "Sending handshake message..." << std::endl;
+        // 핸드셰이크 메시지 전송
         NetworkMessage handshake_msg(MessageType::HANDSHAKE,
             std::vector<uint8_t>(slave_id_.begin(), slave_id_.end()));
         if (!sendMessage(handshake_msg)) {
@@ -68,6 +79,7 @@ namespace DPApp {
             return false;
         }
 
+        std::cout << "Sending registration message..." << std::endl;
         // 슬레이브 등록 메시지 전송
         NetworkMessage register_msg(MessageType::SLAVE_REGISTER,
             std::vector<uint8_t>(slave_id_.begin(), slave_id_.end()));
@@ -77,6 +89,7 @@ namespace DPApp {
             return false;
         }
 
+        std::cout << "Starting heartbeat thread..." << std::endl;
         // 하트비트 스레드는 등록 후에 시작
         heartbeat_thread_ = std::thread(&NetworkClient::heartbeatThread, this);
 
@@ -162,27 +175,55 @@ namespace DPApp {
     void NetworkClient::clientThread() {
         std::vector<uint8_t> buffer(65536);
 
+        std::cout << "Client thread started for " << slave_id_ << std::endl;
+
         while (connected_ && !shutdown_requested_) {
-            int bytes_received = recv(client_socket_,
-                reinterpret_cast<char*>(buffer.data()),
-                static_cast<int>(buffer.size()), 0);
-
-            if (bytes_received <= 0) {
-                if (!shutdown_requested_) {
-                    std::cerr << "Connection lost to server" << std::endl;
-                    connected_ = false;
-
-                    // 연결 끊김 콜백 호출
-                    if (connection_callback_) {
-                        connection_callback_(slave_id_, false);
-                    }
-                }
-                break;
-            }
-
             try {
+                std::cout << "Waiting for data from server..." << std::endl;
+
+                int bytes_received = recv(client_socket_,
+                    reinterpret_cast<char*>(buffer.data()),
+                    static_cast<int>(buffer.size()), 0);
+
+                std::cout << "recv() returned: " << bytes_received << std::endl;
+
+                if (bytes_received < 0) {
+                    int error = errno;
+                    std::cerr << "recv() error: " << error << " - ";
+#ifdef _WIN32
+                    error = WSAGetLastError();
+                    if (error == WSAETIMEDOUT) {
+                        std::cout << "Socket timeout, continuing..." << std::endl;
+                        continue;
+                    }
+                    else if (error == WSAECONNRESET) {
+                        std::cerr << "Connection reset by server" << std::endl;
+                    }
+                    else {
+                        std::cerr << "WSA Error: " << error << std::endl;
+                    }
+#else
+                    if (error == EAGAIN || error == EWOULDBLOCK) {
+                        std::cout << "Socket timeout, continuing..." << std::endl;
+                        continue;
+                    }
+                    else {
+                        std::cerr << "Socket error: " << strerror(error) << std::endl;
+                    }
+#endif
+                    break;
+                }
+                else if (bytes_received == 0) {
+                    std::cout << "Server closed connection gracefully" << std::endl;
+                    break;
+                }
+
+                std::cout << "Received " << bytes_received << " bytes from server" << std::endl;
+
                 buffer.resize(bytes_received);
                 NetworkMessage message = NetworkMessage::deserialize(buffer);
+
+                std::cout << "Deserialized message type: " << static_cast<int>(message.header.type) << std::endl;
 
                 if (message_callback_) {
                     message_callback_(message, "server");
@@ -192,9 +233,22 @@ namespace DPApp {
 
             }
             catch (const std::exception& e) {
-                std::cerr << "Error processing message from server: " << e.what() << std::endl;
+                std::cerr << "Exception in client thread: " << e.what() << std::endl;
+                break;
             }
         }
+
+        if (!shutdown_requested_) {
+            std::cerr << "Connection lost to server" << std::endl;
+            connected_ = false;
+
+            // 연결 끊김 콜백 호출
+            if (connection_callback_) {
+                connection_callback_(slave_id_, false);
+            }
+        }
+
+        std::cout << "Client thread ending for " << slave_id_ << std::endl;
     }
 
     void NetworkClient::heartbeatThread() {

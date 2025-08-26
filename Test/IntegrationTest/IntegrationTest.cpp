@@ -15,6 +15,61 @@
 using namespace DPApp;
 using namespace std::chrono_literals;
 
+int main_simpleTest() {
+    std::cout << "=== Simple Connection Test ===" << std::endl;
+
+    // 서버 시작
+    auto server = std::make_unique<NetworkServer>();
+
+    bool client_connected = false;
+    server->setConnectionCallback([&](const std::string& client_id, bool connected) {
+        std::cout << "Server callback: " << client_id << " " << (connected ? "connected" : "disconnected") << std::endl;
+        if (connected) client_connected = true;
+        });
+
+    server->setMessageCallback([](const NetworkMessage& msg, const std::string& client_id) {
+        std::cout << "Server received message type " << static_cast<int>(msg.header.type)
+            << " from " << client_id << std::endl;
+        });
+
+    if (!server->start(9999)) {
+        std::cerr << "Failed to start server" << std::endl;
+        return 1;
+    }
+
+    std::cout << "Server started on port 9999" << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+
+    // 클라이언트 연결
+    auto client = std::make_unique<NetworkClient>();
+
+    client->setConnectionCallback([](const std::string& client_id, bool connected) {
+        std::cout << "Client callback: " << client_id << " " << (connected ? "connected" : "disconnected") << std::endl;
+        });
+
+    std::cout << "Attempting client connection..." << std::endl;
+    if (!client->connect("127.0.0.1", 9999)) {
+        std::cerr << "Client connection failed" << std::endl;
+        server->stop();
+        return 1;
+    }
+
+    // 연결 유지
+    std::cout << "Connection established, maintaining for 10 seconds..." << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(10));
+
+    std::cout << "Disconnecting client..." << std::endl;
+    client->disconnect();
+
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+
+    std::cout << "Stopping server..." << std::endl;
+    server->stop();
+
+    std::cout << "Test completed" << std::endl;
+    return 0;
+}
+
 class IntegrationTestFramework {
 public:
     struct TestResult {
@@ -102,12 +157,16 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testBasicNetworkC
     TestResult result{ "Basic Network Communication", false, "", 0 };
 
     try {
-        // Master 서버 시작
         auto server = std::make_unique<NetworkServer>();
 
-        bool server_started = false;
+        std::atomic<bool> server_received_connection{ false };
+        std::atomic<bool> client_callback_called{ false };
+
         server->setConnectionCallback([&](const std::string& client_id, bool connected) {
-            if (connected) server_started = true;
+            if (connected) {
+                std::cout << "Server callback: client connected " << client_id << std::endl;
+                server_received_connection = true;
+            }
             });
 
         if (!server->start(8081)) {
@@ -115,31 +174,48 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testBasicNetworkC
             return result;
         }
 
-        // 클라이언트 연결 테스트
+        std::cout << "Server started, waiting..." << std::endl;
+        std::this_thread::sleep_for(2s);
+
         auto client = std::make_unique<NetworkClient>();
 
-        bool client_connected = false;
         client->setConnectionCallback([&](const std::string& client_id, bool connected) {
-            client_connected = connected;
+            std::cout << "Client callback: " << client_id << " connected=" << connected << std::endl;
+            if (connected) {
+                client_callback_called = true;
+            }
             });
 
+        std::cout << "Connecting client..." << std::endl;
         if (!client->connect("127.0.0.1", 8081)) {
             result.error_message = "Failed to connect client";
             server->stop();
             return result;
         }
 
-        // 연결 확인
-        if (!waitForCondition([&]() { return server_started && client_connected; })) {
-            result.error_message = "Connection timeout";
+        // 연결 확인 - SimpleTest와 동일하게 10초 대기
+        std::cout << "Waiting for callbacks..." << std::endl;
+        bool success = waitForCondition([&]() {
+            return server_received_connection.load() && client_callback_called.load();
+            }, 15);
+
+        if (!success) {
+            result.error_message = "Connection callbacks timeout";
+            client->disconnect();
             server->stop();
             return result;
         }
 
-        server->stop();
+        std::cout << "Connection established, maintaining..." << std::endl;
+        std::this_thread::sleep_for(3s); // 연결 유지
+
+        std::cout << "Disconnecting..." << std::endl;
         client->disconnect();
+        std::this_thread::sleep_for(1s);
+        server->stop();
 
         result.passed = true;
+        std::cout << "Basic network test completed successfully" << std::endl;
     }
     catch (const std::exception& e) {
         result.error_message = std::string("Exception: ") + e.what();
@@ -544,6 +620,14 @@ void IntegrationTestFramework::cleanupTestFiles() {
 
 // 메인 테스트 실행 프로그램
 int main() {
+
+    bool simpleTest = false;
+
+    if (simpleTest) {
+        main_simpleTest();
+        return 0;
+    }
+
     std::cout << "DPApp Integration Test Suite" << std::endl;
     std::cout << "=============================" << std::endl;
 

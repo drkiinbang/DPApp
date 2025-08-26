@@ -255,6 +255,8 @@ void NetworkServer::clientHandlerThread(std::shared_ptr<ClientConnection> client
 
                 handshake_completed = true;
                 std::cout << "Handshake completed with client: " << client_id << std::endl;
+                /// Notify upper layers/tests that the client is now connected with its real ID.
+                if (connection_callback_) connection_callback_(client_id, true);
                 continue;
             }
 
