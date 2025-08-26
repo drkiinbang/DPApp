@@ -27,7 +27,7 @@ public:
     static std::vector<TestResult> runAllTests();
 
 private:
-    // Å×½ºÆ® ÄÉÀÌ½ºµé
+    // ï¿½×½ï¿½Æ® ï¿½ï¿½ï¿½Ì½ï¿½ï¿½ï¿½
     static TestResult testBasicNetworkCommunication();
     static TestResult testMasterSlaveRegistration();
     static TestResult testTaskAssignmentAndExecution();
@@ -36,7 +36,7 @@ private:
     static TestResult testDataIntegrity();
     static TestResult testHeartbeatSystem();
 
-    // ÇïÆÛ ÇÔ¼öµé
+    // í—¬í¼ í•¨ìˆ˜ë“¤
     static bool startMasterInBackground(int port);
     static bool startSimulatedWorker(const std::string& master_ip, int port, const std::string& worker_id);
     static void createTestPointCloudData(const std::string& filename);
@@ -44,16 +44,16 @@ private:
     static void cleanupTestFiles();
 };
 
-// ¸ŞÀÎ Å×½ºÆ® ½ÇÇà ÇÔ¼ö
+// ë©”ì¸ í…ŒìŠ¤íŠ¸ ì‹¤í–‰ í•¨ìˆ˜
 std::vector<IntegrationTestFramework::TestResult> IntegrationTestFramework::runAllTests() {
     std::vector<TestResult> results;
 
     std::cout << "=== Starting Integration Tests ===" << std::endl;
 
-    // Å×½ºÆ® µ¥ÀÌÅÍ ÁØºñ
+    // í…ŒìŠ¤íŠ¸ ë°ì´í„° ì¤€ë¹„
     createTestPointCloudData("test_data.xyz");
 
-    // °¢ Å×½ºÆ® ½ÇÇà
+    // ê° í…ŒìŠ¤íŠ¸ ì‹¤í–‰
     std::vector<std::function<TestResult()>> tests = {
         testBasicNetworkCommunication,
         testMasterSlaveRegistration,
@@ -79,13 +79,13 @@ std::vector<IntegrationTestFramework::TestResult> IntegrationTestFramework::runA
         }
         std::cout << std::endl;
 
-        // Å×½ºÆ® °£ Á¤¸® ½Ã°£
+        // í…ŒìŠ¤íŠ¸ ê°„ ì •ë¦¬ ì‹œê°„
         std::this_thread::sleep_for(1s);
     }
 
     cleanupTestFiles();
 
-    // °á°ú ¿ä¾à
+    // ê²°ê³¼ ìš”ì•½
     int passed = 0, failed = 0;
     for (const auto& result : results) {
         if (result.passed) passed++; else failed++;
@@ -97,17 +97,21 @@ std::vector<IntegrationTestFramework::TestResult> IntegrationTestFramework::runA
     return results;
 }
 
-// Test 1: ±âº» ³×Æ®¿öÅ© Åë½Å
+// Test 1: ê¸°ë³¸ ë„¤íŠ¸ì›Œí¬ í†µì‹ 
 IntegrationTestFramework::TestResult IntegrationTestFramework::testBasicNetworkCommunication() {
     TestResult result{ "Basic Network Communication", false, "", 0 };
 
     try {
-        // Master ¼­¹ö ½ÃÀÛ
         auto server = std::make_unique<NetworkServer>();
 
-        bool server_started = false;
+        std::atomic<bool> server_started{ false };
+        std::atomic<bool> client_connected_to_server{ false };
+
         server->setConnectionCallback([&](const std::string& client_id, bool connected) {
-            if (connected) server_started = true;
+            if (connected) {
+                std::cout << "Server detected client connection: " << client_id << std::endl;
+                server_started = true;
+            }
             });
 
         if (!server->start(8081)) {
@@ -115,29 +119,49 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testBasicNetworkC
             return result;
         }
 
-        // Å¬¶óÀÌ¾ğÆ® ¿¬°á Å×½ºÆ®
+        std::cout << "Server started, waiting before client connection..." << std::endl;
+        std::this_thread::sleep_for(1s); // ì„œë²„ ì•ˆì •í™” ëŒ€ê¸°
+
         auto client = std::make_unique<NetworkClient>();
 
-        bool client_connected = false;
         client->setConnectionCallback([&](const std::string& client_id, bool connected) {
-            client_connected = connected;
+            std::cout << "Client callback: " << client_id << " connected=" << connected << std::endl;
+            client_connected_to_server = connected;
             });
 
+        std::cout << "Attempting client connection..." << std::endl;
         if (!client->connect("127.0.0.1", 8081)) {
             result.error_message = "Failed to connect client";
             server->stop();
             return result;
         }
 
-        // ¿¬°á È®ÀÎ
-        if (!waitForCondition([&]() { return server_started && client_connected; })) {
-            result.error_message = "Connection timeout";
+        std::cout << "Client connect() returned, waiting for callbacks..." << std::endl;
+
+        // ì—°ê²° ìƒíƒœ í™•ì¸ - ë” ê¸´ íƒ€ì„ì•„ì›ƒ
+        bool connection_established = waitForCondition([&]() {
+            std::cout << "Checking: server_started=" << server_started
+                << " client_connected=" << client_connected_to_server << std::endl;
+            return server_started.load() && client_connected_to_server.load();
+            }, 15); // 15ì´ˆë¡œ ì¦ê°€
+
+        if (!connection_established) {
+            result.error_message = "Connection timeout - server_started: " +
+                std::to_string(server_started.load()) +
+                ", client_connected: " +
+                std::to_string(client_connected_to_server.load());
             server->stop();
             return result;
         }
 
-        server->stop();
+        std::cout << "Connection established successfully!" << std::endl;
+
+        // ì—°ê²° ìƒíƒœë¥¼ ì ì‹œ ìœ ì§€
+        std::this_thread::sleep_for(2s);
+
         client->disconnect();
+        std::this_thread::sleep_for(1s);
+        server->stop();
 
         result.passed = true;
     }
@@ -148,7 +172,7 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testBasicNetworkC
     return result;
 }
 
-// Test 2: Master-Slave µî·Ï
+// Test 2: Master-Slave ë“±ë¡
 IntegrationTestFramework::TestResult IntegrationTestFramework::testMasterSlaveRegistration() {
     TestResult result{ "Master-Slave Registration", false, "", 0 };
 
@@ -169,12 +193,12 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testMasterSlaveRe
             return result;
         }
 
-        // ¿©·¯ ¿öÄ¿ ½Ã¹Ä·¹ÀÌ¼Ç
+        // ì—¬ëŸ¬ ì›Œì»¤ ì‹œë®¬ë ˆì´ì…˜
         std::vector<std::unique_ptr<NetworkClient>> clients;
         for (int i = 0; i < 3; ++i) {
             auto client = std::make_unique<NetworkClient>();
             if (client->connect("127.0.0.1", 8082)) {
-                // µî·Ï ¸Ş½ÃÁö Àü¼Û
+                // ë“±ë¡ ë©”ì‹œì§€ ì „ì†¡
                 std::string slave_id = "test_worker_" + std::to_string(i);
                 NetworkMessage register_msg(MessageType::SLAVE_REGISTER,
                     std::vector<uint8_t>(slave_id.begin(), slave_id.end()));
@@ -184,7 +208,7 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testMasterSlaveRe
             }
         }
 
-        // µî·Ï È®ÀÎ
+        // ë“±ë¡ í™•ì¸
         if (!waitForCondition([&]() { return registered_slaves >= 3; })) {
             result.error_message = "Slave registration timeout";
             server->stop();
@@ -208,7 +232,7 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testMasterSlaveRe
     return result;
 }
 
-// Test 3: ÀÛ¾÷ ÇÒ´ç ¹× ½ÇÇà
+// Test 3: ì‘ì—… í• ë‹¹ ë° ì‹¤í–‰
 IntegrationTestFramework::TestResult IntegrationTestFramework::testTaskAssignmentAndExecution() {
     TestResult result{ "Task Assignment and Execution", false, "", 0 };
 
@@ -216,40 +240,40 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testTaskAssignmen
         auto server = std::make_unique<NetworkServer>();
         auto task_manager = std::make_unique<TaskManager>();
 
-        // Å×½ºÆ®¿ë Ã»Å© µ¥ÀÌÅÍ »ı¼º
+        // í…ŒìŠ¤íŠ¸ìš© ì²­í¬ ë°ì´í„° ìƒì„±
         auto chunk = std::make_shared<PointCloudChunk>();
         chunk->chunk_id = 1;
         for (int i = 0; i < 100; ++i) {
             chunk->points.emplace_back(i * 0.1, i * 0.1, i * 0.1);
         }
 
-        // ÀÛ¾÷ Ãß°¡
+        // ì‘ì—… ì¶”ê°€
         std::vector<uint8_t> params;
         uint32_t task_id = task_manager->addTask("filter", chunk, params);
 
-        // ¿öÄ¿ µî·Ï
+        // ì›Œì»¤ ë“±ë¡
         task_manager->registerSlave("test_worker");
 
-        // ÀÛ¾÷ ÇÒ´ç
+        // ì‘ì—… í• ë‹¹
         bool assigned = task_manager->assignTasksToSlaves();
         if (!assigned) {
             result.error_message = "Failed to assign tasks";
             return result;
         }
 
-        // ÇÒ´çµÈ ÀÛ¾÷ È®ÀÎ
+        // í• ë‹¹ëœ ì‘ì—… í™•ì¸
         auto assigned_tasks = task_manager->getTasksByStatus(TaskStatus::ASSIGNED);
         if (assigned_tasks.empty()) {
             result.error_message = "No tasks were assigned";
             return result;
         }
 
-        // ÀÛ¾÷ ¿Ï·á ½Ã¹Ä·¹ÀÌ¼Ç
+        // ì‘ì—… ì™„ë£Œ ì‹œë®¬ë ˆì´ì…˜
         ProcessingResult proc_result;
         proc_result.task_id = task_id;
         proc_result.chunk_id = 1;
         proc_result.success = true;
-        proc_result.processed_points = chunk->points; // ´Ü¼øÈ÷ ¿øº» º¹»ç
+        proc_result.processed_points = chunk->points; // ë‹¨ìˆœíˆ ì›ë³¸ ë³µì‚¬
 
         bool completed = task_manager->completeTask(task_id, proc_result);
         if (!completed) {
@@ -257,7 +281,7 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testTaskAssignmen
             return result;
         }
 
-        // ¿Ï·áµÈ ÀÛ¾÷ È®ÀÎ
+        // ì™„ë£Œëœ ì‘ì—… í™•ì¸
         auto completed_tasks = task_manager->getTasksByStatus(TaskStatus::COMPLETED);
         if (completed_tasks.empty()) {
             result.error_message = "Task was not marked as completed";
@@ -273,7 +297,7 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testTaskAssignmen
     return result;
 }
 
-// Test 4: ´ÙÁß ¿öÄ¿ ½Ã³ª¸®¿À
+// Test 4: ë‹¤ì¤‘ ì›Œì»¤ ì‹œë‚˜ë¦¬ì˜¤
 IntegrationTestFramework::TestResult IntegrationTestFramework::testMultipleWorkersScenario() {
     TestResult result{ "Multiple Workers Scenario", false, "", 0 };
 
@@ -286,7 +310,7 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testMultipleWorke
             return result;
         }
 
-        // ¿©·¯ ÀÛ¾÷ »ı¼º
+        // ì—¬ëŸ¬ ì‘ì—… ìƒì„±
         std::vector<uint32_t> task_ids;
         for (int i = 0; i < 5; ++i) {
             auto chunk = std::make_shared<PointCloudChunk>();
@@ -300,12 +324,12 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testMultipleWorke
             task_ids.push_back(task_id);
         }
 
-        // ¿©·¯ ¿öÄ¿ µî·Ï
+        // ì—¬ëŸ¬ ì›Œì»¤ ë“±ë¡
         for (int i = 0; i < 3; ++i) {
             task_manager->registerSlave("worker_" + std::to_string(i));
         }
 
-        // ÀÛ¾÷ ÇÒ´ç
+        // ì‘ì—… í• ë‹¹
         bool assigned = task_manager->assignTasksToSlaves();
         if (!assigned) {
             result.error_message = "Failed to assign tasks to multiple workers";
@@ -313,9 +337,9 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testMultipleWorke
             return result;
         }
 
-        // ÇÒ´ç È®ÀÎ
+        // í• ë‹¹ í™•ì¸
         auto assigned_tasks = task_manager->getTasksByStatus(TaskStatus::ASSIGNED);
-        if (assigned_tasks.size() < 3) { // ÃÖ¼Ò 3°³´Â ÇÒ´çµÇ¾î¾ß ÇÔ
+        if (assigned_tasks.size() < 3) { // ìµœì†Œ 3ê°œëŠ” í• ë‹¹ë˜ì–´ì•¼ í•¨
             result.error_message = "Insufficient tasks assigned to workers";
             server->stop();
             return result;
@@ -331,14 +355,14 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testMultipleWorke
     return result;
 }
 
-// Test 5: ¿öÄ¿ ¿¬°á ÇØÁ¦ º¹±¸
+// Test 5: ì›Œì»¤ ì—°ê²° í•´ì œ ë³µêµ¬
 IntegrationTestFramework::TestResult IntegrationTestFramework::testWorkerDisconnectionRecovery() {
     TestResult result{ "Worker Disconnection Recovery", false, "", 0 };
 
     try {
         auto task_manager = std::make_unique<TaskManager>();
 
-        // ¿öÄ¿ µî·Ï ¹× ÀÛ¾÷ ÇÒ´ç
+        // ì›Œì»¤ ë“±ë¡ ë° ì‘ì—… í• ë‹¹
         task_manager->registerSlave("worker_1");
 
         auto chunk = std::make_shared<PointCloudChunk>();
@@ -348,17 +372,17 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testWorkerDisconn
 
         task_manager->assignTasksToSlaves();
 
-        // ¿öÄ¿ ¿¬°á ÇØÁ¦ ½Ã¹Ä·¹ÀÌ¼Ç
+        // ì›Œì»¤ ì—°ê²° í•´ì œ ì‹œë®¬ë ˆì´ì…˜
         task_manager->unregisterSlave("worker_1");
 
-        // ÀÛ¾÷ÀÌ ´Ù½Ã ´ë±â »óÅÂ·Î µ¹¾Æ°¡´ÂÁö È®ÀÎ
+        // ì‘ì—…ì´ ë‹¤ì‹œ ëŒ€ê¸° ìƒíƒœë¡œ ëŒì•„ê°€ëŠ”ì§€ í™•ì¸
         auto pending_tasks = task_manager->getTasksByStatus(TaskStatus::PENDING);
         if (pending_tasks.empty()) {
             result.error_message = "Task was not returned to pending after worker disconnection";
             return result;
         }
 
-        // »õ ¿öÄ¿ µî·Ï ¹× ÀçÇÒ´ç
+        // ìƒˆ ì›Œì»¤ ë“±ë¡ ë° ì¬í• ë‹¹
         task_manager->registerSlave("worker_2");
         bool reassigned = task_manager->assignTasksToSlaves();
 
@@ -376,12 +400,12 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testWorkerDisconn
     return result;
 }
 
-// Test 6: µ¥ÀÌÅÍ ¹«°á¼º
+// Test 6: ë°ì´í„° ë¬´ê²°ì„±
 IntegrationTestFramework::TestResult IntegrationTestFramework::testDataIntegrity() {
     TestResult result{ "Data Integrity", false, "", 0 };
 
     try {
-        // Æ÷ÀÎÆ®Å¬¶ó¿ìµå Á÷·ÄÈ­/¿ªÁ÷·ÄÈ­ Å×½ºÆ®
+        // í¬ì¸íŠ¸í´ë¼ìš°ë“œ ì§ë ¬í™”/ì—­ì§ë ¬í™” í…ŒìŠ¤íŠ¸
         PointCloudChunk original_chunk;
         original_chunk.chunk_id = 42;
         original_chunk.min_x = -10.0; original_chunk.max_x = 10.0;
@@ -393,13 +417,13 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testDataIntegrity
                 i * 10.0f, 255, 128, 64);
         }
 
-        // Á÷·ÄÈ­
+        // ì§ë ¬í™”
         auto serialized = NetworkUtils::serializeChunk(original_chunk);
 
-        // ¿ªÁ÷·ÄÈ­
+        // ì—­ì§ë ¬í™”
         auto deserialized_chunk = NetworkUtils::deserializeChunk(serialized);
 
-        // µ¥ÀÌÅÍ ºñ±³
+        // ë°ì´í„° ë¹„êµ
         if (deserialized_chunk.chunk_id != original_chunk.chunk_id) {
             result.error_message = "Chunk ID mismatch after serialization";
             return result;
@@ -431,17 +455,17 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testDataIntegrity
     return result;
 }
 
-// Test 7: ÇÏÆ®ºñÆ® ½Ã½ºÅÛ
+// Test 7: í•˜íŠ¸ë¹„íŠ¸ ì‹œìŠ¤í…œ
 IntegrationTestFramework::TestResult IntegrationTestFramework::testHeartbeatSystem() {
     TestResult result{ "Heartbeat System", false, "", 0 };
 
     try {
         auto task_manager = std::make_unique<TaskManager>();
 
-        // ¿öÄ¿ µî·Ï
+        // ì›Œì»¤ ë“±ë¡
         task_manager->registerSlave("heartbeat_worker");
 
-        // ÃÊ±â ÇÏÆ®ºñÆ®
+        // ì´ˆê¸° í•˜íŠ¸ë¹„íŠ¸
         task_manager->updateSlaveHeartbeat("heartbeat_worker");
 
         auto slaves = task_manager->getAllSlaves();
@@ -450,7 +474,7 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testHeartbeatSyst
             return result;
         }
 
-        // ÇÏÆ®ºñÆ®°¡ ±â·ÏµÇ¾ú´ÂÁö È®ÀÎ
+        // í•˜íŠ¸ë¹„íŠ¸ê°€ ê¸°ë¡ë˜ì—ˆëŠ”ì§€ í™•ì¸
         bool found_worker = false;
         for (const auto& slave : slaves) {
             if (slave.slave_id == "heartbeat_worker" && slave.is_active) {
@@ -473,7 +497,7 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testHeartbeatSyst
     return result;
 }
 
-// ÇïÆÛ ÇÔ¼öµé
+// í—¬í¼ í•¨ìˆ˜ë“¤
 bool IntegrationTestFramework::waitForCondition(std::function<bool()> condition, int timeout_seconds) {
     auto start = std::chrono::steady_clock::now();
     while (std::chrono::steady_clock::now() - start < std::chrono::seconds(timeout_seconds)) {
@@ -500,14 +524,14 @@ void IntegrationTestFramework::cleanupTestFiles() {
     std::remove("test_data.xyz");
 }
 
-// ¸ŞÀÎ Å×½ºÆ® ½ÇÇà ÇÁ·Î±×·¥
+// ë©”ì¸ í…ŒìŠ¤íŠ¸ ì‹¤í–‰ í”„ë¡œê·¸ë¨
 int main() {
     std::cout << "DPApp Integration Test Suite" << std::endl;
     std::cout << "=============================" << std::endl;
 
     auto results = IntegrationTestFramework::runAllTests();
 
-    // ½ÇÆĞÇÑ Å×½ºÆ®°¡ ÀÖÀ¸¸é 1 ¹İÈ¯
+    // ì‹¤íŒ¨í•œ í…ŒìŠ¤íŠ¸ê°€ ìˆìœ¼ë©´ 1 ë°˜í™˜
     for (const auto& result : results) {
         if (!result.passed) {
             return 1;
