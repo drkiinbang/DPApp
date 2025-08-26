@@ -193,71 +193,97 @@ void NetworkServer::serverThread() {
     while (running_ && !shutdown_requested_) {
         sockaddr_in client_addr{};
         socklen_t client_len = sizeof(client_addr);
-        
-        int client_socket = static_cast<int>(accept(server_socket_, 
-                                  reinterpret_cast<sockaddr*>(&client_addr), 
-                                  &client_len));
-        
+
+        int client_socket = static_cast<int>(accept(server_socket_,
+            reinterpret_cast<sockaddr*>(&client_addr),
+            &client_len));
+
         if (client_socket < 0) {
             if (!shutdown_requested_) {
                 std::cerr << "Failed to accept client connection" << std::endl;
             }
             continue;
         }
-        
+
         std::string client_address = inet_ntoa(client_addr.sin_addr);
         uint16_t client_port = ntohs(client_addr.sin_port);
-        
+
+        // 클라이언트 연결 객체 생성 (ID는 handshake에서 설정)
         auto client = std::make_shared<ClientConnection>(client_socket, client_address, client_port);
-        client->slave_id = NetworkUtils::generateSlaveId();
-        
-        {
-            std::lock_guard<std::mutex> lock(clients_mutex_);
-            clients_[client->slave_id] = client;
-        }
-        
+        // 임시 ID 생성
+        client->slave_id = "pending_" + NetworkUtils::generateSlaveId();
+
+        // 클라이언트 핸들러 스레드 시작
         std::thread client_thread(&NetworkServer::clientHandlerThread, this, client);
         client_thread.detach();
-        
-        if (connection_callback_) {
-            connection_callback_(client->slave_id, true);
-        }
-        
-        std::cout << "Client connected: " << client->slave_id 
-                  << " from " << client_address << ":" << client_port << std::endl;
+
+        std::cout << "Client connected: from " << client_address << ":" << client_port << std::endl;
     }
 }
 
 void NetworkServer::clientHandlerThread(std::shared_ptr<ClientConnection> client) {
     std::vector<uint8_t> buffer(65536);
-    
+    bool handshake_completed = false;
+
     while (client->is_active && running_) {
-        int bytes_received = recv(client->socket_fd, 
-                                 reinterpret_cast<char*>(buffer.data()), 
-                                 static_cast<int>(buffer.size()), 0);
-        
+        int bytes_received = recv(client->socket_fd,
+            reinterpret_cast<char*>(buffer.data()),
+            static_cast<int>(buffer.size()), 0);
+
         if (bytes_received <= 0) {
             break;  // 클라이언트 연결 종료
         }
-        
+
         try {
             buffer.resize(bytes_received);
             NetworkMessage message = NetworkMessage::deserialize(buffer);
-            
+
             client->last_heartbeat = std::chrono::steady_clock::now();
-            
+
+            // 핸드셰이크 메시지 처리
+            if (message.header.type == MessageType::HANDSHAKE && !handshake_completed) {
+                // 클라이언트가 보낸 ID를 사용
+                std::string client_id(message.data.begin(), message.data.end());
+
+                // 기존 pending ID를 실제 ID로 교체
+                {
+                    std::lock_guard<std::mutex> lock(clients_mutex_);
+                    clients_.erase(client->slave_id); // pending ID 제거
+                    client->slave_id = client_id;
+                    clients_[client_id] = client;
+                }
+
+                handshake_completed = true;
+                std::cout << "Handshake completed with client: " << client_id << std::endl;
+                continue;
+            }
+
+            if (!handshake_completed) {
+                std::cerr << "Received message before handshake completion" << std::endl;
+                continue;
+            }
+
+            // 클라이언트가 등록되어 있는지 확인
+            {
+                std::lock_guard<std::mutex> lock(clients_mutex_);
+                if (clients_.find(client->slave_id) == clients_.end()) {
+                    clients_[client->slave_id] = client;
+                }
+            }
+
             if (message_callback_) {
                 message_callback_(message, client->slave_id);
             }
-            
+
             buffer.resize(65536);  // 버퍼 크기 복원
-            
-        } catch (const std::exception& e) {
-            std::cerr << "Error processing message from " << client->slave_id 
-                      << ": " << e.what() << std::endl;
+
+        }
+        catch (const std::exception& e) {
+            std::cerr << "Error processing message from " << client->slave_id
+                << ": " << e.what() << std::endl;
         }
     }
-    
+
     // 클라이언트 정리
     client->is_active = false;
 #ifdef _WIN32
@@ -265,16 +291,16 @@ void NetworkServer::clientHandlerThread(std::shared_ptr<ClientConnection> client
 #else
     close(client->socket_fd);
 #endif
-    
+
     {
         std::lock_guard<std::mutex> lock(clients_mutex_);
         clients_.erase(client->slave_id);
     }
-    
+
     if (connection_callback_) {
         connection_callback_(client->slave_id, false);
     }
-    
+
     std::cout << "Client disconnected: " << client->slave_id << std::endl;
 }
 
