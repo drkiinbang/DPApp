@@ -1,3 +1,6 @@
+// inet_ntoa 경고 해결
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+
 #include "../include/NetworkManager.h"
 #include <iostream>
 #include <sstream>
@@ -143,7 +146,7 @@ void NetworkServer::stop() {
 }
 
 bool NetworkServer::initializeSocket() {
-    server_socket_ = socket(AF_INET, SOCK_STREAM, 0);
+    server_socket_ = static_cast<int>(socket(AF_INET, SOCK_STREAM, 0));
     if (server_socket_ < 0) {
         std::cerr << "Failed to create socket" << std::endl;
         return false;
@@ -191,9 +194,9 @@ void NetworkServer::serverThread() {
         sockaddr_in client_addr{};
         socklen_t client_len = sizeof(client_addr);
         
-        int client_socket = accept(server_socket_, 
+        int client_socket = static_cast<int>(accept(server_socket_, 
                                   reinterpret_cast<sockaddr*>(&client_addr), 
-                                  &client_len);
+                                  &client_len));
         
         if (client_socket < 0) {
             if (!shutdown_requested_) {
@@ -231,7 +234,7 @@ void NetworkServer::clientHandlerThread(std::shared_ptr<ClientConnection> client
     while (client->is_active && running_) {
         int bytes_received = recv(client->socket_fd, 
                                  reinterpret_cast<char*>(buffer.data()), 
-                                 buffer.size(), 0);
+                                 static_cast<int>(buffer.size()), 0);
         
         if (bytes_received <= 0) {
             break;  // 클라이언트 연결 종료
@@ -286,7 +289,7 @@ bool NetworkServer::sendMessage(const std::string& client_id, const NetworkMessa
     std::vector<uint8_t> data = message.serialize();
     int bytes_sent = send(it->second->socket_fd, 
                          reinterpret_cast<const char*>(data.data()), 
-                         data.size(), 0);
+                         static_cast<int>(data.size()), 0);
     
     return bytes_sent == static_cast<int>(data.size());
 }
@@ -315,6 +318,80 @@ void NetworkServer::heartbeatThread() {
             disconnectClient(client_id);
         }
     }
+}
+
+void NetworkServer::disconnectClient(const std::string& client_id) {
+    std::lock_guard<std::mutex> lock(clients_mutex_);
+
+    auto it = clients_.find(client_id);
+    if (it != clients_.end()) {
+        it->second->is_active = false;
+#ifdef _WIN32
+        closesocket(it->second->socket_fd);
+#else
+        close(it->second->socket_fd);
+#endif
+        clients_.erase(it);
+
+        if (connection_callback_) {
+            connection_callback_(client_id, false);
+        }
+
+        std::cout << "Client forcibly disconnected: " << client_id << std::endl;
+    }
+}
+
+std::vector<std::string> NetworkServer::getConnectedClients() const {
+    std::lock_guard<std::mutex> lock(clients_mutex_);
+
+    std::vector<std::string> client_ids;
+    for (const auto& pair : clients_) {
+        if (pair.second->is_active) {
+            client_ids.push_back(pair.first);
+        }
+    }
+
+    return client_ids;
+}
+
+bool NetworkServer::isClientConnected(const std::string& client_id) const {
+    std::lock_guard<std::mutex> lock(clients_mutex_);
+
+    auto it = clients_.find(client_id);
+    return it != clients_.end() && it->second->is_active;
+}
+
+size_t NetworkServer::getClientCount() const {
+    std::lock_guard<std::mutex> lock(clients_mutex_);
+
+    size_t count = 0;
+    for (const auto& pair : clients_) {
+        if (pair.second->is_active) {
+            count++;
+        }
+    }
+
+    return count;
+}
+
+bool NetworkServer::broadcastMessage(const NetworkMessage& message) {
+    std::lock_guard<std::mutex> lock(clients_mutex_);
+
+    bool success = true;
+    for (const auto& pair : clients_) {
+        if (pair.second->is_active) {
+            std::vector<uint8_t> data = message.serialize();
+            int bytes_sent = send(pair.second->socket_fd,
+                reinterpret_cast<const char*>(data.data()),
+                static_cast<int>(data.size()), 0);
+
+            if (bytes_sent != static_cast<int>(data.size())) {
+                success = false;
+            }
+        }
+    }
+
+    return success;
 }
 
 // NetworkUtils 구현

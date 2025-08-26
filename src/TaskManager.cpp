@@ -371,4 +371,110 @@ void TaskManager::clearCompletedResults() {
     completed_results_.clear();
 }
 
+bool TaskManager::updateTaskStatus(uint32_t task_id, TaskStatus status) {
+    std::lock_guard<std::mutex> lock(tasks_mutex_);
+
+    auto it = tasks_.find(task_id);
+    if (it == tasks_.end()) {
+        return false;
+    }
+
+    it->second.status = status;
+
+    if (status == TaskStatus::IN_PROGRESS) {
+        it->second.assigned_time = std::chrono::steady_clock::now();
+    }
+    else if (status == TaskStatus::COMPLETED) {
+        it->second.completed_time = std::chrono::steady_clock::now();
+    }
+
+    return true;
+}
+
+void TaskManager::updateSlaveHeartbeat(const std::string& slave_id) {
+    std::lock_guard<std::mutex> lock(slaves_mutex_);
+
+    auto it = slaves_.find(slave_id);
+    if (it != slaves_.end()) {
+        it->second.last_heartbeat = std::chrono::steady_clock::now();
+    }
+}
+
+std::vector<TaskInfo> TaskManager::getTasksByStatus(TaskStatus status) {
+    std::lock_guard<std::mutex> lock(tasks_mutex_);
+
+    std::vector<TaskInfo> result;
+    for (const auto& pair : tasks_) {
+        if (pair.second.status == status) {
+            result.push_back(pair.second);
+        }
+    }
+
+    return result;
+}
+
+std::vector<SlaveWorkerInfo> TaskManager::getAllSlaves() {
+    std::lock_guard<std::mutex> lock(slaves_mutex_);
+
+    std::vector<SlaveWorkerInfo> result;
+    for (const auto& pair : slaves_) {
+        result.push_back(pair.second);
+    }
+
+    return result;
+}
+
+size_t TaskManager::getPendingTaskCount() {
+    std::lock_guard<std::mutex> lock(tasks_mutex_);
+
+    size_t count = 0;
+    for (const auto& pair : tasks_) {
+        if (pair.second.status == TaskStatus::PENDING) {
+            count++;
+        }
+    }
+
+    return count;
+}
+
+size_t TaskManager::getActiveTaskCount() {
+    std::lock_guard<std::mutex> lock(tasks_mutex_);
+
+    size_t count = 0;
+    for (const auto& pair : tasks_) {
+        if (pair.second.status == TaskStatus::ASSIGNED ||
+            pair.second.status == TaskStatus::IN_PROGRESS) {
+            count++;
+        }
+    }
+
+    return count;
+}
+
+size_t TaskManager::getCompletedTaskCount() {
+    std::lock_guard<std::mutex> lock(tasks_mutex_);
+
+    size_t count = 0;
+    for (const auto& pair : tasks_) {
+        if (pair.second.status == TaskStatus::COMPLETED) {
+            count++;
+        }
+    }
+
+    return count;
+}
+
+size_t TaskManager::getFailedTaskCount() {
+    std::lock_guard<std::mutex> lock(tasks_mutex_);
+
+    size_t count = 0;
+    for (const auto& pair : tasks_) {
+        if (pair.second.status == TaskStatus::FAILED) {
+            count++;
+        }
+    }
+
+    return count;
+}
+
 } // namespace DPApp

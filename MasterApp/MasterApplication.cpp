@@ -3,6 +3,7 @@
 #include <thread>
 #include <chrono>
 #include <signal.h>
+#include <sstream>  // 추가된 헤더
 
 #include "../include/PointCloudTypes.h"
 #include "../include/NetworkManager.h"

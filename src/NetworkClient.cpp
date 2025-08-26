@@ -101,7 +101,7 @@ void NetworkClient::disconnect() {
 }
 
 bool NetworkClient::initializeSocket() {
-    client_socket_ = socket(AF_INET, SOCK_STREAM, 0);
+    client_socket_ = static_cast<int>(socket(AF_INET, SOCK_STREAM, 0));
     if (client_socket_ < 0) {
         std::cerr << "Failed to create socket" << std::endl;
         return false;
@@ -127,7 +127,7 @@ void NetworkClient::clientThread() {
     while (connected_ && !shutdown_requested_) {
         int bytes_received = recv(client_socket_, 
                                  reinterpret_cast<char*>(buffer.data()), 
-                                 buffer.size(), 0);
+                                 static_cast<int>(buffer.size()), 0);
         
         if (bytes_received <= 0) {
             if (!shutdown_requested_) {
@@ -171,7 +171,7 @@ bool NetworkClient::sendMessage(const NetworkMessage& message) {
     std::vector<uint8_t> data = message.serialize();
     int bytes_sent = send(client_socket_, 
                          reinterpret_cast<const char*>(data.data()), 
-                         data.size(), 0);
+                         static_cast<int>(data.size()), 0);
     
     return bytes_sent == static_cast<int>(data.size());
 }
