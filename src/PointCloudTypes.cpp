@@ -1,4 +1,4 @@
-#include "PointCloudTypes.h"
+#include "../include/PointCloudTypes.h"
 #include <algorithm>
 #include <limits>
 #include <fstream>

@@ -21,8 +21,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{38d1c0d4-f89b-4f55-8d9c-834f56ebbf4e}</ProjectGuid>
-    <RootNamespace>master</RootNamespace>
+    <ProjectGuid>{d4589f9e-272d-4be4-a8ed-5f4c2f2a4fd6}</ProjectGuid>
+    <RootNamespace>MasterApp</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -123,7 +123,18 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\src\master\MasterApplication.cpp" />
+    <ClCompile Include="..\src\NetworkClient.cpp" />
+    <ClCompile Include="..\src\NetworkManager.cpp" />
+    <ClCompile Include="..\src\NetworkUtils.cpp" />
+    <ClCompile Include="..\src\PointCloudTypes.cpp" />
+    <ClCompile Include="..\src\TaskManager.cpp" />
+    <ClCompile Include="..\src\TaskProcessor.cpp" />
+    <ClCompile Include="MasterApplication.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\include\NetworkManager.h" />
+    <ClInclude Include="..\include\PointCloudTypes.h" />
+    <ClInclude Include="..\include\TaskManager.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

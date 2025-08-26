@@ -5,9 +5,9 @@
 #include <signal.h>
 #include <queue>
 
-#include "../../include/PointCloudTypes.h"
-#include "../../include/NetworkManager.h"
-#include "../../include/TaskManager.h"
+#include "../include/PointCloudTypes.h"
+#include "../include/NetworkManager.h"
+#include "../include/TaskManager.h"
 
 using namespace DPApp;
 
