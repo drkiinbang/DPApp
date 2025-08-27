@@ -27,12 +27,6 @@
     <ClCompile Include="..\..\src\PointCloudTypes.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\TaskManager.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\src\TaskProcessor.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="IntegrationTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

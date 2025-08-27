@@ -131,8 +131,6 @@
     <ClCompile Include="..\src\NetworkManager.cpp" />
     <ClCompile Include="..\src\NetworkUtils.cpp" />
     <ClCompile Include="..\src\PointCloudTypes.cpp" />
-    <ClCompile Include="..\src\TaskManager.cpp" />
-    <ClCompile Include="..\src\TaskProcessor.cpp" />
     <ClCompile Include="MasterApplication.cpp" />
   </ItemGroup>
   <ItemGroup>
