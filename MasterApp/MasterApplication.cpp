@@ -155,6 +155,39 @@ private:
         }
     }
     
+    void shutdownSlave(const std::string& slave_id) {
+        NetworkMessage shutdown_msg(MessageType::SHUTDOWN, std::vector<uint8_t>());
+
+        if (server_->sendMessage(slave_id, shutdown_msg)) {
+            std::cout << "Shutdown command sent to slave: " << slave_id << std::endl;
+        }
+        else {
+            std::cout << "Failed to send shutdown command to slave: " << slave_id << std::endl;
+        }
+    }
+
+    void shutdownAllSlaves() {
+        auto connected_clients = server_->getConnectedClients();
+
+        if (connected_clients.empty()) {
+            std::cout << "No connected slaves to shutdown" << std::endl;
+            return;
+        }
+
+        NetworkMessage shutdown_msg(MessageType::SHUTDOWN, std::vector<uint8_t>());
+
+        for (const auto& client_id : connected_clients) {
+            if (server_->sendMessage(client_id, shutdown_msg)) {
+                std::cout << "Shutdown command sent to slave: " << client_id << std::endl;
+            }
+            else {
+                std::cout << "Failed to send shutdown command to slave: " << client_id << std::endl;
+            }
+        }
+
+        std::cout << "Shutdown commands sent to " << connected_clients.size() << " slaves" << std::endl;
+    }
+
     void printUsage() {
         std::cout << "Usage: master [options]" << std::endl;
         std::cout << "Options:" << std::endl;
@@ -174,6 +207,7 @@ private:
         std::cout << "results                  - Show completed results count" << std::endl;
         std::cout << "save <file>              - Save merged results to file" << std::endl;
         std::cout << "clear                    - Clear all completed tasks" << std::endl;
+        std::cout << "shutdown [slave_id]      - Shutdown specific slave or all slaves" << std::endl;  // 추가
         std::cout << "help                     - Show this help" << std::endl;
         std::cout << "quit                     - Stop and exit" << std::endl;
         std::cout << "=====================================" << std::endl;
@@ -215,6 +249,19 @@ private:
             }
         } else if (cmd == "clear") {
             clearCompletedTasks();
+        }
+        else if (cmd == "shutdown") {
+            std::string slave_id;
+            iss >> slave_id;
+
+            if (slave_id.empty()) {
+                /// 모든 슬레이브 종료
+                shutdownAllSlaves();
+            }
+            else {
+                /// 특정 슬레이브 종료
+                shutdownSlave(slave_id);
+            }
         } else if (cmd == "help") {
             printHelp();
         } else if (cmd == "quit" || cmd == "exit") {
