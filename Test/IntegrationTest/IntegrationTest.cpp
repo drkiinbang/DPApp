@@ -230,7 +230,7 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testMasterSlaveRe
 
     try {
         auto server = std::make_unique<NetworkServer>();
-        auto task_manager = std::make_unique<TaskManager>();
+        auto task_manager = std::make_unique<TaskManager>(300);
 
         std::atomic<int> registered_slaves{ 0 };
         std::atomic<int> connected_clients{ 0 };
@@ -332,7 +332,7 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testTaskAssignmen
 
     try {
         auto server = std::make_unique<NetworkServer>();
-        auto task_manager = std::make_unique<TaskManager>();
+        auto task_manager = std::make_unique<TaskManager>(300);
 
         // 테스트용 청크 데이터 생성
         auto chunk = std::make_shared<PointCloudChunk>();
@@ -397,7 +397,7 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testMultipleWorke
 
     try {
         auto server = std::make_unique<NetworkServer>();
-        auto task_manager = std::make_unique<TaskManager>();
+        auto task_manager = std::make_unique<TaskManager>(300);
 
         if (!server->start(8083)) {
             result.error_message = "Failed to start server";
@@ -454,7 +454,7 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testWorkerDisconn
     TestResult result{ "Worker Disconnection Recovery", false, "", 0 };
 
     try {
-        auto task_manager = std::make_unique<TaskManager>();
+        auto task_manager = std::make_unique<TaskManager>(300);
 
         // 워커 등록 및 작업 할당
         task_manager->registerSlave("worker_1");
@@ -554,7 +554,7 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testHeartbeatSyst
     TestResult result{ "Heartbeat System", false, "", 0 };
 
     try {
-        auto task_manager = std::make_unique<TaskManager>();
+        auto task_manager = std::make_unique<TaskManager>(300);
 
         // 워커 등록
         task_manager->registerSlave("heartbeat_worker");

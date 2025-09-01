@@ -623,7 +623,6 @@ private:
         ILOG << "Registering custom point cloud processors...";
 
         /// 필요한 경우 커스텀 프로세서 등록
-        /// 예: 특별한 포인트클라우드 처리 알고리즘
         /// 
         /* sample templet
         task_processor_->registerProcessor("custom_filter",
