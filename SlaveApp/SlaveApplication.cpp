@@ -1,3 +1,5 @@
+#define NOMINMAX   // Windows 헤더 포함하기 전에 정의
+
 #include <iostream>
 #include <string>
 #include <thread>
@@ -6,10 +8,13 @@
 #include <queue>
 #include <set>
 #include <tuple>
+#include <iomanip>
 
 #include "../include/PointCloudTypes.h"
 #include "../include/NetworkManager.h"
 #include "../include/TaskManager.h"
+#include "../include/Logger.h"
+#include "../MasterApp/RuntimeConfig.h"
 
 using namespace DPApp;
 
@@ -20,9 +25,12 @@ namespace DPApp {
 
 class SlaveApplication {
 private:
+    DPApp::RuntimeConfig cfg_;
+
     // 작업별 중단 플래그들을 관리
     std::map<uint32_t, std::shared_ptr<std::atomic<bool>>> active_task_cancellations_;
     std::mutex cancellation_mutex_;
+
 public:
     SlaveApplication() : running_(false), server_port_(8080), processing_threads_(1) {}
 
@@ -31,6 +39,22 @@ public:
     }
 
     bool initialize(int argc, char* argv[]) {
+        /// Initialize logger
+        std::time_t t = std::time(nullptr);
+        std::tm tm{};
+#ifdef _WIN32
+        localtime_s(&tm, &t);
+#else
+        localtime_r(&t, &tm);
+#endif
+        char logFilename[512];
+        std::strftime(logFilename, sizeof(logFilename), "SlaveApp_%Y-%m-%d_%H-%M-%S.log", &tm);
+        DPApp::Logger::initialize(logFilename);
+        DPApp::Logger::setMinLevel(DPApp::LogLevel::INFO);
+
+        // Load configuration from environment
+        cfg_ = DPApp::RuntimeConfig::loadFromEnv();
+
         // 명령행 인수 파싱
         parseCommandLine(argc, argv);
 
@@ -58,14 +82,14 @@ public:
 
         DPApp::g_cancel_requested.store(false, std::memory_order_relaxed);
 
-        std::cout << "Starting DPApp Slave Worker..." << std::endl;
-        std::cout << "Server: " << server_address_ << ":" << server_port_ << std::endl;
-        std::cout << "Processing threads: " << processing_threads_ << std::endl;
-        std::cout << "Slave ID: " << client_->getSlaveId() << std::endl;
+        ILOG << "Starting DPApp Slave Worker...";
+        ILOG << "Server: " << server_address_ << ":" << server_port_;
+        ILOG << "Processing threads: " << processing_threads_;
+        ILOG << "Slave ID: " << client_->getSlaveId();
 
         // 서버에 연결
         if (!client_->connect(server_address_, server_port_)) {
-            std::cerr << "Failed to connect to master server" << std::endl;
+            ELOG << "Failed to connect to master server";
             return false;
         }
 
@@ -79,7 +103,7 @@ public:
         // 상태 보고 스레드 시작
         status_thread_ = std::thread(&SlaveApplication::statusLoop, this);
 
-        std::cout << "Slave worker started successfully" << std::endl;
+        ILOG << "Slave worker started successfully";
 
         return true;
     }
@@ -87,7 +111,7 @@ public:
     void stop() {
         if (!running_) return;
 
-        std::cout << "Stopping slave worker..." << std::endl;
+        ILOG << "Stopping slave worker...";
 
         // 1. Set running flag to false first
         running_ = false;
@@ -114,13 +138,13 @@ public:
             client_->disconnect();
         }
 
-        std::cout << "Slave worker stopped" << std::endl;
+        ILOG << "Slave worker stopped";
     }
 
     /// Graceful shutdown from network disconnect :
     void handleNetworkDisconnect() {
         if (running_) {
-            std::cout << "Network disconnected, initiating graceful shutdown..." << std::endl;
+            ILOG << "Network disconnected, initiating graceful shutdown...";
             running_ = false;
             task_queue_cv_.notify_all();
         }
@@ -137,7 +161,7 @@ public:
         while (running_) {
             // 강제 종료 요청 확인
             if (shutdown_requested_) {
-                std::cout << "Shutdown requested by master, stopping..." << std::endl;
+                ILOG << "Shutdown requested by master, stopping...";
                 break;
             }
 
@@ -195,24 +219,26 @@ private:
     }
 
     void printUsage() {
-        std::cout << "Usage: slave [options]" << std::endl;
-        std::cout << "Options:" << std::endl;
-        std::cout << "  -s, --server <address>   Master server address (default: localhost)" << std::endl;
-        std::cout << "  -p, --port <port>        Master server port (default: 8080)" << std::endl;
-        std::cout << "  -t, --threads <count>    Processing thread count (default: 1)" << std::endl;
-        std::cout << "  -h, --help               Show this help message" << std::endl;
+        ILOG << "Usage: slave [options]";
+        ILOG << "Options:";
+        ILOG << "  -s, --server <address>   Master server address (default: localhost)";
+        ILOG << "  -p, --port <port>        Master server port (default: 8080)";
+        ILOG << "  -t, --threads <count>    Processing thread count (default: 1)";
+        ILOG << "  -h, --help               Show this help message";
     }
 
     void printHelp() {
-        std::cout << "=== DPApp Slave Console Commands ===\n";
-        std::cout << "status        - Show worker status\n";
-        std::cout << "stats         - Show processing statistics\n";
-        std::cout << "tasks         - Show supported task types\n";
-        std::cout << "queue         - Show task queue status\n";
-        std::cout << "quit          - Graceful stop (finish current task)\n";
-        std::cout << "quit-now      - Immediate stop (cancel current task)\n";
-        std::cout << "help          - Show this help\n";
-        std::cout << "====================================\n";
+        ILOG << "";
+        ILOG << "=== DPApp Slave Console Commands ===";
+        ILOG << "status        - Show worker status";
+        ILOG << "stats         - Show processing statistics";
+        ILOG << "tasks         - Show supported task types";
+        ILOG << "queue         - Show task queue status";
+        ILOG << "quit          - Graceful stop (finish current task)";
+        ILOG << "quit-now      - Immediate stop (cancel current task)";
+        ILOG << "help          - Show this help";
+        ILOG << "====================================";
+        ILOG << "";
     }
 
     // processCommand 함수를 bool 반환형으로 변경
@@ -240,22 +266,22 @@ private:
         }
         /// quit: 그레이스풀 종료 ---
         else if (cmd == "quit" || cmd == "exit") {
-            std::cout << "[GRACEFUL] finish current task then stop." << std::endl;
+            ILOG << "[GRACEFUL] finish current task then stop.";
             /// 대기 중 스레드 깨우기
             task_queue_cv_.notify_all();
-            /// run() 루프를 빠져나가 stop() 호출로 이동
+            /// run() 루프를 빠져나가서 stop() 호출로 이동
             return false;
         }
         /// 즉시 종료: 진행 중 작업도 중단 시도 ---
         else if (cmd == "quit-now" || cmd == "exit-now" || cmd == "quit!") {
-            std::cout << "[IMMEDIATE] cancel in-flight task and stop NOW." << std::endl;
+            ILOG << "[IMMEDIATE] cancel in-flight task and stop NOW.";
             DPApp::g_cancel_requested.store(true, std::memory_order_relaxed);
             task_queue_cv_.notify_all();
             return false;
         }
         else {
-            std::cout << "Unknown command: " << cmd << std::endl;
-            std::cout << "Type 'help' for available commands" << std::endl;
+            WLOG << "Unknown command: " << cmd;
+            WLOG << "Type 'help' for available commands";
         }
         return true;
     }
@@ -272,64 +298,77 @@ private:
             break;
 
         case MessageType::SHUTDOWN:
-            std::cout << "Received shutdown command from master" << std::endl;
+            ILOG << "Received shutdown command from master";
             shutdown_requested_ = true;
             break;
 
         default:
-            std::cout << "Unknown message type from master" << std::endl;
+            WLOG << "Unknown message type from master: " << static_cast<int>(message.header.type);
             break;
         }
     }
 
     void handleConnection(const std::string& client_id, bool connected) {
         if (connected) {
-            std::cout << "Connected to master server as: " << client_id << std::endl;
+            ILOG << "Connected to master server as: " << client_id;
         }
         else {
-            std::cout << "Disconnected from master server" << std::endl;
+            ILOG << "Disconnected from master server";
             /// Only attempt reconnection if we're still supposed to be running
             /// and the disconnection wasn't initiated by us
             if (running_ && !shutdown_requested_) {
-                std::cout << "Connection lost, attempting to reconnect..." << std::endl;
+                WLOG << "Connection lost, attempting to reconnect...";
                 /// Reconnection logic would go here
             }
             else {
                 /// If we initiated the shutdown, don't try to reconnect
-                std::cout << "Shutdown in progress, not attempting reconnection" << std::endl;
+                ILOG << "Shutdown in progress, not attempting reconnection";
             }
         }
     }
 
     void handleTaskAssignment(const NetworkMessage& message) {
         try {
-            /// 메시지 데이터에서 작업과 청크 정보 분리
-            /// 실제로는 더 정교한 직렬화/역직렬화가 필요
-
-            /// 임시로 간단한 분리 (실제 구현에서는 프로토콜 정의 필요)
-            if (message.data.size() < sizeof(uint32_t)) {
-                throw std::runtime_error("Invalid task assignment message");
+            // 실제 NetworkUtils 함수를 사용하여 메시지 파싱
+            if (message.data.size() < sizeof(uint32_t) * 3) {
+                throw std::runtime_error("Invalid task assignment message size");
             }
 
-            /// 여기서는 NetworkUtils의 함수들을 사용하여 분리
-            /// 실제 구현에서는 메시지 프로토콜을 더 정교하게 정의해야 함
+            // 메시지는 task data + chunk data로 구성됨
+            // 먼저 task 헤더를 읽어서 task data의 크기를 파악
+            size_t task_header_size = sizeof(uint32_t) * 2 + sizeof(size_t) * 2; // task_id, chunk_id, task_type_len, param_len
 
-            ProcessingTask task;
-            PointCloudChunk chunk;
-
-            /// 임시 구현: 하드코딩된 작업 생성
-            task.task_id = 1;  /// 실제로는 메시지에서 파싱
-            task.chunk_id = 1;
-            task.task_type = "filter";  /// 실제로는 메시지에서 파싱
-
-            /// 임시 청크 데이터 (실제로는 메시지에서 파싱)
-            chunk.chunk_id = 1;
-            chunk.points.resize(1000);
-            for (size_t i = 0; i < chunk.points.size(); ++i) {
-                chunk.points[i] = Point3D(i * 0.1, i * 0.1, i * 0.01);
+            if (message.data.size() < task_header_size) {
+                throw std::runtime_error("Message too small for task header");
             }
 
-            /// 작업을 큐에 추가
+            // task_type 길이와 parameter 길이 읽기
+            size_t offset = sizeof(uint32_t) * 2; // task_id, chunk_id 이후
+            size_t task_type_len, param_len;
+
+            std::memcpy(&task_type_len, message.data.data() + offset, sizeof(size_t));
+            offset += sizeof(size_t);
+            std::memcpy(&param_len, message.data.data() + offset, sizeof(size_t));
+
+            size_t task_data_size = task_header_size + task_type_len + param_len;
+
+            if (message.data.size() < task_data_size) {
+                throw std::runtime_error("Message too small for complete task data");
+            }
+
+            // Task 데이터 추출 및 역직렬화
+            std::vector<uint8_t> task_data(message.data.begin(), message.data.begin() + task_data_size);
+            ProcessingTask task = NetworkUtils::deserializeTask(task_data);
+
+            // 남은 데이터에서 Chunk 역직렬화
+            if (message.data.size() <= task_data_size) {
+                throw std::runtime_error("No chunk data found in message");
+            }
+
+            std::vector<uint8_t> chunk_data(message.data.begin() + task_data_size, message.data.end());
+            PointCloudChunk chunk = NetworkUtils::deserializeChunk(chunk_data);
+
+            // 작업을 큐에 추가
             {
                 std::lock_guard<std::mutex> lock(task_queue_mutex_);
                 task_queue_.emplace(task, chunk);
@@ -337,14 +376,22 @@ private:
 
             task_queue_cv_.notify_one();
 
-            std::cout << "Received task " << task.task_id
+            ILOG << "Received task " << task.task_id
                 << " (type: " << task.task_type
                 << ", chunk: " << chunk.chunk_id
-                << ", points: " << chunk.points.size() << ")" << std::endl;
+                << ", points: " << chunk.points.size() << ")";
 
         }
         catch (const std::exception& e) {
-            std::cerr << "Error processing task assignment: " << e.what() << std::endl;
+            ELOG << "Error processing task assignment: " << e.what();
+
+            // 에러 응답 전송
+            ProcessingResult error_result;
+            error_result.task_id = 0; // 파싱에 실패했으므로 알 수 없음
+            error_result.chunk_id = 0;
+            error_result.success = false;
+            error_result.error_message = "Task assignment parsing failed: " + std::string(e.what());
+            sendTaskResult(error_result);
         }
     }
 
@@ -352,11 +399,13 @@ private:
         NetworkMessage response(MessageType::HEARTBEAT,
             std::vector<uint8_t>(client_->getSlaveId().begin(),
                 client_->getSlaveId().end()));
-        client_->sendMessage(response);
+        if (!client_->sendMessage(response)) {
+            WLOG << "Failed to send heartbeat response";
+        }
     }
 
     void processingLoop(size_t thread_id) {
-        std::cout << "Processing thread " << thread_id << " started" << std::endl;
+        ILOG << "Processing thread " << thread_id << " started";
 
         while (running_) {
             TaskQueueItem item(ProcessingTask{}, PointCloudChunk{});
@@ -377,19 +426,53 @@ private:
                 }
             }
 
-            std::cout << "Thread " << thread_id << " processing task " << item.task.task_id << std::endl;
+            ILOG << "Thread " << thread_id << " processing task " << item.task.task_id;
 
             /// 작업 처리
             auto start_time = std::chrono::steady_clock::now();
-            ProcessingResult result = task_processor_->processTask(item.task, item.chunk);
+
+            ProcessingResult result;
+            try {
+                // 취소 가능한 작업 처리
+                {
+                    std::lock_guard<std::mutex> cancel_lock(cancellation_mutex_);
+                    active_task_cancellations_[item.task.task_id] = std::make_shared<std::atomic<bool>>(false);
+                }
+
+                result = task_processor_->processTask(item.task, item.chunk);
+
+                // 취소 플래그 제거
+                {
+                    std::lock_guard<std::mutex> cancel_lock(cancellation_mutex_);
+                    active_task_cancellations_.erase(item.task.task_id);
+                }
+
+            }
+            catch (const std::exception& e) {
+                result.task_id = item.task.task_id;
+                result.chunk_id = item.task.chunk_id;
+                result.success = false;
+                result.error_message = "Processing exception: " + std::string(e.what());
+
+                // 취소 플래그 제거
+                {
+                    std::lock_guard<std::mutex> cancel_lock(cancellation_mutex_);
+                    active_task_cancellations_.erase(item.task.task_id);
+                }
+            }
+
             auto end_time = std::chrono::steady_clock::now();
 
             auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
                 end_time - start_time).count();
 
-            std::cout << "Thread " << thread_id << " completed task " << item.task.task_id
+            ILOG << "Thread " << thread_id << " completed task " << item.task.task_id
                 << " in " << processing_time << "ms (success: "
-                << (result.success ? "Yes" : "No") << ")" << std::endl;
+                << (result.success ? "Yes" : "No") << ")";
+
+            if (!result.success) {
+                WLOG << "Task " << item.task.task_id << " failed: " << result.error_message;
+            }
 
             /// 결과를 마스터에게 전송
             sendTaskResult(result);
@@ -398,7 +481,7 @@ private:
             updateStats(result.success, processing_time / 1000.0);
         }
 
-        std::cout << "Processing thread " << thread_id << " stopped" << std::endl;
+        ILOG << "Processing thread " << thread_id << " stopped";
     }
 
     void sendTaskResult(const ProcessingResult& result) {
@@ -407,15 +490,15 @@ private:
             NetworkMessage message(MessageType::TASK_RESULT, result_data);
 
             if (client_->sendMessage(message)) {
-                std::cout << "Task result " << result.task_id << " sent to master" << std::endl;
+                ILOG << "Task result " << result.task_id << " sent to master";
             }
             else {
-                std::cerr << "Failed to send task result " << result.task_id << " to master" << std::endl;
+                ELOG << "Failed to send task result " << result.task_id << " to master";
             }
 
         }
         catch (const std::exception& e) {
-            std::cerr << "Error sending task result: " << e.what() << std::endl;
+            ELOG << "Error sending task result: " << e.what();
         }
     }
 
@@ -427,10 +510,10 @@ private:
             }
 
             if (running_) {
-                std::cout << "=== Worker Status Update ===" << std::endl;
+                ILOG << "=== Worker Status Update ===";
                 printProcessingStats();
                 printQueueStatus();
-                std::cout << "============================" << std::endl;
+                ILOG << "============================";
             }
         }
     }
@@ -443,8 +526,8 @@ private:
         ///     실험적이거나 임시적인 기능
         ///     외부 라이브러리나 하드웨어에 의존하는 기능
         /// Compare to PointCloudProcessors in TaskManager.h
-        
-        std::cout << "Registering custom point cloud processors..." << std::endl;
+
+        ILOG << "Registering custom point cloud processors...";
 
         /// 필요한 경우 커스텀 프로세서 등록
         /// 예: 특별한 포인트클라우드 처리 알고리즘
@@ -472,52 +555,66 @@ private:
                 result.chunk_id = task.chunk_id;
                 result.success = true;
 
-                // 통계적 이상치 제거 알고리즘
-                std::vector<Point3D> filtered_points;
-                const double std_dev_threshold = 2.0; // 표준편차 임계값
-                const int k_neighbors = 10; // 이웃 점 개수
+                try {
+                    // 통계적 이상치 제거 알고리즘
+                    std::vector<Point3D> filtered_points;
+                    const double std_dev_threshold = 2.0; // 표준편차 임계값
+                    const int k_neighbors = std::min(10, static_cast<int>(chunk.points.size())); // 이웃 점 개수
 
-                for (const auto& point : chunk.points) {
-                    // 각 점에 대해 k개 이웃점과의 평균 거리 계산
-                    std::vector<double> distances;
-                    for (const auto& neighbor : chunk.points) {
-                        if (&point != &neighbor) {
-                            double dist = std::sqrt(
-                                std::pow(point.x - neighbor.x, 2) +
-                                std::pow(point.y - neighbor.y, 2) +
-                                std::pow(point.z - neighbor.z, 2)
-                            );
-                            distances.push_back(dist);
+                    if (chunk.points.size() < 3) {
+                        result.processed_points = chunk.points;
+                        return result;
+                    }
+
+                    for (const auto& point : chunk.points) {
+                        // 각 점에 대해 k개 이웃점과의 평균 거리 계산
+                        std::vector<double> distances;
+                        for (const auto& neighbor : chunk.points) {
+                            if (&point != &neighbor) {
+                                double dist = std::sqrt(
+                                    std::pow(point.x - neighbor.x, 2) +
+                                    std::pow(point.y - neighbor.y, 2) +
+                                    std::pow(point.z - neighbor.z, 2)
+                                );
+                                distances.push_back(dist);
+                            }
+                        }
+
+                        // 거리들을 정렬하고 k개만 선택
+                        std::sort(distances.begin(), distances.end());
+                        if (distances.size() > k_neighbors) {
+                            distances.resize(k_neighbors);
+                        }
+
+                        if (distances.empty()) {
+                            filtered_points.push_back(point);
+                            continue;
+                        }
+
+                        // 평균과 표준편차 계산
+                        double mean = 0.0;
+                        for (double d : distances) mean += d;
+                        mean /= distances.size();
+
+                        double variance = 0.0;
+                        for (double d : distances) {
+                            variance += std::pow(d - mean, 2);
+                        }
+                        variance /= distances.size();
+                        double std_dev = std::sqrt(variance);
+
+                        // 임계값 내의 점만 유지
+                        if (mean <= std_dev_threshold * std_dev) {
+                            filtered_points.push_back(point);
                         }
                     }
 
-                    // 거리들을 정렬하고 k개만 선택
-                    std::sort(distances.begin(), distances.end());
-                    if (distances.size() > k_neighbors) {
-                        distances.resize(k_neighbors);
-                    }
-
-                    // 평균과 표준편차 계산
-                    double mean = 0.0;
-                    for (double d : distances) mean += d;
-                    mean /= distances.size();
-
-                    double variance = 0.0;
-                    for (double d : distances) {
-                        variance += std::pow(d - mean, 2);
-                    }
-                    variance /= distances.size();
-                    double std_dev = std::sqrt(variance);
-
-                    // 임계값 내의 점만 유지
-                    if (mean <= std_dev_threshold * std_dev) {
-                        filtered_points.push_back(point);
-                    }
+                    result.processed_points = filtered_points;
                 }
-
-                result.processed_points = filtered_points;
-                std::cout << "Outlier filter: " << chunk.points.size()
-                    << " -> " << filtered_points.size() << " points" << std::endl;
+                catch (const std::exception& e) {
+                    result.success = false;
+                    result.error_message = "Outlier filter error: " + std::string(e.what());
+                }
 
                 return result;
             });
@@ -530,39 +627,43 @@ private:
                 result.chunk_id = task.chunk_id;
                 result.success = true;
 
-                const double voxel_size = 0.1; // 복셀 크기
-                std::map<std::tuple<int, int, int>, std::vector<Point3D>> voxel_map;
+                try {
+                    const double voxel_size = 0.1; // 복셀 크기
+                    std::map<std::tuple<int, int, int>, std::vector<Point3D>> voxel_map;
 
-                // 각 점을 복셀에 할당
-                for (const auto& point : chunk.points) {
-                    int vx = static_cast<int>(std::floor(point.x / voxel_size));
-                    int vy = static_cast<int>(std::floor(point.y / voxel_size));
-                    int vz = static_cast<int>(std::floor(point.z / voxel_size));
+                    // 각 점을 복셀에 할당
+                    for (const auto& point : chunk.points) {
+                        int vx = static_cast<int>(std::floor(point.x / voxel_size));
+                        int vy = static_cast<int>(std::floor(point.y / voxel_size));
+                        int vz = static_cast<int>(std::floor(point.z / voxel_size));
 
-                    voxel_map[std::make_tuple(vx, vy, vz)].push_back(point);
-                }
-
-                // 각 복셀의 중심점으로 다운샘플링
-                std::vector<Point3D> downsampled_points;
-                for (const auto& voxel_pair : voxel_map) {
-                    const auto& points_in_voxel = voxel_pair.second;
-
-                    Point3D centroid(0, 0, 0);
-                    for (const auto& p : points_in_voxel) {
-                        centroid.x += p.x;
-                        centroid.y += p.y;
-                        centroid.z += p.z;
+                        voxel_map[std::make_tuple(vx, vy, vz)].push_back(point);
                     }
-                    centroid.x /= points_in_voxel.size();
-                    centroid.y /= points_in_voxel.size();
-                    centroid.z /= points_in_voxel.size();
 
-                    downsampled_points.push_back(centroid);
+                    // 각 복셀의 중심점으로 다운샘플링
+                    std::vector<Point3D> downsampled_points;
+                    for (const auto& voxel_pair : voxel_map) {
+                        const auto& points_in_voxel = voxel_pair.second;
+
+                        Point3D centroid(0, 0, 0);
+                        for (const auto& p : points_in_voxel) {
+                            centroid.x += p.x;
+                            centroid.y += p.y;
+                            centroid.z += p.z;
+                        }
+                        centroid.x /= points_in_voxel.size();
+                        centroid.y /= points_in_voxel.size();
+                        centroid.z /= points_in_voxel.size();
+
+                        downsampled_points.push_back(centroid);
+                    }
+
+                    result.processed_points = downsampled_points;
                 }
-
-                result.processed_points = downsampled_points;
-                std::cout << "Voxel downsample: " << chunk.points.size()
-                    << " -> " << downsampled_points.size() << " points" << std::endl;
+                catch (const std::exception& e) {
+                    result.success = false;
+                    result.error_message = "Voxel downsample error: " + std::string(e.what());
+                }
 
                 return result;
             });
@@ -575,141 +676,71 @@ private:
                 result.chunk_id = task.chunk_id;
                 result.success = true;
 
-                if (chunk.points.size() < 3) {
-                    result.processed_points = chunk.points;
-                    return result;
-                }
-
-                const int max_iterations = 1000;
-                const double distance_threshold = 0.02;
-                const int min_inliers = static_cast<int>(chunk.points.size() * 0.1); // 최소 10%
-
-                std::vector<Point3D> best_inliers;
-                std::random_device rd;
-                std::mt19937 gen(rd());
-                std::uniform_int_distribution<> dis(0, static_cast<int>(chunk.points.size() - 1));
-
-                for (int iter = 0; iter < max_iterations; ++iter) {
-                    // 랜덤하게 3개 점 선택하여 평면 방정식 구성
-                    std::vector<int> indices(3);
-                    for (int i = 0; i < 3; ++i) {
-                        indices[i] = dis(gen);
+                try {
+                    if (chunk.points.size() < 3) {
+                        result.processed_points = chunk.points;
+                        return result;
                     }
 
-                    // 3개 점이 모두 다른지 확인
-                    if (indices[0] == indices[1] || indices[1] == indices[2] || indices[0] == indices[2]) {
-                        continue;
-                    }
+                    const int max_iterations = 1000;
+                    const double distance_threshold = 0.02;
+                    const int min_inliers = static_cast<int>(chunk.points.size() * 0.1); // 최소 10%
 
-                    const Point3D& p1 = chunk.points[indices[0]];
-                    const Point3D& p2 = chunk.points[indices[1]];
-                    const Point3D& p3 = chunk.points[indices[2]];
+                    std::vector<Point3D> best_inliers;
+                    std::random_device rd;
+                    std::mt19937 gen(rd());
+                    std::uniform_int_distribution<> dis(0, static_cast<int>(chunk.points.size() - 1));
 
-                    // 평면 법선 벡터 계산 (외적)
-                    double nx = (p2.y - p1.y) * (p3.z - p1.z) - (p2.z - p1.z) * (p3.y - p1.y);
-                    double ny = (p2.z - p1.z) * (p3.x - p1.x) - (p2.x - p1.x) * (p3.z - p1.z);
-                    double nz = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
+                    for (int iter = 0; iter < max_iterations; ++iter) {
+                        // 랜덤하게 3개 점 선택하여 평면 방정식 구성
+                        std::set<int> selected_indices;
+                        while (selected_indices.size() < 3) {
+                            selected_indices.insert(dis(gen));
+                        }
 
-                    double norm = std::sqrt(nx * nx + ny * ny + nz * nz);
-                    if (norm < 1e-6) continue; // 퇴화된 경우 건너뛰기
+                        std::vector<int> indices(selected_indices.begin(), selected_indices.end());
 
-                    nx /= norm; ny /= norm; nz /= norm;
-                    double d = -(nx * p1.x + ny * p1.y + nz * p1.z);
+                        const Point3D& p1 = chunk.points[indices[0]];
+                        const Point3D& p2 = chunk.points[indices[1]];
+                        const Point3D& p3 = chunk.points[indices[2]];
 
-                    // 인라이어 계산
-                    std::vector<Point3D> inliers;
-                    for (const auto& point : chunk.points) {
-                        double distance = std::abs(nx * point.x + ny * point.y + nz * point.z + d);
-                        if (distance < distance_threshold) {
-                            inliers.push_back(point);
+                        // 평면 법선 벡터 계산 (외적)
+                        double nx = (p2.y - p1.y) * (p3.z - p1.z) - (p2.z - p1.z) * (p3.y - p1.y);
+                        double ny = (p2.z - p1.z) * (p3.x - p1.x) - (p2.x - p1.x) * (p3.z - p1.z);
+                        double nz = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
+
+                        double norm = std::sqrt(nx * nx + ny * ny + nz * nz);
+                        if (norm < 1e-6) continue; // 퇴화된 경우 건너뛰기
+
+                        nx /= norm; ny /= norm; nz /= norm;
+                        double d = -(nx * p1.x + ny * p1.y + nz * p1.z);
+
+                        // 인라이어 계산
+                        std::vector<Point3D> inliers;
+                        for (const auto& point : chunk.points) {
+                            double distance = std::abs(nx * point.x + ny * point.y + nz * point.z + d);
+                            if (distance < distance_threshold) {
+                                inliers.push_back(point);
+                            }
+                        }
+
+                        if (inliers.size() > best_inliers.size() && inliers.size() >= min_inliers) {
+                            best_inliers = inliers;
                         }
                     }
 
-                    if (inliers.size() > best_inliers.size() && inliers.size() >= min_inliers) {
-                        best_inliers = inliers;
-                    }
+                    result.processed_points = best_inliers;
                 }
-
-                result.processed_points = best_inliers;
-                std::cout << "Plane segmentation: found " << best_inliers.size()
-                    << " inliers out of " << chunk.points.size() << " points" << std::endl;
+                catch (const std::exception& e) {
+                    result.success = false;
+                    result.error_message = "Plane segmentation error: " + std::string(e.what());
+                }
 
                 return result;
             });
 
-        // 4. 포인트클라우드 압축
-        task_processor_->registerProcessor("compress",
-            [](const ProcessingTask& task, const PointCloudChunk& chunk) -> ProcessingResult {
-                ProcessingResult result;
-                result.task_id = task.task_id;
-                result.chunk_id = task.chunk_id;
-                result.success = true;
-
-                // 간단한 양자화 기반 압축
-                const double quantization_step = 0.001; // 1mm 정밀도
-
-                std::vector<Point3D> compressed_points;
-                std::set<std::tuple<int, int, int>> quantized_points;
-
-                for (const auto& point : chunk.points) {
-                    int qx = static_cast<int>(std::round(point.x / quantization_step));
-                    int qy = static_cast<int>(std::round(point.y / quantization_step));
-                    int qz = static_cast<int>(std::round(point.z / quantization_step));
-
-                    auto quantized = std::make_tuple(qx, qy, qz);
-                    if (quantized_points.find(quantized) == quantized_points.end()) {
-                        quantized_points.insert(quantized);
-
-                        Point3D compressed_point;
-                        compressed_point.x = qx * quantization_step;
-                        compressed_point.y = qy * quantization_step;
-                        compressed_point.z = qz * quantization_step;
-                        compressed_points.push_back(compressed_point);
-                    }
-                }
-
-                result.processed_points = compressed_points;
-                std::cout << "Compression: " << chunk.points.size()
-                    << " -> " << compressed_points.size() << " points" << std::endl;
-
-                return result;
-            });
-
-        // 5. 균등 샘플링
-        task_processor_->registerProcessor("uniform_sample",
-            [](const ProcessingTask& task, const PointCloudChunk& chunk) -> ProcessingResult {
-                ProcessingResult result;
-                result.task_id = task.task_id;
-                result.chunk_id = task.chunk_id;
-                result.success = true;
-
-                const int target_points = (std::min)(static_cast<int>(chunk.points.size() / 2), 1000);
-
-                if (chunk.points.size() <= target_points) {
-                    result.processed_points = chunk.points;
-                    return result;
-                }
-
-                std::vector<Point3D> sampled_points;
-                double step = static_cast<double>(chunk.points.size()) / target_points;
-
-                for (int i = 0; i < target_points; ++i) {
-                    int index = static_cast<int>(i * step);
-                    if (index < chunk.points.size()) {
-                        sampled_points.push_back(chunk.points[index]);
-                    }
-                }
-
-                result.processed_points = sampled_points;
-                std::cout << "Uniform sampling: " << chunk.points.size()
-                    << " -> " << sampled_points.size() << " points" << std::endl;
-
-                return result;
-            });
-
-        std::cout << "Custom processors registered successfully!" << std::endl;
-        std::cout << "Available processors: outlier_filter, voxel_downsample, "
-            << "plane_segmentation, compress, uniform_sample" << std::endl;
+        ILOG << "Custom processors registered successfully!";
+        ILOG << "Available processors: outlier_filter, voxel_downsample, plane_segmentation";
     }
 
     void updateStats(bool success, double processing_time) {
@@ -730,49 +761,57 @@ private:
     }
 
     void printWorkerStatus() {
-        std::cout << "=== Worker Status ===" << std::endl;
-        std::cout << "Connected: " << (client_->isConnected() ? "Yes" : "No") << std::endl;
-        std::cout << "Slave ID: " << client_->getSlaveId() << std::endl;
-        std::cout << "Server: " << server_address_ << ":" << server_port_ << std::endl;
-        std::cout << "Processing threads: " << processing_threads_ << std::endl;
-        std::cout << "Running: " << (running_ ? "Yes" : "No") << std::endl;
-        std::cout << "===================" << std::endl;
+        ILOG << "=== Worker Status ===";
+        ILOG << "Connected: " << (client_->isConnected() ? "Yes" : "No");
+        ILOG << "Slave ID: " << client_->getSlaveId();
+        ILOG << "Server: " << server_address_ << ":" << server_port_;
+        ILOG << "Processing threads: " << processing_threads_;
+        ILOG << "Running: " << (running_ ? "Yes" : "No");
+        ILOG << "====================";
     }
 
     void printProcessingStats() {
         std::lock_guard<std::mutex> lock(stats_mutex_);
 
-        std::cout << "=== Processing Statistics ===" << std::endl;
-        std::cout << "Completed tasks: " << completed_tasks_ << std::endl;
-        std::cout << "Failed tasks: " << failed_tasks_ << std::endl;
+        ILOG << "=== Processing Statistics ===";
+        ILOG << "Completed tasks: " << completed_tasks_;
+        ILOG << "Failed tasks: " << failed_tasks_;
 
         uint32_t total_tasks = completed_tasks_ + failed_tasks_;
         if (total_tasks > 0) {
             double success_rate = static_cast<double>(completed_tasks_) / total_tasks * 100;
-            std::cout << "Success rate: " << success_rate << "%" << std::endl;
+            std::ostringstream oss;
+            oss << std::fixed << std::setprecision(1) << success_rate << "%";
+            ILOG << "Success rate: " << oss.str();
         }
 
-        std::cout << "Average processing time: " << avg_processing_time_ << "s" << std::endl;
-        std::cout << "Total processing time: " << total_processing_time_ << "s" << std::endl;
-        std::cout << "=============================" << std::endl;
+        std::ostringstream avg_oss;
+        avg_oss << std::fixed << std::setprecision(3) << avg_processing_time_ << "s";
+        ILOG << "Average processing time: " << avg_oss.str();
+
+        std::ostringstream total_oss;
+        total_oss << std::fixed << std::setprecision(1) << total_processing_time_ << "s";
+        ILOG << "Total processing time: " << total_oss.str();
+
+        ILOG << "=============================";
     }
 
     void printSupportedTasks() {
         auto task_types = task_processor_->getSupportedTaskTypes();
 
-        std::cout << "=== Supported Task Types ===" << std::endl;
+        ILOG << "=== Supported Task Types ===";
         for (const auto& task_type : task_types) {
-            std::cout << "- " << task_type << std::endl;
+            ILOG << "- " << task_type;
         }
-        std::cout << "============================" << std::endl;
+        ILOG << "============================";
     }
 
     void printQueueStatus() {
         std::lock_guard<std::mutex> lock(task_queue_mutex_);
 
-        std::cout << "=== Task Queue Status ===" << std::endl;
-        std::cout << "Queue size: " << task_queue_.size() << std::endl;
-        std::cout << "=========================" << std::endl;
+        ILOG << "=== Task Queue Status ===";
+        ILOG << "Queue size: " << task_queue_.size();
+        ILOG << "=========================";
     }
 
 private:
@@ -805,7 +844,8 @@ private:
 static SlaveApplication* g_app = nullptr;
 
 void signalHandler(int signal) {
-    std::cout << std::endl << "Received signal " << signal << ", shutting down..." << std::endl;
+    ILOG << "";
+    ILOG << "Received signal " << signal << ", shutting down...";
     if (g_app) {
         g_app->stop();
     }
