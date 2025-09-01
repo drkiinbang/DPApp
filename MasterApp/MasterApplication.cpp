@@ -10,7 +10,7 @@
 #include "../include/NetworkManager.h"
 #include "../include/TaskManager.h"
 #include "RestApiServer.h"
-#include "RuntimeConfig.h"
+#include "../include/RuntimeConfig.h"
 #include "../include/Logger.h"
 
 using namespace DPApp;

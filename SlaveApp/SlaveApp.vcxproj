@@ -134,7 +134,9 @@
     <ClInclude Include="..\include\Logger.h" />
     <ClInclude Include="..\include\NetworkManager.h" />
     <ClInclude Include="..\include\PointCloudTypes.h" />
+    <ClInclude Include="..\include\RuntimeConfig.h" />
     <ClInclude Include="..\include\TaskManager.h" />
+    <ClInclude Include="..\include\ThreadPool.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

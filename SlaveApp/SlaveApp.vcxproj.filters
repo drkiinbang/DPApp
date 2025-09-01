@@ -35,5 +35,11 @@
     <ClInclude Include="..\include\Logger.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\include\RuntimeConfig.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\ThreadPool.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

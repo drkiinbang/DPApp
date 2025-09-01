@@ -1,8 +1,8 @@
 // RestApiServer.h - Header-Only REST API Server
 #pragma once
 
-#include "RuntimeConfig.h"
-#include "ThreadPool.h"
+#include "../include/RuntimeConfig.h"
+#include "../include/ThreadPool.h"
 #include "MiniJson.h"
 
 #include <string>

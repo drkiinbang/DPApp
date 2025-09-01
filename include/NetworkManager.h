@@ -23,8 +23,8 @@
 #endif
 
 #include "PointCloudTypes.h"
-#include "../MasterApp/RuntimeConfig.h"
-#include "../MasterApp/ThreadPool.h"
+#include "RuntimeConfig.h"
+#include "ThreadPool.h"
 
 namespace DPApp {
 
