@@ -127,16 +127,18 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\src\NetworkClient.cpp" />
     <ClCompile Include="..\src\NetworkManager.cpp" />
-    <ClCompile Include="..\src\NetworkUtils.cpp" />
-    <ClCompile Include="..\src\PointCloudTypes.cpp" />
     <ClCompile Include="MasterApplication.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\include\Logger.h" />
     <ClInclude Include="..\include\NetworkManager.h" />
     <ClInclude Include="..\include\PointCloudTypes.h" />
     <ClInclude Include="..\include\TaskManager.h" />
+    <ClInclude Include="MiniJson.h" />
+    <ClInclude Include="RESTApiServer.h" />
+    <ClInclude Include="RuntimeConfig.h" />
+    <ClInclude Include="ThreadPool.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

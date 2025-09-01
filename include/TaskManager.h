@@ -80,27 +80,119 @@ enum class TaskDistributionStrategy {
     ROUND_ROBIN,        // 순차 분배
     LOAD_BALANCED,      // 부하 균형
     PERFORMANCE_BASED,  // 성능 기반
-    PRIORITY_FIRST      // 우선순위 우선
 };
 
 // 작업 관리자 (Master용)
 class TaskManager {
+private:
+    std::atomic<bool> stopping_{ false };
+
 public:
-    TaskManager();
-    ~TaskManager();
+    explicit TaskManager(const uint32_t timeout_seconds)
+        : next_task_id_(1), distribution_strategy_(TaskDistributionStrategy::LOAD_BALANCED),
+        task_timeout_seconds_(timeout_seconds), current_slave_index_(0) {
+    }
+
+    ~TaskManager() {
+        clearAllTasks();
+    }
+
+    void requestStop() {
+        stopping_ = true;
+    }
+
+    bool isStopping() const {
+        return stopping_;
+    }
     
     // 작업 관리
     uint32_t addTask(const std::string& task_type, 
                     std::shared_ptr<PointCloudChunk> chunk,
                     const std::vector<uint8_t>& parameters,
-                    TaskPriority priority = TaskPriority::NORMAL);
+                    TaskPriority priority = TaskPriority::NORMAL) {
+        std::lock_guard<std::mutex> lock(tasks_mutex_);
+
+        uint32_t task_id = next_task_id_++;
+
+        TaskInfo task_info;
+        task_info.task_id = task_id;
+        task_info.chunk_id = chunk->chunk_id;
+        task_info.task_type = task_type;
+        task_info.priority = priority;
+        task_info.parameters = parameters;
+        task_info.chunk_data = chunk;
+
+        tasks_[task_id] = std::move(task_info);
+
+        std::cout << "Task added: " << task_id << " (" << task_type << ")" << std::endl;
+
+        return task_id;
+    }
                     
-    bool removeTask(uint32_t task_id);
-    void clearAllTasks();
+    bool removeTask(uint32_t task_id) {
+        std::lock_guard<std::mutex> lock(tasks_mutex_);
+
+        auto it = tasks_.find(task_id);
+        if (it == tasks_.end()) {
+            return false;
+        }
+
+        tasks_.erase(it);
+        return true;
+    }
+
+    void clearAllTasks() {
+        std::lock_guard<std::mutex> lock(tasks_mutex_);
+        tasks_.clear();
+    }
     
     // 작업 분배
     void setDistributionStrategy(TaskDistributionStrategy strategy) { distribution_strategy_ = strategy; }
-    bool assignTasksToSlaves();
+
+    bool assignTasksToSlaves() {
+        if (stopping_) {
+            return false;  // 종료 요청시 새 작업 할당 중지
+        }
+
+        std::lock_guard<std::mutex> tasks_lock(tasks_mutex_);
+        std::lock_guard<std::mutex> slaves_lock(slaves_mutex_);
+
+        // 대기 중인 작업들을 우선순위 순으로 정렬
+        std::vector<uint32_t> pending_tasks;
+        for (auto& [task_id, task_info] : tasks_) {
+            if (task_info.status == TaskStatus::PENDING) {
+                pending_tasks.push_back(task_id);
+            }
+        }
+
+        // 우선순위 기준으로 정렬
+        std::sort(pending_tasks.begin(), pending_tasks.end(),
+            [this](uint32_t a, uint32_t b) {
+                return tasks_[a].priority > tasks_[b].priority;
+            });
+
+        int assigned_count = 0;
+
+        for (uint32_t task_id : pending_tasks) {
+            TaskInfo& task_info = tasks_[task_id];
+
+            std::string selected_slave = selectSlaveForTask(task_info);
+            if (!selected_slave.empty()) {
+                task_info.status = TaskStatus::ASSIGNED;
+                task_info.assigned_slave = selected_slave;
+                task_info.assigned_time = std::chrono::steady_clock::now();
+
+                // 슬레이브를 바쁨 상태로 설정
+                slaves_[selected_slave].is_busy = true;
+                slaves_[selected_slave].current_task_id = std::to_string(task_id);
+
+                assigned_count++;
+                std::cout << "Task " << task_id << " assigned to " << selected_slave << std::endl;
+            }
+        }
+
+        return assigned_count > 0;
+    }
     
     // 작업 상태 관리
     bool updateTaskStatus(uint32_t task_id, TaskStatus status);
@@ -140,10 +232,83 @@ public:
 
 private:
     // 작업 분배 전략 구현
-    std::string selectSlaveForTask(const TaskInfo& task);
-    std::string selectSlaveRoundRobin();
-    std::string selectSlaveLoadBalanced();
-    std::string selectSlavePerformanceBased();
+    std::string selectSlaveForTask(const TaskInfo& task) {
+        switch (distribution_strategy_) {
+        case TaskDistributionStrategy::ROUND_ROBIN:
+            return selectSlaveRoundRobin();
+        case TaskDistributionStrategy::LOAD_BALANCED:
+            return selectSlaveLoadBalanced();
+        case TaskDistributionStrategy::PERFORMANCE_BASED:
+            return selectSlavePerformanceBased();
+        default:
+            return selectSlaveRoundRobin();
+        }
+    }
+
+    std::string selectSlaveRoundRobin() {
+        std::vector<std::string> available_slaves;
+        for (auto& [slave_id, slave_info] : slaves_) {
+            if (slave_info.is_active && !slave_info.is_busy) {
+                available_slaves.push_back(slave_id);
+            }
+        }
+
+        if (available_slaves.empty()) {
+            return "";
+        }
+
+        std::string selected = available_slaves[current_slave_index_ % available_slaves.size()];
+        current_slave_index_++;
+
+        return selected;
+    }
+
+    std::string selectSlaveLoadBalanced() {
+        std::string best_slave;
+        uint32_t min_load = UINT32_MAX;
+
+        for (auto& [slave_id, slave_info] : slaves_) {
+            if (slave_info.is_active && !slave_info.is_busy) {
+                uint32_t load = slave_info.completed_tasks + slave_info.failed_tasks;
+                if (load < min_load) {
+                    min_load = load;
+                    best_slave = slave_id;
+                }
+            }
+        }
+
+        return best_slave;
+    }
+
+    std::string selectSlavePerformanceBased() {
+        std::string best_slave;
+        double best_performance = 0.0;
+
+        for (auto& [slave_id, slave_info] : slaves_) {
+            if (slave_info.is_active && !slave_info.is_busy) {
+                // 성공률과 처리 속도를 고려한 점수 계산
+                double success_rate = 1.0;
+                if (slave_info.completed_tasks + slave_info.failed_tasks > 0) {
+                    success_rate = static_cast<double>(slave_info.completed_tasks) /
+                        (slave_info.completed_tasks + slave_info.failed_tasks);
+                }
+
+                double speed_factor = 1.0;
+                if (slave_info.avg_processing_time > 0) {
+                    speed_factor = 1.0 / slave_info.avg_processing_time;
+                }
+
+                double performance = success_rate * speed_factor;
+
+                if (performance > best_performance) {
+                    best_performance = performance;
+                    best_slave = slave_id;
+                }
+            }
+        }
+
+        return best_slave;
+    }
     
     void updateSlaveStatistics(const std::string& slave_id, bool success, double processing_time);
     
@@ -209,177 +374,6 @@ namespace PointCloudProcessors {
 ///
 /// TaskManager Implementation
 ///
-
-// TaskManager 구현
-TaskManager::TaskManager()
-    : next_task_id_(1), distribution_strategy_(TaskDistributionStrategy::LOAD_BALANCED),
-    task_timeout_seconds_(300), current_slave_index_(0) {
-}
-
-TaskManager::~TaskManager() {
-    clearAllTasks();
-}
-
-uint32_t TaskManager::addTask(const std::string& task_type,
-    std::shared_ptr<PointCloudChunk> chunk,
-    const std::vector<uint8_t>& parameters,
-    TaskPriority priority) {
-    std::lock_guard<std::mutex> lock(tasks_mutex_);
-
-    uint32_t task_id = next_task_id_++;
-
-    TaskInfo task_info;
-    task_info.task_id = task_id;
-    task_info.chunk_id = chunk->chunk_id;
-    task_info.task_type = task_type;
-    task_info.priority = priority;
-    task_info.parameters = parameters;
-    task_info.chunk_data = chunk;
-
-    tasks_[task_id] = std::move(task_info);
-
-    std::cout << "Task added: " << task_id << " (" << task_type << ")" << std::endl;
-
-    return task_id;
-}
-
-bool TaskManager::removeTask(uint32_t task_id) {
-    std::lock_guard<std::mutex> lock(tasks_mutex_);
-
-    auto it = tasks_.find(task_id);
-    if (it == tasks_.end()) {
-        return false;
-    }
-
-    tasks_.erase(it);
-    return true;
-}
-
-void TaskManager::clearAllTasks() {
-    std::lock_guard<std::mutex> lock(tasks_mutex_);
-    tasks_.clear();
-}
-
-bool TaskManager::assignTasksToSlaves() {
-    std::lock_guard<std::mutex> tasks_lock(tasks_mutex_);
-    std::lock_guard<std::mutex> slaves_lock(slaves_mutex_);
-
-    // 대기 중인 작업들을 우선순위 순으로 정렬
-    std::vector<uint32_t> pending_tasks;
-    for (auto& [task_id, task_info] : tasks_) {
-        if (task_info.status == TaskStatus::PENDING) {
-            pending_tasks.push_back(task_id);
-        }
-    }
-
-    // 우선순위 기준으로 정렬
-    std::sort(pending_tasks.begin(), pending_tasks.end(),
-        [this](uint32_t a, uint32_t b) {
-            return tasks_[a].priority > tasks_[b].priority;
-        });
-
-    int assigned_count = 0;
-
-    for (uint32_t task_id : pending_tasks) {
-        TaskInfo& task_info = tasks_[task_id];
-
-        std::string selected_slave = selectSlaveForTask(task_info);
-        if (!selected_slave.empty()) {
-            task_info.status = TaskStatus::ASSIGNED;
-            task_info.assigned_slave = selected_slave;
-            task_info.assigned_time = std::chrono::steady_clock::now();
-
-            // 슬레이브를 바쁨 상태로 설정
-            slaves_[selected_slave].is_busy = true;
-            slaves_[selected_slave].current_task_id = std::to_string(task_id);
-
-            assigned_count++;
-            std::cout << "Task " << task_id << " assigned to " << selected_slave << std::endl;
-        }
-    }
-
-    return assigned_count > 0;
-}
-
-std::string TaskManager::selectSlaveForTask(const TaskInfo& task) {
-    switch (distribution_strategy_) {
-    case TaskDistributionStrategy::ROUND_ROBIN:
-        return selectSlaveRoundRobin();
-    case TaskDistributionStrategy::LOAD_BALANCED:
-        return selectSlaveLoadBalanced();
-    case TaskDistributionStrategy::PERFORMANCE_BASED:
-        return selectSlavePerformanceBased();
-    case TaskDistributionStrategy::PRIORITY_FIRST:
-    default:
-        return selectSlaveLoadBalanced(); // 기본값
-    }
-}
-
-std::string TaskManager::selectSlaveRoundRobin() {
-    std::vector<std::string> available_slaves;
-    for (auto& [slave_id, slave_info] : slaves_) {
-        if (slave_info.is_active && !slave_info.is_busy) {
-            available_slaves.push_back(slave_id);
-        }
-    }
-
-    if (available_slaves.empty()) {
-        return "";
-    }
-
-    std::string selected = available_slaves[current_slave_index_ % available_slaves.size()];
-    current_slave_index_++;
-
-    return selected;
-}
-
-std::string TaskManager::selectSlaveLoadBalanced() {
-    std::string best_slave;
-    uint32_t min_load = UINT32_MAX;
-
-    for (auto& [slave_id, slave_info] : slaves_) {
-        if (slave_info.is_active && !slave_info.is_busy) {
-            uint32_t load = slave_info.completed_tasks + slave_info.failed_tasks;
-            if (load < min_load) {
-                min_load = load;
-                best_slave = slave_id;
-            }
-        }
-    }
-
-    return best_slave;
-}
-
-std::string TaskManager::selectSlavePerformanceBased() {
-    std::string best_slave;
-    double best_performance = 0.0;
-
-    for (auto& [slave_id, slave_info] : slaves_) {
-        if (slave_info.is_active && !slave_info.is_busy) {
-            // 성공률과 처리 속도를 고려한 점수 계산
-            double success_rate = 1.0;
-            if (slave_info.completed_tasks + slave_info.failed_tasks > 0) {
-                success_rate = static_cast<double>(slave_info.completed_tasks) /
-                    (slave_info.completed_tasks + slave_info.failed_tasks);
-            }
-
-            double speed_factor = 1.0;
-            if (slave_info.avg_processing_time > 0) {
-                speed_factor = 1.0 / slave_info.avg_processing_time;
-            }
-
-            double performance = success_rate * speed_factor;
-
-            if (performance > best_performance) {
-                best_performance = performance;
-                best_slave = slave_id;
-            }
-        }
-    }
-
-    return best_slave;
-}
-
 bool TaskManager::completeTask(uint32_t task_id, const ProcessingResult& result) {
     std::lock_guard<std::mutex> tasks_lock(tasks_mutex_);
     std::lock_guard<std::mutex> slaves_lock(slaves_mutex_);
@@ -556,17 +550,17 @@ double TaskManager::getOverallProgress() {
     std::lock_guard<std::mutex> lock(tasks_mutex_);
 
     if (tasks_.empty()) {
-        return 1.0; // 작업이 없으면 100% 완료
+        return 1.0; /// If task is empty, return 100%
     }
 
-    size_t completed = 0;
+    std::vector<TaskStatus> statuses;
+    statuses.reserve(tasks_.size());
     for (const auto& [task_id, task_info] : tasks_) {
-        if (task_info.status == TaskStatus::COMPLETED) {
-            completed++;
-        }
+        statuses.push_back(task_info.status);
     }
 
-    return static_cast<double>(completed) / tasks_.size();
+    size_t completed = std::count(statuses.begin(), statuses.end(), TaskStatus::COMPLETED);
+    return static_cast<double>(completed) / statuses.size();
 }
 
 std::vector<ProcessingResult> TaskManager::getCompletedResults() {

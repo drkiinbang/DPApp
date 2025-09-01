@@ -2,6 +2,8 @@
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 
 #include "../include/NetworkManager.h"
+#include "../include/Logger.h"
+
 #include <iostream>
 #include <sstream>
 #include <random>
@@ -9,64 +11,6 @@
 #include <cstring>
 
 namespace DPApp {
-
-// NetworkMessage 구현
-NetworkMessage::NetworkMessage(MessageType type, const std::vector<uint8_t>& payload) 
-    : data(payload) {
-    header.type = type;
-    header.data_length = static_cast<uint32_t>(payload.size());
-    calculateChecksum();
-}
-
-std::vector<uint8_t> NetworkMessage::serialize() const {
-    std::vector<uint8_t> buffer(sizeof(MessageHeader) + data.size());
-    
-    // 헤더 복사
-    std::memcpy(buffer.data(), &header, sizeof(MessageHeader));
-    
-    // 데이터 복사
-    if (!data.empty()) {
-        std::memcpy(buffer.data() + sizeof(MessageHeader), data.data(), data.size());
-    }
-    
-    return buffer;
-}
-
-NetworkMessage NetworkMessage::deserialize(const std::vector<uint8_t>& buffer) {
-    if (buffer.size() < sizeof(MessageHeader)) {
-        throw std::runtime_error("Buffer too small for message header");
-    }
-    
-    NetworkMessage message;
-    
-    // 헤더 복사
-    std::memcpy(&message.header, buffer.data(), sizeof(MessageHeader));
-    
-    // 매직 넘버 확인
-    if (message.header.magic != MessageHeader::MAGIC_NUMBER) {
-        throw std::runtime_error("Invalid magic number");
-    }
-    
-    // 데이터 복사
-    if (message.header.data_length > 0) {
-        if (buffer.size() < sizeof(MessageHeader) + message.header.data_length) {
-            throw std::runtime_error("Buffer too small for message data");
-        }
-        
-        message.data.resize(message.header.data_length);
-        std::memcpy(message.data.data(), 
-                   buffer.data() + sizeof(MessageHeader), 
-                   message.header.data_length);
-    }
-    
-    // 체크섬 검증
-    if (!message.verifyChecksum()) {
-        throw std::runtime_error("Checksum verification failed");
-    }
-    
-    return message;
-}
-
 void NetworkMessage::calculateChecksum() {
     header.checksum = NetworkUtils::calculateCRC32(data);
 }
@@ -79,6 +23,9 @@ bool NetworkMessage::verifyChecksum() const {
 NetworkServer::NetworkServer() 
     : server_socket_(-1), port_(0), running_(false), shutdown_requested_(false), next_sequence_(0) {
     
+    cfg_ = DPApp::RuntimeConfig::loadFromEnv();
+    worker_pool_ = std::make_unique<DPApp::ThreadPool>(static_cast<size_t>(cfg_.server_io_threads));
+
 #ifdef _WIN32
     WSADATA wsaData;
     WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -148,33 +95,37 @@ void NetworkServer::stop() {
 bool NetworkServer::initializeSocket() {
     server_socket_ = static_cast<int>(socket(AF_INET, SOCK_STREAM, 0));
     if (server_socket_ < 0) {
-        std::cerr << "Failed to create socket" << std::endl;
+        ELOG << "Failed to create socket";
         return false;
     }
-    
-    // SO_REUSEADDR 설정
+
+    /// 소켓 옵션 설정
     int opt = 1;
-    if (setsockopt(server_socket_, SOL_SOCKET, SO_REUSEADDR, 
-                   reinterpret_cast<const char*>(&opt), sizeof(opt)) < 0) {
-        std::cerr << "Failed to set socket options" << std::endl;
+    if (setsockopt(server_socket_, SOL_SOCKET, SO_REUSEADDR,
+        reinterpret_cast<const char*>(&opt), sizeof(opt)) < 0) {
+        ELOG << "Failed to set SO_REUSEADDR";
         return false;
     }
-    
+
+#ifdef SO_REUSEPORT  /// Linux에서만 사용 가능
+    setsockopt(server_socket_, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
+#endif
+
     sockaddr_in server_addr{};
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
     server_addr.sin_port = htons(port_);
-    
+
     if (bind(server_socket_, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr)) < 0) {
-        std::cerr << "Failed to bind socket" << std::endl;
+        ELOG << "Failed to bind socket";
         return false;
     }
-    
-    if (listen(server_socket_, 10) < 0) {
-        std::cerr << "Failed to listen on socket" << std::endl;
+
+    if (listen(server_socket_, cfg_.server_backlog) < 0) {
+        ELOG << "Failed to listen on socket";
         return false;
     }
-    
+
     return true;
 }
 
@@ -208,14 +159,12 @@ void NetworkServer::serverThread() {
         std::string client_address = inet_ntoa(client_addr.sin_addr);
         uint16_t client_port = ntohs(client_addr.sin_port);
 
-        // 클라이언트 연결 객체 생성 (ID는 handshake에서 설정)
         auto client = std::make_shared<ClientConnection>(client_socket, client_address, client_port);
-        // 임시 ID 생성
         client->slave_id = "pending_" + NetworkUtils::generateSlaveId();
 
-        // 클라이언트 핸들러 스레드 시작
-        std::thread client_thread(&NetworkServer::clientHandlerThread, this, client);
-        client_thread.detach();
+        worker_pool_->enqueue([this, client]() {
+            this->clientHandlerThread(client);
+            });
 
         std::cout << "Client connected: from " << client_address << ":" << client_port << std::endl;
     }
@@ -335,7 +284,7 @@ void NetworkServer::heartbeatThread() {
                 auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
                     now - client->last_heartbeat).count();
                 
-                if (elapsed > 30) {  // 30초 타임아웃
+                if (elapsed > cfg_.heartbeat_timeout_seconds) {  // 30초 타임아웃
                     disconnected_clients.push_back(client_id);
                 }
             }
@@ -421,42 +370,5 @@ bool NetworkServer::broadcastMessage(const NetworkMessage& message) {
 
     return success;
 }
-
-// NetworkUtils 구현
-namespace NetworkUtils {
-
-std::string generateSlaveId() {
-    static std::random_device rd;
-    static std::mt19937 gen(rd());
-    static std::uniform_int_distribution<> dis(0, 15);
-    
-    std::stringstream ss;
-    ss << "slave_";
-    for (int i = 0; i < 8; ++i) {
-        ss << std::hex << dis(gen);
-    }
-    
-    return ss.str();
-}
-
-uint32_t calculateCRC32(const std::vector<uint8_t>& data) {
-    // 간단한 CRC32 구현
-    uint32_t crc = 0xFFFFFFFF;
-    
-    for (uint8_t byte : data) {
-        crc ^= byte;
-        for (int i = 0; i < 8; ++i) {
-            if (crc & 1) {
-                crc = (crc >> 1) ^ 0xEDB88320;
-            } else {
-                crc >>= 1;
-            }
-        }
-    }
-    
-    return ~crc;
-}
-
-} // namespace NetworkUtils
 
 } // namespace DPApp
