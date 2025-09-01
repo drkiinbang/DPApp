@@ -14,7 +14,7 @@
 #include "../include/NetworkManager.h"
 #include "../include/TaskManager.h"
 #include "../include/Logger.h"
-#include "../MasterApp/RuntimeConfig.h"
+#include "../include/RuntimeConfig.h"
 
 using namespace DPApp;
 
@@ -26,6 +26,7 @@ namespace DPApp {
 class SlaveApplication {
 private:
     DPApp::RuntimeConfig cfg_;
+    std::atomic<bool> force_exit_{ false };  /// 강제 종료 플래그
 
     // 작업별 중단 플래그들을 관리
     std::map<uint32_t, std::shared_ptr<std::atomic<bool>>> active_task_cancellations_;
@@ -109,36 +110,69 @@ public:
     }
 
     void stop() {
-        if (!running_) return;
+        if (!running_ && !shutdown_requested_) return;
 
         ILOG << "Stopping slave worker...";
 
-        // 1. Set running flag to false first
+        /// 1. Set running flag to false first
         running_ = false;
+        shutdown_requested_ = true;
 
-        // 2. Notify all waiting threads about shutdown
+        /// 2. Notify all waiting threads about shutdown
         task_queue_cv_.notify_all();
 
-        // 3. Wait for processing threads to complete current tasks
+        /// 3. Processing threads 종료 (타임아웃 적용)
+        auto thread_shutdown_start = std::chrono::steady_clock::now();
+        const auto max_wait_time = std::chrono::seconds(5);  // 최대 5초 대기
+
         for (auto& thread : processing_thread_pool_) {
             if (thread.joinable()) {
-                thread.join();
+                auto elapsed = std::chrono::steady_clock::now() - thread_shutdown_start;
+                if (elapsed < max_wait_time) {
+                    // 남은 시간만큼 대기
+                    auto remaining = max_wait_time - elapsed;
+                    if (std::chrono::milliseconds(100) < remaining) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    }
+
+                    try {
+                        thread.join();
+                    }
+                    catch (const std::exception& e) {
+                        WLOG << "Error joining processing thread: " << e.what();
+                        thread.detach();
+                    }
+                }
+                else {
+                    WLOG << "Processing thread join timeout, detaching...";
+                    thread.detach();
+                }
             }
         }
         processing_thread_pool_.clear();
 
-        // 4. Wait for status thread to finish
+        /// 4. Status thread 종료
         if (status_thread_.joinable()) {
-            status_thread_.join();
+            try {
+                status_thread_.join();
+            }
+            catch (const std::exception& e) {
+                WLOG << "Error joining status thread: " << e.what();
+                status_thread_.detach();
+            }
         }
 
-        // 5. Disconnect client AFTER all threads are stopped
-        // This prevents the client thread from being interrupted while other threads are still running
+        /// 5. 네트워크 클라이언트 해제
         if (client_) {
-            client_->disconnect();
+            try {
+                client_->disconnect();
+            }
+            catch (const std::exception& e) {
+                WLOG << "Error disconnecting client: " << e.what();
+            }
         }
 
-        ILOG << "Slave worker stopped";
+        ILOG << "Slave worker stopped completely";
     }
 
     /// Graceful shutdown from network disconnect :
@@ -157,23 +191,63 @@ public:
 
         printHelp();
 
-        std::string command;
-        while (running_) {
-            // 강제 종료 요청 확인
-            if (shutdown_requested_) {
-                ILOG << "Shutdown requested by master, stopping...";
-                break;
-            }
-
-            // 사용자 명령 입력 처리
-            if (std::getline(std::cin, command)) {
-                if (!processCommand(command)) {
-                    break; // quit 명령 처리됨
+        // 입력 처리를 별도 스레드로 분리
+        std::thread input_thread([this]() {
+            std::string command;
+            while (running_ && !shutdown_requested_ && !force_exit_) {
+                if (std::getline(std::cin, command)) {
+                    if (!processCommand(command)) {
+                        running_ = false;  // quit 명령 처리
+                        break;
+                    }
                 }
+
+                // 입력이 없어도 주기적으로 종료 조건 확인
+                if (shutdown_requested_ || force_exit_) {
+                    break;
+                }
+            }
+            });
+
+        // 메인 루프는 주기적으로 상태를 체크
+        while (running_ && !shutdown_requested_ && !force_exit_) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            // 연결 상태 체크
+            if (!client_->isConnected()) {
+                WLOG << "Lost connection to master server";
+                break;
             }
         }
 
+        /// 종료 이유 로깅
+        if (shutdown_requested_) {
+            ILOG << "Shutdown requested by master, stopping...";
+        }
+        else if (force_exit_) {
+            ILOG << "Force exit requested, stopping immediately...";
+        }
+        else if (!running_) {
+            ILOG << "Normal shutdown requested, stopping...";
+        }
+
+        if (shutdown_requested_) {
+            ILOG << "Shutdown requested by master, stopping...";
+        }
+
+        // 입력 스레드 정리
+        running_ = false;
+        shutdown_requested_ = true;
+
+        if (input_thread.joinable()) {
+            input_thread.detach();
+        }
+
         stop();
+
+        if (force_exit_) {
+            std::exit(0);
+        }
     }
 
 private:
@@ -289,17 +363,36 @@ private:
     void handleMessage(const NetworkMessage& message, const std::string& sender_id) {
         switch (message.header.type) {
         case MessageType::TASK_ASSIGNMENT:
-            handleTaskAssignment(message);
+            if (!shutdown_requested_ && !force_exit_) {
+                handleTaskAssignment(message);
+            }
             break;
 
         case MessageType::HEARTBEAT:
-            /// 마스터로부터의 하트비트에 대한 응답
-            sendHeartbeatResponse();
+            if (!shutdown_requested_ && !force_exit_) {
+                sendHeartbeatResponse();
+            }
             break;
 
         case MessageType::SHUTDOWN:
-            ILOG << "Received shutdown command from master";
+            ILOG << "Received SHUTDOWN command from master - initiating immediate shutdown";
+
+            // 즉시 종료 플래그 설정
             shutdown_requested_ = true;
+            force_exit_ = true;
+            running_ = false;
+
+            // 모든 대기 중인 스레드 깨우기
+            task_queue_cv_.notify_all();
+
+            // 네트워크 연결 즉시 해제하여 블로킹 해제
+            std::thread([this]() {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                if (client_) {
+                    client_->disconnect();
+                }
+                }).detach();
+
             break;
 
         default:
@@ -865,7 +958,14 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    app.run();
+    try {
+        app.run();
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Application error: " << e.what() << std::endl;
+        return 1;
+    }
 
+    std::cout << "Application exited normally" << std::endl;
     return 0;
 }
