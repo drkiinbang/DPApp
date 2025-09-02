@@ -1162,13 +1162,18 @@ namespace DPApp {
 
     // ê¸°ë³¸ í¬ì¸íŠ¸í´ë¼ìš°ë"œ ì²˜ë¦¬ í•¨ìˆ˜ë"¤
     namespace PointCloudProcessors {
+        /// [Smaple] Filtering based on heights
         ProcessingResult filterPoints(const ProcessingTask& task, const PointCloudChunk& chunk);
+        /// [Smaple] Classification based on heights
         ProcessingResult classifyPoints(const ProcessingTask& task, const PointCloudChunk& chunk);
+        /// [Smaple] Estimating normal vectors
         ProcessingResult estimateNormals(const ProcessingTask& task, const PointCloudChunk& chunk);
+        /// [Smaple] Statitical filtering ( mean_z - sigma < inlier < min_z + sigma)
         ProcessingResult removeOutliers(const ProcessingTask& task, const PointCloudChunk& chunk);
+        /// [Sample] Random down sampling
         ProcessingResult downsample(const ProcessingTask& task, const PointCloudChunk& chunk);
 
-        // BIM ê±°ë¦¬ ê³„ì‚° í"„ë¡œì„¸ì„œ (í´ë" ê¸°ë°˜)
+        /// Distances between point cloud and BIM 
         ProcessingResult calculateBIMDistance(const ProcessingTask& task, const PointCloudChunk& chunk);
     }
 
