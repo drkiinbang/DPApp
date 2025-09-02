@@ -1,4 +1,6 @@
+#ifdef _WIN32
 #define NOMINMAX   // Windows 헤더 포함하기 전에 정의
+#endif
 
 #include <iostream>
 #include <string>

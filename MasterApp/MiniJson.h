@@ -1,9 +1,9 @@
 #pragma once
-#include <string>
 #include <unordered_map>
 #include <variant>
 #include <optional>
 #include <cctype>
+#include <string>
 
 namespace DPApp {
 	using JsonValue = std::variant<std::string, double, bool>;
@@ -14,7 +14,7 @@ namespace DPApp {
 	public:
 		MiniJson() {}
 
-		/// 공백/개행 스킵
+		/// ê³µë°±/ê°œí–‰ ìŠ¤í‚µ
 		static void skip_ws(const std::string& s, size_t& i) {
 			while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
 		}
@@ -43,7 +43,7 @@ namespace DPApp {
 					case 'n': tmp.push_back('\n'); break;
 					case 'r': tmp.push_back('\r'); break;
 					case 't': tmp.push_back('\t'); break;
-					default: return false; // \uXXXX 미지원(간이)
+					default: return false; // \uXXXX ë¯¸ì§€ì›(ê°„ì´)
 					}
 				}
 				else if (c == '"') {
@@ -77,29 +77,29 @@ namespace DPApp {
 			return false;
 		}
 
-		/// MAX_DEPTH, 32, ,초과하면 failure
+		/// MAX_DEPTH, 32, ,ì´ˆê³¼í•˜ë©´ failure
 		static std::optional<JsonObject> parse_object(const std::string& s, size_t depth = 0) {
 			if (depth > MAX_DEPTH) {
 				return std::nullopt;
 			}
 
 			size_t i = 0;
-			skip_ws(s, i);     // 공백/개행 스킵
+			skip_ws(s, i);     // ê³µë°±/ê°œí–‰ ìŠ¤í‚µ
 			if (i >= s.size() || s[i] != '{')
 				return std::nullopt;
-			++i;               // '{' 소비
+			++i;               // '{' ì†Œë¹„
 
 			JsonObject obj;
 
 			for (;;) {
 				skip_ws(s, i);
-				/// 빈 객체 {} 처리: 닫는 괄호 '}'면 종료
+				/// ë¹ˆ ê°ì²´ {} ì²˜ë¦¬: ë‹«ëŠ" ê´„í˜¸ '}'ë©´ ì¢…ë£Œ
 				if (i < s.size() && s[i] == '}') {
 					++i;
 					break;
 				}
 
-				// 키는 반드시 문자열
+				// í‚¤ëŠ" ë°˜ë"œì‹œ ë¬¸ìžì—´
 				std::string key;
 				if (!parse_string(s, i, key))
 					return std::nullopt;
@@ -107,13 +107,13 @@ namespace DPApp {
 				skip_ws(s, i);
 				if (i >= s.size() || s[i] != ':')
 					return std::nullopt;
-				++i;                 // ':' 소비
+				++i;                 // ':' ì†Œë¹„
 				skip_ws(s, i);
 
 				if (i >= s.size())
 					return std::nullopt;
 
-				// [핵심 #2] 현 버전은 값으로 "문자열/숫자/불리언"만 허용
+				// [í•µì‹¬ #2] í˜„ ë²„ì „ì€ ê°'ìœ¼ë¡œ "ë¬¸ìžì—´/ìˆ«ìž/ë¶ˆë¦¬ì–¸"ë§Œ í—ˆìš©
 				if (s[i] == '"') {
 					std::string v;
 					if (!parse_string(s, i, v))
@@ -127,8 +127,8 @@ namespace DPApp {
 					obj.emplace(std::move(key), JsonValue{ d });
 				}
 				else if (s[i] == '{') {
-					/// 재귀 호출(parse_object(..., depth+1))을 하지 않으므로
-					/// 실제로는 depth가 0에서 증가할 일이 없음
+					/// ìž¬ê·€ í˜¸ì¶œ(parse_object(..., depth+1))ì„ í•˜ì§€ ì•Šìœ¼ë¯€ë¡œ
+					/// ì‹¤ì œë¡œëŠ" depthê°€ 0ì—ì„œ ì¦ê°€í•  ì¼ì´ ì—†ìŒ
 					return std::nullopt;
 				}
 				else {
@@ -139,9 +139,9 @@ namespace DPApp {
 				}
 
 				skip_ws(s, i);
-				if (i < s.size() && s[i] == ',') { ++i; continue; } // 다음 KV쌍
-				if (i < s.size() && s[i] == '}') { ++i; break; }    // 객체 종료
-				if (i >= s.size()) return std::nullopt;             // 잘못된 종료
+				if (i < s.size() && s[i] == ',') { ++i; continue; } // ë‹¤ìŒ KVìŒ
+				if (i < s.size() && s[i] == '}') { ++i; break; }    // ê°ì²´ ì¢…ë£Œ
+				if (i >= s.size()) return std::nullopt;             // ìž˜ëª»ëœ ì¢…ë£Œ
 			}
 			return obj;
 		}
