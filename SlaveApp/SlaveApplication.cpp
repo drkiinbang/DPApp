@@ -628,14 +628,12 @@ private:
     }
 
     void registerCustomProcessors() {
-        /// registerCustomProcessors는 이런 경우에 :
-        /// 
-        /// 특정 프로젝트나 클라이언트만을 위한 특수 알고리즘
-        ///     설정 파일이나 명령행 옵션에 따라 달라지는 기능
-        ///     실험적이거나 임시적인 기능
-        ///     외부 라이브러리나 하드웨어에 의존하는 기능
-        /// Compare to PointCloudProcessors in TaskManager.h
-
+        /// registerCustomProcessors :
+        /// Compared to PointCloudProcessors in TaskManager.h
+        /// Custom processor for a specific client
+        /// 설정 파일이나 명령행 옵션에 따라 처리과정이 달라짐
+        ///  외부 라이브러리나 하드웨어에 의존하는 기능 추가 가능
+        
         ILOG << "Registering custom point cloud processors...";
 
         /// 필요한 경우 커스텀 프로세서 등록
@@ -722,126 +720,6 @@ private:
                 catch (const std::exception& e) {
                     result.success = false;
                     result.error_message = "Outlier filter error: " + std::string(e.what());
-                }
-
-                return result;
-            });
-
-        // 2. 복셀 그리드 다운샘플링
-        task_processor_->registerProcessor(TaskType::VOXEL_DOWNSAMPLE,
-            [](const ProcessingTask& task, const PointCloudChunk& chunk) -> ProcessingResult {
-                ProcessingResult result;
-                result.task_id = task.task_id;
-                result.chunk_id = task.chunk_id;
-                result.success = true;
-
-                try {
-                    const double voxel_size = 0.1; // 복셀 크기
-                    std::map<std::tuple<int, int, int>, std::vector<Point3D>> voxel_map;
-
-                    // 각 점을 복셀에 할당
-                    for (const auto& point : chunk.points) {
-                        int vx = static_cast<int>(std::floor(point.x / voxel_size));
-                        int vy = static_cast<int>(std::floor(point.y / voxel_size));
-                        int vz = static_cast<int>(std::floor(point.z / voxel_size));
-
-                        voxel_map[std::make_tuple(vx, vy, vz)].push_back(point);
-                    }
-
-                    // 각 복셀의 중심점으로 다운샘플링
-                    std::vector<Point3D> downsampled_points;
-                    for (const auto& voxel_pair : voxel_map) {
-                        const auto& points_in_voxel = voxel_pair.second;
-
-                        Point3D centroid(0, 0, 0);
-                        for (const auto& p : points_in_voxel) {
-                            centroid.x += p.x;
-                            centroid.y += p.y;
-                            centroid.z += p.z;
-                        }
-                        centroid.x /= points_in_voxel.size();
-                        centroid.y /= points_in_voxel.size();
-                        centroid.z /= points_in_voxel.size();
-
-                        downsampled_points.push_back(centroid);
-                    }
-
-                    result.processed_points = downsampled_points;
-                }
-                catch (const std::exception& e) {
-                    result.success = false;
-                    result.error_message = "Voxel downsample error: " + std::string(e.what());
-                }
-
-                return result;
-            });
-
-        // 3. 평면 세그멘테이션 (RANSAC 기반)
-        task_processor_->registerProcessor(TaskType::PLANE_SEGMENTATION,
-            [](const ProcessingTask& task, const PointCloudChunk& chunk) -> ProcessingResult {
-                ProcessingResult result;
-                result.task_id = task.task_id;
-                result.chunk_id = task.chunk_id;
-                result.success = true;
-
-                try {
-                    if (chunk.points.size() < 3) {
-                        result.processed_points = chunk.points;
-                        return result;
-                    }
-
-                    const int max_iterations = 1000;
-                    const double distance_threshold = 0.02;
-                    const int min_inliers = static_cast<int>(chunk.points.size() * 0.1); // 최소 10%
-
-                    std::vector<Point3D> best_inliers;
-                    std::random_device rd;
-                    std::mt19937 gen(rd());
-                    std::uniform_int_distribution<> dis(0, static_cast<int>(chunk.points.size() - 1));
-
-                    for (int iter = 0; iter < max_iterations; ++iter) {
-                        // 랜덤하게 3개 점 선택하여 평면 방정식 구성
-                        std::set<int> selected_indices;
-                        while (selected_indices.size() < 3) {
-                            selected_indices.insert(dis(gen));
-                        }
-
-                        std::vector<int> indices(selected_indices.begin(), selected_indices.end());
-
-                        const Point3D& p1 = chunk.points[indices[0]];
-                        const Point3D& p2 = chunk.points[indices[1]];
-                        const Point3D& p3 = chunk.points[indices[2]];
-
-                        // 평면 법선 벡터 계산 (외적)
-                        double nx = (p2.y - p1.y) * (p3.z - p1.z) - (p2.z - p1.z) * (p3.y - p1.y);
-                        double ny = (p2.z - p1.z) * (p3.x - p1.x) - (p2.x - p1.x) * (p3.z - p1.z);
-                        double nz = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
-
-                        double norm = std::sqrt(nx * nx + ny * ny + nz * nz);
-                        if (norm < 1e-6) continue; // 퇴화된 경우 건너뛰기
-
-                        nx /= norm; ny /= norm; nz /= norm;
-                        double d = -(nx * p1.x + ny * p1.y + nz * p1.z);
-
-                        // 인라이어 계산
-                        std::vector<Point3D> inliers;
-                        for (const auto& point : chunk.points) {
-                            double distance = std::abs(nx * point.x + ny * point.y + nz * point.z + d);
-                            if (distance < distance_threshold) {
-                                inliers.push_back(point);
-                            }
-                        }
-
-                        if (inliers.size() > best_inliers.size() && inliers.size() >= min_inliers) {
-                            best_inliers = inliers;
-                        }
-                    }
-
-                    result.processed_points = best_inliers;
-                }
-                catch (const std::exception& e) {
-                    result.success = false;
-                    result.error_message = "Plane segmentation error: " + std::string(e.what());
                 }
 
                 return result;

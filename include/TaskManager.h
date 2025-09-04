@@ -1224,13 +1224,7 @@ namespace DPApp {
     TaskProcessor::TaskProcessor()
         : processed_task_count_(0), failed_task_count_(0), avg_processing_time_(0.0) {
 
-        // ê¸°ë³¸ í"„ë¡œì„¸ì„œë"¤ ë"±ë¡
         registerProcessor(TaskType::FILTER, PointCloudProcessors::filterPoints);
-        registerProcessor(TaskType::CLASSIFY, PointCloudProcessors::classifyPoints);
-        registerProcessor(TaskType::ESTIMATE_NORMALS, PointCloudProcessors::estimateNormals);
-        registerProcessor(TaskType::REMOVE_OUTLIERS, PointCloudProcessors::removeOutliers);
-        registerProcessor(TaskType::DOWNSAMPLE, PointCloudProcessors::downsample);
-
         /// BIM to PTS
         registerProcessor(TaskType::BIM_DISTANCE_CALCULATION, PointCloudProcessors::calculateBIMDistance);
 
