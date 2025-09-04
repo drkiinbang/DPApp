@@ -1,0 +1,299 @@
+<svg viewBox="0 0 1400 1800" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .title { font-family: Arial, sans-serif; font-size: 20px; font-weight: bold; fill: #2c3e50; }
+      .subtitle { font-family: Arial, sans-serif; font-size: 14px; font-weight: bold; fill: #34495e; }
+      .text { font-family: Arial, sans-serif; font-size: 11px; fill: #2c3e50; }
+      .small-text { font-family: Arial, sans-serif; font-size: 9px; fill: #7f8c8d; }
+      .phase-text { font-family: Arial, sans-serif; font-size: 12px; font-weight: bold; fill: #8e44ad; }
+      .entity-box { fill: #3498db; stroke: #2980b9; stroke-width: 2; }
+      .slave-box { fill: #e74c3c; stroke: #c0392b; stroke-width: 2; }
+      .lifeline { stroke: #bdc3c7; stroke-width: 2; stroke-dasharray: 5,5; }
+      .message-arrow { fill: none; stroke: #2c3e50; stroke-width: 1.5; marker-end: url(#arrow); }
+      .handshake-arrow { fill: none; stroke: #9b59b6; stroke-width: 2; marker-end: url(#arrow); }
+      .task-arrow { fill: none; stroke: #27ae60; stroke-width: 2; marker-end: url(#arrow); }
+      .result-arrow { fill: none; stroke: #e67e22; stroke-width: 2; marker-end: url(#arrow); }
+      .heartbeat-arrow { fill: none; stroke: #f39c12; stroke-width: 1; marker-end: url(#arrow); }
+      .shutdown-arrow { fill: none; stroke: #e74c3c; stroke-width: 2; marker-end: url(#arrow); }
+      .phase-bg { fill: #ecf0f1; stroke: #bdc3c7; stroke-width: 1; opacity: 0.5; }
+      .activation { fill: #3498db; opacity: 0.3; stroke: #2980b9; stroke-width: 1; }
+    </style>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#2c3e50" />
+    </marker>
+  </defs>
+  
+  <!-- Title -->
+  <text x="700" y="30" text-anchor="middle" class="title">Master-Slave 통신 시퀀스</text>
+  
+  <!-- Entities -->
+  <rect x="50" y="60" width="120" height="40" rx="5" class="entity-box"/>
+  <text x="110" y="85" text-anchor="middle" class="text" fill="white">MasterApp</text>
+  
+  <rect x="200" y="60" width="120" height="40" rx="5" class="entity-box"/>
+  <text x="260" y="85" text-anchor="middle" class="text" fill="white">NetworkServer</text>
+  
+  <rect x="350" y="60" width="120" height="40" rx="5" class="entity-box"/>
+  <text x="410" y="85" text-anchor="middle" class="text" fill="white">TaskManager</text>
+  
+  <rect x="500" y="60" width="120" height="40" rx="5" class="slave-box"/>
+  <text x="560" y="85" text-anchor="middle" class="text" fill="white">Slave-1</text>
+  
+  <rect x="650" y="60" width="120" height="40" rx="5" class="slave-box"/>
+  <text x="710" y="85" text-anchor="middle" class="text" fill="white">Slave-2</text>
+  
+  <rect x="800" y="60" width="120" height="40" rx="5" class="slave-box"/>
+  <text x="860" y="85" text-anchor="middle" class="text" fill="white">Slave-N</text>
+  
+  <rect x="980" y="60" width="120" height="40" rx="5" class="entity-box"/>
+  <text x="1040" y="85" text-anchor="middle" class="text" fill="white">REST API</text>
+  
+  <rect x="1130" y="60" width="120" height="40" rx="5" class="entity-box"/>
+  <text x="1190" y="85" text-anchor="middle" class="text" fill="white">Client/User</text>
+  
+  <!-- Lifelines -->
+  <line x1="110" y1="100" x2="110" y2="1750" class="lifeline"/>
+  <line x1="260" y1="100" x2="260" y2="1750" class="lifeline"/>
+  <line x1="410" y1="100" x2="410" y2="1750" class="lifeline"/>
+  <line x1="560" y1="100" x2="560" y2="1750" class="lifeline"/>
+  <line x1="710" y1="100" x2="710" y2="1750" class="lifeline"/>
+  <line x1="860" y1="100" x2="860" y2="1750" class="lifeline"/>
+  <line x1="1040" y1="100" x2="1040" y2="1750" class="lifeline"/>
+  <line x1="1190" y1="100" x2="1190" y2="1750" class="lifeline"/>
+  
+  <!-- Phase 1: System Initialization -->
+  <rect x="30" y="120" width="1220" height="180" rx="5" class="phase-bg"/>
+  <text x="640" y="140" text-anchor="middle" class="phase-text">Phase 1: 시스템 초기화</text>
+  
+  <!-- Master starts -->
+  <rect x="105" y="160" width="10" height="20" class="activation"/>
+  <path d="M 115 170 L 255 170" class="message-arrow"/>
+  <text x="185" y="165" text-anchor="middle" class="text">start(port=8080)</text>
+  
+  <rect x="255" y="160" width="10" height="40" class="activation"/>
+  <path d="M 265 180 L 405 180" class="message-arrow"/>
+  <text x="335" y="175" text-anchor="middle" class="text">initialize()</text>
+  
+  <rect x="405" y="160" width="10" height="60" class="activation"/>
+  <path d="M 115 200 L 1035 200" class="message-arrow"/>
+  <text x="575" y="195" text-anchor="middle" class="text">startRestApiServer(port=8081)</text>
+  
+  <rect x="1035" y="190" width="10" height="20" class="activation"/>
+  <path d="M 1045 210 L 115 210" class="message-arrow"/>
+  <text x="580" y="225" text-anchor="middle" class="text">system ready</text>
+  
+  <text x="70" y="250" class="small-text">Master가 NetworkServer와 TaskManager 초기화</text>
+  <text x="70" y="265" class="small-text">REST API 서버 시작 (포트 8081)</text>
+  <text x="70" y="280" class="small-text">Background threads 시작 (assignment, status, timeout)</text>
+  
+  <!-- Phase 2: Slave Connection -->
+  <rect x="30" y="320" width="1220" height="220" rx="5" class="phase-bg"/>
+  <text x="640" y="340" text-anchor="middle" class="phase-text">Phase 2: Slave 연결 및 등록</text>
+  
+  <!-- Slave connections -->
+  <rect x="555" y="360" width="10" height="40" class="activation"/>
+  <path d="M 565 370 L 255 370" class="handshake-arrow"/>
+  <text x="410" y="365" text-anchor="middle" class="text">connect(localhost:8080)</text>
+  
+  <rect x="255" y="360" width="10" height="80" class="activation"/>
+  <path d="M 255 390 L 565 390" class="handshake-arrow"/>
+  <text x="410" y="385" text-anchor="middle" class="text">HANDSHAKE</text>
+  <text x="410" y="398" text-anchor="middle" class="small-text">slave_id: slave_abc123</text>
+  
+  <path d="M 565 410 L 255 410" class="handshake-arrow"/>
+  <text x="410" y="405" text-anchor="middle" class="text">SLAVE_REGISTER</text>
+  
+  <path d="M 255 430 L 405 430" class="message-arrow"/>
+  <text x="330" y="425" text-anchor="middle" class="text">registerSlave()</text>
+  
+  <rect x="405" y="420" width="10" height="20" class="activation"/>
+  
+  <!-- Similar for other slaves -->
+  <rect x="705" y="460" width="10" height="40" class="activation"/>
+  <path d="M 715 470 L 255 470" class="handshake-arrow"/>
+  <text x="485" y="465" text-anchor="middle" class="text">connect + register</text>
+  
+  <rect x="855" y="480" width="10" height="40" class="activation"/>
+  <path d="M 865 490 L 255 490" class="handshake-arrow"/>
+  <text x="560" y="485" text-anchor="middle" class="text">connect + register</text>
+  
+  <text x="70" y="520" class="small-text">각 Slave가 Master에 TCP 연결</text>
+  <text x="70" y="535" class="small-text">HANDSHAKE로 slave_id 교환</text>
+  <text x="70" y="550" text-anchor="start" class="small-text">SLAVE_REGISTER로 TaskManager에 등록</text>
+  
+  <!-- Phase 3: Task Processing -->
+  <rect x="30" y="580" width="1220" height="400" rx="5" class="phase-bg"/>
+  <text x="640" y="600" text-anchor="middle" class="phase-text">Phase 3: 작업 처리</text>
+  
+  <!-- User loads point cloud -->
+  <rect x="1185" y="620" width="10" height="20" class="activation"/>
+  <path d="M 1185 630 L 1035 630" class="message-arrow"/>
+  <text x="1110" y="625" text-anchor="middle" class="text">POST /api/files/load</text>
+  
+  <rect x="1035" y="620" width="10" height="40" class="activation"/>
+  <path d="M 1035 640 L 105 640" class="message-arrow"/>
+  <text x="570" y="635" text-anchor="middle" class="text">loadAndProcessPointCloud()</text>
+  
+  <rect x="105" y="630" width="10" height="60" class="activation"/>
+  <path d="M 115 660 L 405 660" class="message-arrow"/>
+  <text x="260" y="655" text-anchor="middle" class="text">addTask() x N chunks</text>
+  
+  <rect x="405" y="650" width="10" height="120" class="activation"/>
+  <text x="70" y="690" class="small-text">Point Cloud 파일을 청크로 분할</text>
+  <text x="70" y="705" class="small-text">각 청크마다 Task 생성</text>
+  
+  <!-- Task assignment loop -->
+  <path d="M 415 720 L 415 730" class="task-arrow"/>
+  <path d="M 415 730 L 255 730" class="message-arrow"/>
+  <text x="335" y="725" text-anchor="middle" class="text">assignTasksToSlaves()</text>
+  
+  <rect x="255" y="720" width="10" height="100" class="activation"/>
+  <path d="M 265 750 L 555 750" class="task-arrow"/>
+  <text x="410" y="745" text-anchor="middle" class="text">TASK_ASSIGNMENT</text>
+  <text x="410" y="758" text-anchor="middle" class="small-text">task_id, chunk_data, parameters</text>
+  
+  <path d="M 265 770 L 705 770" class="task-arrow"/>
+  <text x="485" y="765" text-anchor="middle" class="text">TASK_ASSIGNMENT</text>
+  
+  <path d="M 265 790 L 855 790" class="task-arrow"/>
+  <text x="560" y="785" text-anchor="middle" class="text">TASK_ASSIGNMENT</text>
+  
+  <!-- Task processing -->
+  <rect x="555" y="750" width="10" height="80" class="activation"/>
+  <rect x="705" y="770" width="10" height="60" class="activation"/>
+  <rect x="855" y="790" width="10" height="40" class="activation"/>
+  
+  <text x="600" y="775" class="small-text">processTask()</text>
+  <text x="600" y="788" class="small-text">Filter/Classify</text>
+  <text x="600" y="801" class="small-text">BIM Distance</text>
+  <text x="600" y="814" class="small-text">Custom processors</text>
+  
+  <!-- Results back -->
+  <path d="M 555 830 L 255 830" class="result-arrow"/>
+  <text x="405" y="825" text-anchor="middle" class="text">TASK_RESULT</text>
+  <text x="405" y="838" text-anchor="middle" class="small-text">success, processed_points</text>
+  
+  <path d="M 705 850 L 255 850" class="result-arrow"/>
+  <text x="480" y="845" text-anchor="middle" class="text">TASK_RESULT</text>
+  
+  <path d="M 855 870 L 255 870" class="result-arrow"/>
+  <text x="555" y="865" text-anchor="middle" class="text">TASK_RESULT</text>
+  
+  <path d="M 255 890 L 405 890" class="message-arrow"/>
+  <text x="330" y="885" text-anchor="middle" class="text">completeTask()</text>
+  
+  <text x="70" y="920" class="small-text">TaskManager가 Load Balance 전략으로 작업 할당</text>
+  <text x="70" y="935" class="small-text">각 Slave가 병렬로 TaskProcessor 실행</text>
+  <text x="70" y="950" class="small-text">결과를 Master로 전송하여 병합</text>
+  <text x="70" y="965" class="small-text">진행 상황을 실시간 모니터링</text>
+  
+  <!-- Phase 4: Monitoring -->
+  <rect x="30" y="1000" width="1220" height="180" rx="5" class="phase-bg"/>
+  <text x="640" y="1020" text-anchor="middle" class="phase-text">Phase 4: 상태 모니터링</text>
+  
+  <!-- Heartbeat -->
+  <path d="M 560 1050 L 260 1050" class="heartbeat-arrow"/>
+  <text x="410" y="1045" text-anchor="middle" class="text">HEARTBEAT (every 10s)</text>
+  
+  <path d="M 710 1070 L 260 1070" class="heartbeat-arrow"/>
+  <text x="485" y="1065" text-anchor="middle" class="text">HEARTBEAT</text>
+  
+  <path d="M 860 1090 L 260 1090" class="heartbeat-arrow"/>
+  <text x="560" y="1085" text-anchor="middle" class="text">HEARTBEAT</text>
+  
+  <!-- Status check -->
+  <path d="M 260 1110 L 410 1110" class="message-arrow"/>
+  <text x="335" y="1105" text-anchor="middle" class="text">updateSlaveHeartbeat()</text>
+  
+  <!-- API status -->
+  <path d="M 1190 1130 L 1040 1130" class="message-arrow"/>
+  <text x="1115" y="1125" text-anchor="middle" class="text">GET /api/status</text>
+  
+  <path d="M 1040 1150 L 410 1150" class="message-arrow"/>
+  <text x="725" y="1145" text-anchor="middle" class="text">getOverallProgress()</text>
+  
+  <text x="70" y="1170" class="small-text">30초 heartbeat timeout 체크</text>
+  
+  <!-- Phase 5: Error Handling -->
+  <rect x="30" y="1200" width="1220" height="160" rx="5" class="phase-bg"/>
+  <text x="640" y="1220" text-anchor="middle" class="phase-text">Phase 5: 오류 처리 및 복구</text>
+  
+  <!-- Timeout scenario -->
+  <path d="M 410 1250 L 410 1260" class="message-arrow"/>
+  <text x="450" y="1255" class="small-text">checkTimeouts()</text>
+  
+  <path d="M 410 1270 L 260 1270" class="message-arrow"/>
+  <text x="335" y="1265" text-anchor="middle" class="text">disconnectClient(timeout)</text>
+  
+  <path d="M 410 1290 L 410 1300" class="message-arrow"/>
+  <text x="450" y="1295" class="small-text">failTask() + reassign</text>
+  
+  <text x="70" y="1320" class="small-text">3000초 task timeout 체크</text>
+  <text x="70" y="1335" class="small-text">실패한 작업은 최대 3회 재시도</text>
+  <text x="70" y="1350" class="small-text">Slave 연결 끊어지면 작업 재할당</text>
+  
+  <!-- Phase 6: System Shutdown -->
+  <rect x="30" y="1380" width="1220" height="200" rx="5" class="phase-bg"/>
+  <text x="640" y="1400" text-anchor="middle" class="phase-text">Phase 6: 시스템 종료</text>
+  
+  <!-- User shutdown -->
+  <path d="M 1190 1430 L 1040 1430" class="message-arrow"/>
+  <text x="1115" y="1425" text-anchor="middle" class="text">POST /api/shutdown</text>
+  
+  <path d="M 1040 1450 L 110 1450" class="shutdown-arrow"/>
+  <text x="575" y="1445" text-anchor="middle" class="text">stop()</text>
+  
+  <!-- Shutdown slaves -->
+  <path d="M 260 1470 L 560 1470" class="shutdown-arrow"/>
+  <text x="410" y="1465" text-anchor="middle" class="text">SHUTDOWN</text>
+  
+  <path d="M 260 1490 L 710 1490" class="shutdown-arrow"/>
+  <text x="485" y="1485" text-anchor="middle" class="text">SHUTDOWN</text>
+  
+  <path d="M 260 1510 L 860 1510" class="shutdown-arrow"/>
+  <text x="560" y="1505" text-anchor="middle" class="text">SHUTDOWN</text>
+  
+  <!-- Cleanup -->
+  <path d="M 560 1530 L 260 1530" class="message-arrow"/>
+  <text x="410" y="1525" text-anchor="middle" class="text">SLAVE_UNREGISTER</text>
+  
+  <path d="M 710 1540 L 260 1540" class="message-arrow"/>
+  <text x="485" y="1535" text-anchor="middle" class="text">disconnect</text>
+  
+  <path d="M 860 1550 L 260 1550" class="message-arrow"/>
+  <text x="560" y="1545" text-anchor="middle" class="text">disconnect</text>
+  
+  <text x="70" y="1570" class="small-text">모든 Slave에게 SHUTDOWN 메시지 전송</text>
+  <text x="70" y="1585" text-anchor="start" class="small-text">진행중인 작업 완료 대기 (최대 30초)</text>
+  
+  <!-- Final status -->
+  <rect x="30" y="1600" width="1220" height="120" rx="5" fill="#d5dbdb" stroke="#85929e" stroke-width="1" opacity="0.7"/>
+  <text x="640" y="1625" text-anchor="middle" class="phase-text">시스템 종료 완료</text>
+  
+  <text x="70" y="1650" class="text">모든 네트워크 연결 정리</text>
+  <text x="70" y="1665" class="text">ThreadPool 및 백그라운드 스레드 종료</text>
+  <text x="70" y="1680" class="text">소켓 및 파일 핸들 해제</text>
+  <text x="70" y="1695" class="text">로그 파일 정리 및 종료</text>
+  
+  <!-- Legend -->
+  <rect x="50" y="1740" width="600" height="50" fill="#f8f9fa" stroke="#dee2e6" stroke-width="1"/>
+  <text x="70" y="1760" class="subtitle">메시지 타입별 색상</text>
+  
+  <line x1="70" y1="1770" x2="100" y2="1770" class="handshake-arrow"/>
+  <text x="110" y="1775" class="small-text">연결/등록</text>
+  
+  <line x1="170" y1="1770" x2="200" y2="1770" class="task-arrow"/>
+  <text x="210" y="1775" class="small-text">작업 할당</text>
+  
+  <line x1="270" y1="1770" x2="300" y2="1770" class="result-arrow"/>
+  <text x="310" y="1775" class="small-text">결과 전송</text>
+  
+  <line x1="370" y1="1770" x2="400" y2="1770" class="heartbeat-arrow"/>
+  <text x="410" y="1775" class="small-text">상태 확인</text>
+  
+  <line x1="470" y1="1770" x2="500" y2="1770" class="shutdown-arrow"/>
+  <text x="510" y="1775" class="small-text">시스템 종료</text>
+  
+  <line x1="580" y1="1770" x2="610" y2="1770" class="message-arrow"/>
+  <text x="620" y="1775" class="small-text">내부 호출</text>
+</svg>

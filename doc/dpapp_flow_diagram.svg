@@ -1,0 +1,275 @@
+<svg viewBox="0 0 1400 1000" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .title { font-family: Arial, sans-serif; font-size: 20px; font-weight: bold; fill: #2c3e50; }
+      .subtitle { font-family: Arial, sans-serif; font-size: 14px; font-weight: bold; fill: #34495e; }
+      .text { font-family: Arial, sans-serif; font-size: 12px; fill: #2c3e50; }
+      .small-text { font-family: Arial, sans-serif; font-size: 10px; fill: #7f8c8d; }
+      .master-box { fill: #3498db; stroke: #2980b9; stroke-width: 2; }
+      .slave-box { fill: #e74c3c; stroke: #c0392b; stroke-width: 2; }
+      .component-box { fill: #f8f9fa; stroke: #6c757d; stroke-width: 1.5; }
+      .data-box { fill: #2ecc71; stroke: #27ae60; stroke-width: 2; }
+      .api-box { fill: #f39c12; stroke: #e67e22; stroke-width: 2; }
+      .arrow { fill: none; stroke: #34495e; stroke-width: 2; marker-end: url(#arrowhead); }
+      .data-arrow { fill: none; stroke: #27ae60; stroke-width: 2; marker-end: url(#arrowhead); }
+      .api-arrow { fill: none; stroke: #f39c12; stroke-width: 2; marker-end: url(#arrowhead); }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#34495e" />
+    </marker>
+  </defs>
+  
+  <!-- Title -->
+  <text x="700" y="30" text-anchor="middle" class="title">DPApp 분산 Point Cloud 처리 시스템</text>
+  
+  <!-- Master Server Section -->
+  <rect x="50" y="80" width="500" height="350" rx="10" class="master-box" opacity="0.1"/>
+  <text x="300" y="105" text-anchor="middle" class="subtitle" fill="#2980b9">Master Server (Port 8080)</text>
+  
+  <!-- Master Components -->
+  <rect x="70" y="120" width="150" height="60" rx="5" class="component-box"/>
+  <text x="145" y="140" text-anchor="middle" class="text">MasterApplication</text>
+  <text x="145" y="155" text-anchor="middle" class="small-text">- 시스템 전체 제어</text>
+  <text x="145" y="168" text-anchor="middle" class="small-text">- 설정 관리</text>
+  
+  <rect x="240" y="120" width="130" height="60" rx="5" class="component-box"/>
+  <text x="305" y="140" text-anchor="middle" class="text">NetworkServer</text>
+  <text x="305" y="155" text-anchor="middle" class="small-text">- Slave 연결 관리</text>
+  <text x="305" y="168" text-anchor="middle" class="small-text">- 메시지 송수신</text>
+  
+  <rect x="390" y="120" width="130" height="60" rx="5" class="component-box"/>
+  <text x="455" y="140" text-anchor="middle" class="text">TaskManager</text>
+  <text x="455" y="155" text-anchor="middle" class="small-text">- 작업 분산</text>
+  <text x="455" y="168" text-anchor="middle" class="small-text">- 결과 수집</text>
+  
+  <!-- REST API -->
+  <rect x="240" y="200" width="130" height="60" rx="5" class="api-box"/>
+  <text x="305" y="220" text-anchor="middle" class="text" fill="white">REST API Server</text>
+  <text x="305" y="235" text-anchor="middle" class="small-text" fill="white">Port 8081</text>
+  <text x="305" y="248" text-anchor="middle" class="small-text" fill="white">- 상태 조회</text>
+  
+  <!-- Background Threads -->
+  <rect x="70" y="280" width="200" height="80" rx="5" class="component-box"/>
+  <text x="170" y="300" text-anchor="middle" class="text">Background Threads</text>
+  <text x="170" y="318" text-anchor="middle" class="small-text">• Task Assignment Loop</text>
+  <text x="170" y="331" text-anchor="middle" class="small-text">• Status Report Loop</text>
+  <text x="170" y="344" text-anchor="middle" class="small-text">• Timeout Check Loop</text>
+  
+  <!-- Data Processing -->
+  <rect x="290" y="280" width="200" height="80" rx="5" class="data-box"/>
+  <text x="390" y="300" text-anchor="middle" class="text" fill="white">Point Cloud Processing</text>
+  <text x="390" y="318" text-anchor="middle" class="small-text" fill="white">• 파일 로드</text>
+  <text x="390" y="331" text-anchor="middle" class="small-text" fill="white">• 청크 분할</text>
+  <text x="390" y="344" text-anchor="middle" class="small-text" fill="white">• 결과 병합</text>
+  
+  <!-- Slave Workers Section -->
+  <rect x="650" y="80" width="500" height="350" rx="10" class="slave-box" opacity="0.1"/>
+  <text x="900" y="105" text-anchor="middle" class="subtitle" fill="#c0392b">Slave Workers</text>
+  
+  <!-- Slave 1 -->
+  <rect x="670" y="130" width="140" height="100" rx="5" class="component-box"/>
+  <text x="740" y="150" text-anchor="middle" class="text">SlaveApplication</text>
+  <text x="740" y="165" text-anchor="middle" class="small-text">ID: slave_001</text>
+  <rect x="675" y="175" width="130" height="25" rx="3" fill="#ecf0f1" stroke="#bdc3c7"/>
+  <text x="740" y="190" text-anchor="middle" class="small-text">NetworkClient</text>
+  <rect x="675" y="205" width="130" height="20" rx="3" fill="#ecf0f1" stroke="#bdc3c7"/>
+  <text x="740" y="218" text-anchor="middle" class="small-text">TaskProcessor</text>
+  
+  <!-- Slave 2 -->
+  <rect x="830" y="130" width="140" height="100" rx="5" class="component-box"/>
+  <text x="900" y="150" text-anchor="middle" class="text">SlaveApplication</text>
+  <text x="900" y="165" text-anchor="middle" class="small-text">ID: slave_002</text>
+  <rect x="835" y="175" width="130" height="25" rx="3" fill="#ecf0f1" stroke="#bdc3c7"/>
+  <text x="900" y="190" text-anchor="middle" class="small-text">NetworkClient</text>
+  <rect x="835" y="205" width="130" height="20" rx="3" fill="#ecf0f1" stroke="#bdc3c7"/>
+  <text x="900" y="218" text-anchor="middle" class="small-text">TaskProcessor</text>
+  
+  <!-- Slave N -->
+  <rect x="990" y="130" width="140" height="100" rx="5" class="component-box"/>
+  <text x="1060" y="150" text-anchor="middle" class="text">SlaveApplication</text>
+  <text x="1060" y="165" text-anchor="middle" class="small-text">ID: slave_N</text>
+  <rect x="995" y="175" width="130" height="25" rx="3" fill="#ecf0f1" stroke="#bdc3c7"/>
+  <text x="1060" y="190" text-anchor="middle" class="small-text">NetworkClient</text>
+  <rect x="995" y="205" width="130" height="20" rx="3" fill="#ecf0f1" stroke="#bdc3c7"/>
+  <text x="1060" y="218" text-anchor="middle" class="small-text">TaskProcessor</text>
+  
+  <!-- Processing Types -->
+  <rect x="670" y="250" width="300" height="80" rx="5" class="component-box"/>
+  <text x="820" y="270" text-anchor="middle" class="text">Point Cloud Processors</text>
+  <text x="720" y="288" text-anchor="middle" class="small-text">• Filter • Classify • Normals</text>
+  <text x="720" y="301" text-anchor="middle" class="small-text">• Outliers • Downsample</text>
+  <text x="920" y="288" text-anchor="middle" class="small-text">• BIM Distance</text>
+  <text x="920" y="301" text-anchor="middle" class="small-text">• Custom Processors</text>
+  
+  <!-- Data Flow Section -->
+  <text x="700" y="480" text-anchor="middle" class="subtitle">데이터 처리 흐름</text>
+  
+  <!-- Data Flow Steps -->
+  <rect x="50" y="500" width="120" height="60" rx="5" class="data-box"/>
+  <text x="110" y="520" text-anchor="middle" class="text" fill="white">1. Point Cloud</text>
+  <text x="110" y="535" text-anchor="middle" class="text" fill="white">파일 로드</text>
+  <text x="110" y="548" text-anchor="middle" class="small-text" fill="white">.las, .ply, .xyz</text>
+  
+  <rect x="200" y="500" width="120" height="60" rx="5" class="data-box"/>
+  <text x="260" y="520" text-anchor="middle" class="text" fill="white">2. 청크 분할</text>
+  <text x="260" y="535" text-anchor="middle" class="small-text" fill="white">max_points</text>
+  <text x="260" y="548" text-anchor="middle" class="small-text" fill="white">per_chunk</text>
+  
+  <rect x="350" y="500" width="120" height="60" rx="5" class="data-box"/>
+  <text x="410" y="520" text-anchor="middle" class="text" fill="white">3. Task 생성</text>
+  <text x="410" y="535" text-anchor="middle" class="small-text" fill="white">TaskManager</text>
+  <text x="410" y="548" text-anchor="middle" class="small-text" fill="white">task_id 할당</text>
+  
+  <rect x="500" y="500" width="120" height="60" rx="5" class="data-box"/>
+  <text x="560" y="520" text-anchor="middle" class="text" fill="white">4. Slave 할당</text>
+  <text x="560" y="535" text-anchor="middle" class="small-text" fill="white">Load Balance</text>
+  <text x="560" y="548" text-anchor="middle" class="small-text" fill="white">Strategy</text>
+  
+  <rect x="650" y="500" width="120" height="60" rx="5" class="data-box"/>
+  <text x="710" y="520" text-anchor="middle" class="text" fill="white">5. 병렬 처리</text>
+  <text x="710" y="535" text-anchor="middle" class="small-text" fill="white">Processing</text>
+  <text x="710" y="548" text-anchor="middle" class="small-text" fill="white">Threads</text>
+  
+  <rect x="800" y="500" width="120" height="60" rx="5" class="data-box"/>
+  <text x="860" y="520" text-anchor="middle" class="text" fill="white">6. 결과 전송</text>
+  <text x="860" y="535" text-anchor="middle" class="small-text" fill="white">Network</text>
+  <text x="860" y="548" text-anchor="middle" class="small-text" fill="white">Message</text>
+  
+  <rect x="950" y="500" width="120" height="60" rx="5" class="data-box"/>
+  <text x="1010" y="520" text-anchor="middle" class="text" fill="white">7. 결과 병합</text>
+  <text x="1010" y="535" text-anchor="middle" class="small-text" fill="white">Master</text>
+  <text x="1010" y="548" text-anchor="middle" class="small-text" fill="white">Collection</text>
+  
+  <rect x="1100" y="500" width="120" height="60" rx="5" class="data-box"/>
+  <text x="1160" y="520" text-anchor="middle" class="text" fill="white">8. 파일 저장</text>
+  <text x="1160" y="535" text-anchor="middle" class="small-text" fill="white">Final</text>
+  <text x="1160" y="548" text-anchor="middle" class="small-text" fill="white">Output</text>
+  
+  <!-- Control Flow Section -->
+  <text x="700" y="620" text-anchor="middle" class="subtitle">제어 흐름</text>
+  
+  <!-- Client Control -->
+  <rect x="100" y="640" width="200" height="80" rx="5" class="api-box"/>
+  <text x="200" y="665" text-anchor="middle" class="text" fill="white">Client/User Interface</text>
+  <text x="200" y="680" text-anchor="middle" class="small-text" fill="white">• Console Commands</text>
+  <text x="200" y="693" text-anchor="middle" class="small-text" fill="white">• REST API Calls</text>
+  <text x="200" y="706" text-anchor="middle" class="small-text" fill="white">• Status Monitoring</text>
+  
+  <!-- System Management -->
+  <rect x="350" y="640" width="200" height="80" rx="5" class="component-box"/>
+  <text x="450" y="665" text-anchor="middle" class="text">System Management</text>
+  <text x="450" y="680" text-anchor="middle" class="small-text">• Heartbeat Monitoring</text>
+  <text x="450" y="693" text-anchor="middle" class="small-text">• Timeout Handling</text>
+  <text x="450" y="706" text-anchor="middle" class="small-text">• Error Recovery</text>
+  
+  <!-- Logging System -->
+  <rect x="600" y="640" width="200" height="80" rx="5" class="component-box"/>
+  <text x="700" y="665" text-anchor="middle" class="text">Logging System</text>
+  <text x="700" y="680" text-anchor="middle" class="small-text">• Console Output</text>
+  <text x="700" y="693" text-anchor="middle" class="small-text">• File Logging</text>
+  <text x="700" y="706" text-anchor="middle" class="small-text">• Log Levels</text>
+  
+  <!-- Configuration -->
+  <rect x="850" y="640" width="200" height="80" rx="5" class="component-box"/>
+  <text x="950" y="665" text-anchor="middle" class="text">Configuration</text>
+  <text x="950" y="680" text-anchor="middle" class="small-text">• Environment Variables</text>
+  <text x="950" y="693" text-anchor="middle" class="small-text">• Runtime Settings</text>
+  <text x="950" y="706" text-anchor="middle" class="small-text">• Thread Pool Size</text>
+  
+  <!-- Message Types -->
+  <rect x="50" y="750" width="1200" height="120" rx="5" class="component-box"/>
+  <text x="650" y="775" text-anchor="middle" class="subtitle">네트워크 메시지 타입</text>
+  
+  <text x="150" y="800" text-anchor="middle" class="text">HANDSHAKE</text>
+  <text x="150" y="815" text-anchor="middle" class="small-text">초기 연결 설정</text>
+  
+  <text x="300" y="800" text-anchor="middle" class="text">SLAVE_REGISTER</text>
+  <text x="300" y="815" text-anchor="middle" class="small-text">워커 등록</text>
+  
+  <text x="450" y="800" text-anchor="middle" class="text">TASK_ASSIGNMENT</text>
+  <text x="450" y="815" text-anchor="middle" class="small-text">작업 할당</text>
+  
+  <text x="600" y="800" text-anchor="middle" class="text">TASK_RESULT</text>
+  <text x="600" y="815" text-anchor="middle" class="small-text">결과 전송</text>
+  
+  <text x="750" y="800" text-anchor="middle" class="text">HEARTBEAT</text>
+  <text x="750" y="815" text-anchor="middle" class="small-text">상태 확인</text>
+  
+  <text x="900" y="800" text-anchor="middle" class="text">ERROR_MESSAGE</text>
+  <text x="900" y="815" text-anchor="middle" class="small-text">오류 보고</text>
+  
+  <text x="1050" y="800" text-anchor="middle" class="text">SHUTDOWN</text>
+  <text x="1050" y="815" text-anchor="middle" class="small-text">시스템 종료</text>
+  
+  <text x="150" y="840" text-anchor="middle" class="small-text">Magic: 0xDEADBEEF</text>
+  <text x="300" y="840" text-anchor="middle" class="small-text">Sequence Number</text>
+  <text x="450" y="840" text-anchor="middle" class="small-text">Data Length</text>
+  <text x="600" y="840" text-anchor="middle" class="small-text">CRC32 Checksum</text>
+  <text x="750" y="840" text-anchor="middle" class="small-text">Serialization</text>
+  <text x="900" y="840" text-anchor="middle" class="small-text">Binary Protocol</text>
+  <text x="1050" y="840" text-anchor="middle" class="small-text">TCP/IP</text>
+  
+  <!-- Arrows - Data Flow -->
+  <path d="M 170 530 L 190 530" class="data-arrow"/>
+  <path d="M 320 530 L 340 530" class="data-arrow"/>
+  <path d="M 470 530 L 490 530" class="data-arrow"/>
+  <path d="M 620 530 L 640 530" class="data-arrow"/>
+  <path d="M 770 530 L 790 530" class="data-arrow"/>
+  <path d="M 920 530 L 940 530" class="data-arrow"/>
+  <path d="M 1070 530 L 1090 530" class="data-arrow"/>
+  
+  <!-- Arrows - Network Communication -->
+  <path d="M 370 150 L 660 180" class="arrow"/>
+  <text x="515" y="160" text-anchor="middle" class="small-text">Task Assignment</text>
+  
+  <path d="M 680 200 L 380 170" class="arrow"/>
+  <text x="530" y="190" text-anchor="middle" class="small-text">Results</text>
+  
+  <!-- Arrows - API Control -->
+  <path d="M 300 680 L 340 680" class="api-arrow"/>
+  <path d="M 200 640 L 300 200" class="api-arrow"/>
+  <text x="220" y="420" text-anchor="middle" class="small-text" fill="#f39c12">REST API</text>
+  
+  <!-- Status indicators -->
+  <circle cx="550" cy="150" r="8" fill="#2ecc71"/>
+  <text x="550" y="155" text-anchor="middle" class="small-text" fill="white">ON</text>
+  
+  <circle cx="870" cy="150" r="8" fill="#2ecc71"/>
+  <text x="870" y="155" text-anchor="middle" class="small-text" fill="white">ON</text>
+  
+  <circle cx="1030" cy="150" r="8" fill="#2ecc71"/>
+  <text x="1030" y="155" text-anchor="middle" class="small-text" fill="white">ON</text>
+  
+  <!-- Performance Stats -->
+  <rect x="1200" y="80" width="180" height="200" rx="5" class="component-box"/>
+  <text x="1290" y="105" text-anchor="middle" class="subtitle">시스템 성능</text>
+  <text x="1290" y="130" text-anchor="middle" class="small-text">• 활성 Slave: 3</text>
+  <text x="1290" y="145" text-anchor="middle" class="small-text">• 대기 작업: 15</text>
+  <text x="1290" y="160" text-anchor="middle" class="small-text">• 처리 중: 8</text>
+  <text x="1290" y="175" text-anchor="middle" class="small-text">• 완료: 127</text>
+  <text x="1290" y="190" text-anchor="middle" class="small-text">• 실패: 2</text>
+  <text x="1290" y="205" text-anchor="middle" class="small-text">• 성공률: 98.5%</text>
+  <text x="1290" y="220" text-anchor="middle" class="small-text">• 평균 시간: 2.3s</text>
+  <text x="1290" y="235" text-anchor="middle" class="small-text">• 전체 진행: 85%</text>
+  <text x="1290" y="250" text-anchor="middle" class="small-text">• 처리속도: 45pts/s</text>
+  <text x="1290" y="265" text-anchor="middle" class="small-text">• 메모리: 2.1GB</text>
+  
+  <!-- BIM Processing Special -->
+  <rect x="50" y="890" width="1300" height="80" rx="5" fill="#9b59b6" stroke="#8e44ad" stroke-width="2" opacity="0.1"/>
+  <text x="700" y="915" text-anchor="middle" class="subtitle" fill="#8e44ad">BIM-Point Cloud 비교 처리</text>
+  <text x="200" y="935" text-anchor="middle" class="small-text">BIM 폴더 스캔</text>
+  <text x="350" y="935" text-anchor="middle" class="small-text">GLTF/GLB 로드</text>
+  <text x="500" y="935" text-anchor="middle" class="small-text">Triangle Mesh</text>
+  <text x="650" y="935" text-anchor="middle" class="small-text">거리 계산</text>
+  <text x="800" y="935" text-anchor="middle" class="small-text">색상 코딩</text>
+  <text x="950" y="935" text-anchor="middle" class="small-text">결과 CSV</text>
+  <text x="1100" y="935" text-anchor="middle" class="small-text">Spatial Index</text>
+  
+  <text x="200" y="950" text-anchor="middle" class="small-text">자동 검색</text>
+  <text x="350" y="950" text-anchor="middle" class="small-text">3D 모델</text>
+  <text x="500" y="950" text-anchor="middle" class="small-text">생성</text>
+  <text x="650" y="950" text-anchor="middle" class="small-text">최적화</text>
+  <text x="800" y="950" text-anchor="middle" class="small-text">시각화</text>
+  <text x="950" y="950" text-anchor="middle" class="small-text">내보내기</text>
+  <text x="1100" y="950" text-anchor="middle" class="small-text">Octree</text>
+</svg>
