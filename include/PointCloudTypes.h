@@ -11,6 +11,51 @@
 
 namespace DPApp {
 
+enum class TaskType : uint8_t {
+    UNKNOWN = 0,
+    FILTER,
+    CLASSIFY,
+    ESTIMATE_NORMALS,
+    REMOVE_OUTLIERS,
+    DOWNSAMPLE,
+    BIM_DISTANCE_CALCULATION,
+    // --- 커스텀 타입 추가 ---
+    OUTLIER_FILTER,
+    VOXEL_DOWNSAMPLE,
+    PLANE_SEGMENTATION
+    };
+
+// Enum을 문자열로 변환 (로깅용)
+inline const char* taskStr(TaskType type) {
+    switch (type) {
+    case TaskType::FILTER: return "filter";
+    case TaskType::CLASSIFY: return "classify";
+    case TaskType::ESTIMATE_NORMALS: return "estimate_normals";
+    case TaskType::REMOVE_OUTLIERS: return "remove_outliers";
+    case TaskType::DOWNSAMPLE: return "downsample";
+    case TaskType::BIM_DISTANCE_CALCULATION: return "bim_distance_calculation";
+    case TaskType::OUTLIER_FILTER: return "outlier_filter";
+    case TaskType::VOXEL_DOWNSAMPLE: return "voxel_downsample";
+    case TaskType::PLANE_SEGMENTATION: return "plane_segmentation";
+    default: return "unknown";
+    }
+}
+
+// 문자열을 Enum으로 변환 (사용자 입력 처리용)
+inline TaskType strTask(const std::string& str) {
+    if (str == "filter") return TaskType::FILTER;
+    if (str == "classify") return TaskType::CLASSIFY;
+    if (str == "estimate_normals") return TaskType::ESTIMATE_NORMALS;
+    if (str == "remove_outliers") return TaskType::REMOVE_OUTLIERS;
+    if (str == "downsample") return TaskType::DOWNSAMPLE;
+    if (str == "bim_distance_calculation") return TaskType::BIM_DISTANCE_CALCULATION;
+    if (str == "outlier_filter") return TaskType::OUTLIER_FILTER;
+    if (str == "voxel_downsample") return TaskType::VOXEL_DOWNSAMPLE;
+    if (str == "plane_segmentation") return TaskType::PLANE_SEGMENTATION;
+    return TaskType::UNKNOWN;
+}
+// ==========================================================
+
 // 3D 포인트 구조체
 struct Point3D {
     double x, y, z;
@@ -79,10 +124,10 @@ struct PointCloudChunk {
 struct ProcessingTask {
     uint32_t task_id;
     uint32_t chunk_id;
-    std::string task_type;      // "filter", "classification", "normal_estimation" 등
+    TaskType task_type;      // "filter", "classification", "normal_estimation" 등
     std::vector<uint8_t> parameters; // 작업별 파라미터 (직렬화됨)
     
-    ProcessingTask() : task_id(0), chunk_id(0) {}
+    ProcessingTask() : task_id(0), chunk_id(0), task_type(TaskType::UNKNOWN) {}
 };
 
 // 처리 결과

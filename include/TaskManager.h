@@ -208,7 +208,7 @@ namespace DPApp {
     struct TaskInfo {
         uint32_t task_id;
         uint32_t chunk_id;
-        std::string task_type;
+        TaskType task_type;
         TaskPriority priority;
         TaskStatus status;
         std::string assigned_slave;
@@ -313,7 +313,7 @@ namespace DPApp {
         }
 
         // ìž'ì—… ê´€ë¦¬
-        uint32_t addTask(const std::string& task_type,
+        uint32_t addTask(TaskType task_type,
             std::shared_ptr<PointCloudChunk> chunk,
             const std::vector<uint8_t>& parameters,
             TaskPriority priority = TaskPriority::NORMAL) {
@@ -331,7 +331,7 @@ namespace DPApp {
 
             tasks_[task_id] = std::move(task_info);
 
-            std::cout << "Task added: " << task_id << " (" << task_type << ")" << std::endl;
+            std::cout << "Task added: " << task_id << " (" << taskStr(task_type) << ")" << std::endl;
 
             return task_id;
         }
@@ -517,7 +517,7 @@ namespace DPApp {
                 completed_results_.push_back(result);
 
                 // BIM ë¹„êµ ê²°ê³¼ì¸ ê²½ìš° ë³„ë„ë¡œ ì €ìž¥
-                if (task_info.task_type == "bim_distance_calculation") {
+                if (task_info.task_type == TaskType::BIM_DISTANCE_CALCULATION) {
                     std::lock_guard<std::mutex> bim_lock(bim_results_mutex_);
                     // BIM ê²°ê³¼ë¥¼ ë³„ë„ ì €ìž¥í•˜ëŠ" ë¡œì§ì€ í•„ìš"ì‹œ êµ¬í˜„
                 }
@@ -547,7 +547,8 @@ namespace DPApp {
                 std::cout << "Task " << task_id << " completed successfully" << std::endl;
             }
             else {
-                failTask(task_id, result.error_message);
+                //failTask(task_id, result.error_message);
+                failTaskInternal(task_id, result.error_message);
             }
 
             return true;
@@ -557,44 +558,7 @@ namespace DPApp {
             std::lock_guard<std::mutex> tasks_lock(tasks_mutex_);
             std::lock_guard<std::mutex> slaves_lock(slaves_mutex_);
 
-            auto task_it = tasks_.find(task_id);
-            if (task_it == tasks_.end()) {
-                return false;
-            }
-
-            TaskInfo& task_info = task_it->second;
-            task_info.retry_count++;
-
-            // ìŠ¬ë ˆì´ë¸Œ í•´ì œ
-            if (!task_info.assigned_slave.empty()) {
-                auto slave_it = slaves_.find(task_info.assigned_slave);
-                if (slave_it != slaves_.end()) {
-                    slave_it->second.is_busy = false;
-                    slave_it->second.current_task_id.clear();
-                    slave_it->second.failed_tasks++;
-
-                    auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now() - task_info.assigned_time).count() / 1000.0;
-
-                    updateSlaveStatistics(task_info.assigned_slave, false, processing_time);
-                }
-            }
-
-            // ìž¬ì‹œë„ ê°€ëŠ¥í•œì§€ í™•ì¸
-            if (task_info.retry_count < task_info.max_retries) {
-                task_info.status = TaskStatus::PENDING;
-                task_info.assigned_slave.clear();
-                std::cout << "Task " << task_id << " failed, retrying ("
-                    << task_info.retry_count << "/" << task_info.max_retries << ")" << std::endl;
-            }
-            else {
-                task_info.status = TaskStatus::FAILED;
-                if (task_failed_callback_) {
-                    task_failed_callback_(task_info, error_message);
-                }
-                std::cout << "Task " << task_id << " failed permanently: " << error_message << std::endl;
-            }
-
+            failTaskInternal(task_id, error_message);
             return true;
         }
 
@@ -879,6 +843,43 @@ namespace DPApp {
         }
 
     private:
+        void failTaskInternal(uint32_t task_id, const std::string& error_message) {
+            auto task_it = tasks_.find(task_id);
+            if (task_it == tasks_.end()) {
+                return;
+            }
+
+            TaskInfo& task_info = task_it->second;
+            task_info.retry_count++;
+
+            if (!task_info.assigned_slave.empty()) {
+                auto slave_it = slaves_.find(task_info.assigned_slave);
+                if (slave_it != slaves_.end()) {
+                    slave_it->second.is_busy = false;
+                    slave_it->second.current_task_id.clear();
+                    slave_it->second.failed_tasks++;
+                    
+                    auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - task_info.assigned_time).count() / 1000.0;
+
+                    updateSlaveStatistics(task_info.assigned_slave, false, processing_time);
+                }
+            }
+
+            if (task_info.retry_count < task_info.max_retries) {
+                task_info.status = TaskStatus::PENDING;
+                task_info.assigned_slave.clear();
+                std::cout << "Task " << task_id << " failed, retrying..." << std::endl;
+            }
+            else {
+                task_info.status = TaskStatus::FAILED;
+                if (task_failed_callback_) {
+                    task_failed_callback_(task_info, error_message);
+                }
+                std::cout << "Task " << task_id << " failed permanently." << std::endl;
+            }
+        }
+
         // í¬ì¸íŠ¸í´ë¼ìš°ë"œ íŒŒì¼ ì°¾ê¸°
         std::vector<PointCloudFileInfo> findPointCloudFiles(const std::string& folder_path,
             const std::string& file_pattern) {
@@ -975,7 +976,7 @@ namespace DPApp {
                     parameters.push_back(color_coding);
 
                     // ìž'ì—… ì¶"ê°€
-                    uint32_t task_id = addTask("bim_distance_calculation", chunk, parameters, priority);
+                    uint32_t task_id = addTask(TaskType::BIM_DISTANCE_CALCULATION, chunk, parameters, priority);
                     task_ids.push_back(task_id);
                 }
 
@@ -1063,10 +1064,9 @@ namespace DPApp {
 
             for (auto& [slave_id, slave_info] : slaves_) {
                 if (slave_info.is_active && !slave_info.is_busy) {
-                    // í•´ë‹¹ ìž'ì—… íƒ€ìž…ì„ ì§€ì›í•˜ëŠ"ì§€ í™•ì¸
                     bool supports_task = (std::find)(slave_info.supported_task_types.begin(),
                         slave_info.supported_task_types.end(),
-                        task.task_type) != slave_info.supported_task_types.end();
+                        taskStr(task.task_type)) != slave_info.supported_task_types.end();
 
                     if (supports_task) {
                         double score = slave_info.getPerformanceScore();
@@ -1129,15 +1129,15 @@ namespace DPApp {
         // ì²˜ë¦¬ê¸° ë"±ë¡
         using ProcessorFunction = std::function<ProcessingResult(const ProcessingTask&, const PointCloudChunk&)>;
 
-        void registerProcessor(const std::string& task_type, ProcessorFunction processor);
-        void unregisterProcessor(const std::string& task_type);
+        void registerProcessor(const TaskType task_type, ProcessorFunction processor);
+        void unregisterProcessor(const TaskType task_type);
 
         // ìž'ì—… ì²˜ë¦¬
         ProcessingResult processTask(const ProcessingTask& task, const PointCloudChunk& chunk);
 
         // ì§€ì›ë˜ëŠ" ìž'ì—… íƒ€ìž… ì¡°íšŒ
-        std::vector<std::string> getSupportedTaskTypes();
-        bool supportsTaskType(const std::string& task_type);
+        std::vector<TaskType> getSupportedTaskTypes();
+        bool supportsTaskType(const TaskType task_type);
 
         // í†µê³„
         uint32_t getProcessedTaskCount() const { return processed_task_count_; }
@@ -1145,15 +1145,15 @@ namespace DPApp {
         double getAverageProcessingTime() const { return avg_processing_time_; }
 
         // í"„ë¡œì„¸ì„œ ì„±ëŠ¥ í†µê³„
-        std::map<std::string, uint32_t> getTaskTypeStatistics() const {
+        std::map<TaskType, uint32_t> getTaskTypeStatistics() const {
             std::lock_guard<std::mutex> lock(processors_mutex_);
             return task_type_stats_;
         }
 
     private:
-        std::map<std::string, ProcessorFunction> processors_;
+        std::map<TaskType, ProcessorFunction> processors_;
         mutable std::mutex processors_mutex_;
-        std::map<std::string, uint32_t> task_type_stats_;
+        std::map<TaskType, uint32_t> task_type_stats_;
 
         std::atomic<uint32_t> processed_task_count_;
         std::atomic<uint32_t> failed_task_count_;
@@ -1225,14 +1225,14 @@ namespace DPApp {
         : processed_task_count_(0), failed_task_count_(0), avg_processing_time_(0.0) {
 
         // ê¸°ë³¸ í"„ë¡œì„¸ì„œë"¤ ë"±ë¡
-        registerProcessor("filter", PointCloudProcessors::filterPoints);
-        registerProcessor("classify", PointCloudProcessors::classifyPoints);
-        registerProcessor("estimate_normals", PointCloudProcessors::estimateNormals);
-        registerProcessor("remove_outliers", PointCloudProcessors::removeOutliers);
-        registerProcessor("downsample", PointCloudProcessors::downsample);
+        registerProcessor(TaskType::FILTER, PointCloudProcessors::filterPoints);
+        registerProcessor(TaskType::CLASSIFY, PointCloudProcessors::classifyPoints);
+        registerProcessor(TaskType::ESTIMATE_NORMALS, PointCloudProcessors::estimateNormals);
+        registerProcessor(TaskType::REMOVE_OUTLIERS, PointCloudProcessors::removeOutliers);
+        registerProcessor(TaskType::DOWNSAMPLE, PointCloudProcessors::downsample);
 
-        // BIM ê±°ë¦¬ ê³„ì‚° í"„ë¡œì„¸ì„œ ë"±ë¡
-        registerProcessor("bim_distance_calculation", PointCloudProcessors::calculateBIMDistance);
+        /// BIM to PTS
+        registerProcessor(TaskType::BIM_DISTANCE_CALCULATION, PointCloudProcessors::calculateBIMDistance);
 
         std::cout << "TaskProcessor initialized with " << processors_.size() << " processors" << std::endl;
     }
@@ -1243,18 +1243,18 @@ namespace DPApp {
         std::cout << "TaskProcessor destroyed" << std::endl;
     }
 
-    void TaskProcessor::registerProcessor(const std::string& task_type, ProcessorFunction processor) {
+    void TaskProcessor::registerProcessor(const TaskType task_type, ProcessorFunction processor) {
         std::lock_guard<std::mutex> lock(processors_mutex_);
         processors_[task_type] = processor;
         task_type_stats_[task_type] = 0;
-        std::cout << "Processor registered for task type: " << task_type << std::endl;
+        std::cout << "Processor registered for task type: " << taskStr(task_type) << std::endl;
     }
 
-    void TaskProcessor::unregisterProcessor(const std::string& task_type) {
+    void TaskProcessor::unregisterProcessor(const TaskType task_type) {
         std::lock_guard<std::mutex> lock(processors_mutex_);
         processors_.erase(task_type);
         task_type_stats_.erase(task_type);
-        std::cout << "Processor unregistered for task type: " << task_type << std::endl;
+        std::cout << "Processor unregistered for task type: " << taskStr(task_type) << std::endl;
     }
 
     ProcessingResult TaskProcessor::processTask(const ProcessingTask& task, const PointCloudChunk& chunk) {
@@ -1270,7 +1270,7 @@ namespace DPApp {
             auto it = processors_.find(task.task_type);
             if (it == processors_.end()) {
                 result.success = false;
-                result.error_message = "Unsupported task type: " + task.task_type;
+                result.error_message = "Unsupported task type: " + std::string(taskStr(task.task_type));
                 failed_task_count_++;
                 return result;
             }
@@ -1306,10 +1306,10 @@ namespace DPApp {
         return result;
     }
 
-    std::vector<std::string> TaskProcessor::getSupportedTaskTypes() {
+    std::vector<TaskType> TaskProcessor::getSupportedTaskTypes() {
         std::lock_guard<std::mutex> lock(processors_mutex_);
 
-        std::vector<std::string> types;
+        std::vector<TaskType> types;
         for (const auto& [type, processor] : processors_) {
             types.push_back(type);
         }
@@ -1317,7 +1317,7 @@ namespace DPApp {
         return types;
     }
 
-    bool TaskProcessor::supportsTaskType(const std::string& task_type) {
+    bool TaskProcessor::supportsTaskType(const TaskType task_type) {
         std::lock_guard<std::mutex> lock(processors_mutex_);
         return processors_.find(task_type) != processors_.end();
     }

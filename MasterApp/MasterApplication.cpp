@@ -110,6 +110,9 @@ public:
 
         ILOG << "Stopping master server...";
 
+        shutdownAllSlaves();
+        std::this_thread::sleep_for(std::chrono::milliseconds(500)); // 메시지 전송을 위한 짧은 대기
+
         running_ = false;
 
         /// 1. 새로운 작업 할당 중지
@@ -179,7 +182,7 @@ public:
     }
 
     // 포인트클라우드 파일 로드 및 처리 시작
-    bool loadAndProcessPointCloud(const std::string& filename, const std::string& task_type) {
+    bool loadAndProcessPointCloud(const std::string& filename, const TaskType task_type) {
         auto point_cloud = std::make_shared<PointCloud>();
         
         ILOG << "Loading point cloud: " << filename;
@@ -300,13 +303,14 @@ private:
         iss >> cmd;
         
         if (cmd == "load") {
-            std::string filename, task_type;
-            iss >> filename >> task_type;
+            std::string filename, task_type_str;
+            iss >> filename >> task_type_str;
             
-            if (filename.empty() || task_type.empty()) {
+            if (filename.empty() || task_type_str.empty()) {
                 WLOG << "Usage: load <filename> <task_type>" ;
                 WLOG << "Task types: filter, classify, estimate_normals, remove_outliers, downsample" ;
             } else {
+                auto task_type = strTask(task_type_str);
                 loadAndProcessPointCloud(filename, task_type);
             }
         } else if (cmd == "status") {
@@ -406,16 +410,16 @@ private:
         WLOG << "Task " << task.task_id << " failed: " << error ;
     }
     
-    void createTasksFromChunks(const std::vector<PointCloudChunk>& chunks, const std::string& task_type) {
+    void createTasksFromChunks(const std::vector<PointCloudChunk>& chunks, const TaskType task_type) {
         std::vector<uint8_t> default_params; // 기본 파라미터
         
         // 작업 타입에 따른 기본 파라미터 설정
-        if (task_type == "filter") {
+        if (task_type == TaskType::FILTER) {
             double min_z = -100.0, max_z = 100.0;
             default_params.resize(sizeof(double) * 2);
             std::memcpy(default_params.data(), &min_z, sizeof(double));
             std::memcpy(default_params.data() + sizeof(double), &max_z, sizeof(double));
-        } else if (task_type == "downsample") {
+        } else if (task_type == TaskType::DOWNSAMPLE) {
             double ratio = 0.1; // 10%
             default_params.resize(sizeof(double));
             std::memcpy(default_params.data(), &ratio, sizeof(double));
@@ -455,13 +459,21 @@ private:
             task.task_type = task_info.task_type;
             task.parameters = task_info.parameters;
             
-            // 메시지 생성 (작업 정보 + 청크 데이터)
+            /// 메시지 생성 (작업 정보 + 청크 데이터)
             auto task_data = NetworkUtils::serializeTask(task);
             auto chunk_data = NetworkUtils::serializeChunk(*task_info.chunk_data);
             
-            // 합친 데이터 생성
+            /// 합친 데이터 생성
             std::vector<uint8_t> combined_data;
+            uint32_t task_data_size = static_cast<uint32_t>(task_data.size());
+            /// Insert 4byte data (task_data_size)
+            combined_data.insert(combined_data.end(),
+                reinterpret_cast<uint8_t*>(&task_data_size),
+                reinterpret_cast<uint8_t*>(&task_data_size) + sizeof(uint32_t));
+
+            /// Insert task_data
             combined_data.insert(combined_data.end(), task_data.begin(), task_data.end());
+            /// Insert chunk_data
             combined_data.insert(combined_data.end(), chunk_data.begin(), chunk_data.end());
             
             NetworkMessage message(MessageType::TASK_ASSIGNMENT, combined_data);
@@ -606,7 +618,7 @@ private:
             json << "        {\n";
             json << "          \"task_id\": " << task.task_id << ",\n";
             json << "          \"chunk_id\": " << task.chunk_id << ",\n";
-            json << "          \"task_type\": \"" << task.task_type << "\",\n";
+            json << "          \"task_type\": \"" << std::string(taskStr(task.task_type)) << "\",\n";
             json << "          \"status\": \"pending\",\n";
             json << "          \"assigned_slave\": \"" << task.assigned_slave << "\"\n";
             json << "        }";
@@ -622,7 +634,7 @@ private:
             json << "        {\n";
             json << "          \"task_id\": " << task.task_id << ",\n";
             json << "          \"chunk_id\": " << task.chunk_id << ",\n";
-            json << "          \"task_type\": \"" << task.task_type << "\",\n";
+            json << "          \"task_type\": \"" << taskStr(task.task_type) << "\",\n";
             json << "          \"status\": \"in_progress\",\n";
             json << "          \"assigned_slave\": \"" << task.assigned_slave << "\"\n";
             json << "        }";
@@ -639,7 +651,7 @@ private:
             json << "        {\n";
             json << "          \"task_id\": " << task.task_id << ",\n";
             json << "          \"chunk_id\": " << task.chunk_id << ",\n";
-            json << "          \"task_type\": \"" << task.task_type << "\",\n";
+            json << "          \"task_type\": \"" << taskStr(task.task_type) << "\",\n";
             json << "          \"status\": \"completed\",\n";
             json << "          \"assigned_slave\": \"" << task.assigned_slave << "\"\n";
             json << "        }";
@@ -655,7 +667,7 @@ private:
             json << "        {\n";
             json << "          \"task_id\": " << task.task_id << ",\n";
             json << "          \"chunk_id\": " << task.chunk_id << ",\n";
-            json << "          \"task_type\": \"" << task.task_type << "\",\n";
+            json << "          \"task_type\": \"" << taskStr(task.task_type) << "\",\n";
             json << "          \"status\": \"failed\",\n";
             json << "          \"assigned_slave\": \"" << task.assigned_slave << "\"\n";
             json << "        }";
@@ -709,7 +721,7 @@ private:
                     json << "  \"data\": {\n";
                     json << "    \"task_id\": " << task.task_id << ",\n";
                     json << "    \"chunk_id\": " << task.chunk_id << ",\n";
-                    json << "    \"task_type\": \"" << task.task_type << "\",\n";
+                    json << "    \"task_type\": \"" << taskStr(task.task_type) << "\",\n";
                     json << "    \"status\": \"" << status_str << "\",\n";
                     json << "    \"assigned_slave\": \"" << task.assigned_slave << "\",\n";
                     json << "    \"parameters_size\": " << task.parameters.size();
@@ -925,20 +937,22 @@ private: /// REST API 핸들러들
 
         // 3) 필수/옵션 필드 추출
         auto filename = DPApp::MiniJson::get<std::string>(*parsed, "filename");
-        auto task_type = DPApp::MiniJson::get<std::string>(*parsed, "task_type");
-
-        if (!filename || !task_type) {
+        std::optional<std::string> task_type_str = DPApp::MiniJson::get<std::string>(*parsed, "task_type");
+        
+        if (!filename || !task_type_str) {
             return createErrorResponse(400, "Missing 'filename' or 'task_type'");
         }
 
-        if (loadAndProcessPointCloud(*filename, *task_type)) {
+        TaskType task_type = strTask(task_type_str.value());
+
+        if (loadAndProcessPointCloud(*filename, task_type)) {
             std::ostringstream json;
             json << "{\n";
             json << "  \"success\": true,\n";
             json << "  \"message\": \"Point cloud processing started\",\n";
             json << "  \"data\": {\n";
             json << "    \"filename\": \"" << *filename << "\",\n";
-            json << "    \"task_type\": \"" << *task_type << "\"\n";
+            json << "    \"task_type\": \"" << taskStr(task_type) << "\"\n";
             json << "  }\n";
             json << "}";
             HttpResponse response;

@@ -237,39 +237,34 @@ namespace NetworkUtils {
     inline std::vector<uint8_t> serializeTask(const ProcessingTask& task) {
         std::vector<uint8_t> data;
 
-        // 헤더: task_id, chunk_id, task_type 길이, 파라미터 길이
-        data.resize(sizeof(uint32_t) * 3 + sizeof(size_t) * 2);
-        size_t offset = 0;
+        /// 헤더: task_id, chunk_id, task_type 길이, 파라미터 길이
+        const int marginSize = 64;
+        data.reserve(marginSize + sizeof(uint32_t) * 2 + sizeof(uint8_t) + sizeof(size_t) + task.parameters.size());
 
-        // task_id
-        std::memcpy(data.data() + offset, &task.task_id, sizeof(uint32_t));
-        offset += sizeof(uint32_t);
+        /// task_id (4 bytes)
+        const uint8_t* ptr = reinterpret_cast<const uint8_t*>(&task.task_id);
+        data.insert(data.end(), ptr, ptr + sizeof(uint32_t));
 
-        // chunk_id
-        std::memcpy(data.data() + offset, &task.chunk_id, sizeof(uint32_t));
-        offset += sizeof(uint32_t);
+        /// chunk_id (4 bytes)
+        ptr = reinterpret_cast<const uint8_t*>(&task.chunk_id);
+        data.insert(data.end(), ptr, ptr + sizeof(uint32_t));
 
-        // task_type 길이
-        size_t task_type_len = task.task_type.length();
-        std::memcpy(data.data() + offset, &task_type_len, sizeof(size_t));
-        offset += sizeof(size_t);
+        /// task_type (1 byte)
+        data.push_back(static_cast<uint8_t>(task.task_type));
 
-        // 파라미터 길이
+        /// 파라미터 길이 (8 bytes on x64)
         size_t param_len = task.parameters.size();
-        std::memcpy(data.data() + offset, &param_len, sizeof(size_t));
-        offset += sizeof(size_t);
+        ptr = reinterpret_cast<const uint8_t*>(&param_len);
+        data.insert(data.end(), ptr, ptr + sizeof(size_t));
 
-        // task_type 문자열
-        data.insert(data.end(), task.task_type.begin(), task.task_type.end());
-
-        // 파라미터 데이터
+        /// 파라미터 데이터 (variable size)
         data.insert(data.end(), task.parameters.begin(), task.parameters.end());
 
         return data;
     }
 
     inline ProcessingTask deserializeTask(const std::vector<uint8_t>& data) {
-        if (data.size() < sizeof(uint32_t) * 2 + sizeof(size_t) * 2) {
+        if (data.size() < sizeof(uint32_t) * 2 + sizeof(uint8_t) + sizeof(size_t)) {
             throw std::runtime_error("Invalid task data size");
         }
 
@@ -284,10 +279,10 @@ namespace NetworkUtils {
         std::memcpy(&task.chunk_id, data.data() + offset, sizeof(uint32_t));
         offset += sizeof(uint32_t);
 
-        // task_type 길이
-        size_t task_type_len;
-        std::memcpy(&task_type_len, data.data() + offset, sizeof(size_t));
-        offset += sizeof(size_t);
+        // task_type
+        uint8_t type_val = data[offset];
+        task.task_type = static_cast<TaskType>(type_val);
+        offset += sizeof(uint8_t);
 
         // 파라미터 길이
         size_t param_len;
@@ -295,13 +290,9 @@ namespace NetworkUtils {
         offset += sizeof(size_t);
 
         // 데이터 크기 검증
-        if (offset + task_type_len + param_len > data.size()) {
+        if (offset + param_len > data.size()) {
             throw std::runtime_error("Invalid task data format");
         }
-
-        // task_type
-        task.task_type = std::string(reinterpret_cast<const char*>(data.data() + offset), task_type_len);
-        offset += task_type_len;
 
         // 파라미터
         task.parameters.assign(data.begin() + offset, data.begin() + offset + param_len);

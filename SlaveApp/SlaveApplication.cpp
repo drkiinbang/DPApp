@@ -1,5 +1,6 @@
 #ifdef _WIN32
 #define NOMINMAX   // Windows 헤더 포함하기 전에 정의
+#include <io.h>    // For _close, _fileno
 #endif
 
 #include <iostream>
@@ -11,6 +12,10 @@
 #include <set>
 #include <tuple>
 #include <iomanip>
+
+#ifndef _WIN32
+#include <unistd.h>  // For close, STDIN_FILENO
+#endif
 
 #include "../include/PointCloudTypes.h"
 #include "../include/NetworkManager.h"
@@ -26,14 +31,6 @@ namespace DPApp {
 }
 
 class SlaveApplication {
-private:
-    DPApp::RuntimeConfig cfg_;
-    std::atomic<bool> force_exit_{ false };  /// 강제 종료 플래그
-
-    // 작업별 중단 플래그들을 관리
-    std::map<uint32_t, std::shared_ptr<std::atomic<bool>>> active_task_cancellations_;
-    std::mutex cancellation_mutex_;
-
 public:
     SlaveApplication() : running_(false), server_port_(8080), processing_threads_(1) {}
 
@@ -164,6 +161,36 @@ public:
             }
         }
 
+#ifdef _WIN32
+        try {
+            if (_fileno(stdin) != -1) {
+                _close(_fileno(stdin));
+            }
+        }
+        catch (...) {
+            // 이미 닫혔거나 오류 발생 시 무시
+        }
+#else
+        try {
+            if (fcntl(STDIN_FILENO, F_GETFD) != -1) {
+                close(STDIN_FILENO);
+            }
+        }
+        catch (...) {
+            // 이미 닫혔거나 오류 발생 시 무시
+        }
+#endif
+
+        if (input_thread_.joinable()) {
+            try {
+                input_thread_.join();
+            }
+            catch (const std::exception& e) {
+                WLOG << "Error joining input thread: " << e.what();
+                input_thread_.detach();
+            }
+        }
+
         /// 5. 네트워크 클라이언트 해제
         if (client_) {
             try {
@@ -194,7 +221,7 @@ public:
         printHelp();
 
         // 입력 처리를 별도 스레드로 분리
-        std::thread input_thread([this]() {
+        input_thread_ = std::thread([this]() {
             std::string command;
             while (running_ && !shutdown_requested_ && !force_exit_) {
                 if (std::getline(std::cin, command)) {
@@ -235,14 +262,6 @@ public:
 
         if (shutdown_requested_) {
             ILOG << "Shutdown requested by master, stopping...";
-        }
-
-        // 입력 스레드 정리
-        running_ = false;
-        shutdown_requested_ = true;
-
-        if (input_thread.joinable()) {
-            input_thread.detach();
         }
 
         stop();
@@ -379,15 +398,19 @@ private:
         case MessageType::SHUTDOWN:
             ILOG << "Received SHUTDOWN command from master - initiating immediate shutdown";
 
-            // 즉시 종료 플래그 설정
+            /// 즉시 종료 플래그 설정
             shutdown_requested_ = true;
             force_exit_ = true;
             running_ = false;
 
             // 모든 대기 중인 스레드 깨우기
             task_queue_cv_.notify_all();
-
-            // 네트워크 연결 즉시 해제하여 블로킹 해제
+#ifdef _WIN32
+            _close(_fileno(stdin));
+#else
+            close(STDIN_FILENO);
+#endif
+            /// 네트워크 연결 즉시 해제하여 블로킹 해제
             std::thread([this]() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
                 if (client_) {
@@ -424,46 +447,37 @@ private:
 
     void handleTaskAssignment(const NetworkMessage& message) {
         try {
-            // 실제 NetworkUtils 함수를 사용하여 메시지 파싱
-            if (message.data.size() < sizeof(uint32_t) * 3) {
-                throw std::runtime_error("Invalid task assignment message size");
+            const std::vector<uint8_t>& combined_data = message.data;
+
+            /// Check the size of combined_data
+            if (combined_data.size() < sizeof(uint32_t)) {
+                throw std::runtime_error("Message too small to contain task data size");
             }
 
-            // 메시지는 task data + chunk data로 구성됨
-            // 먼저 task 헤더를 읽어서 task data의 크기를 파악
-            size_t task_header_size = sizeof(uint32_t) * 2 + sizeof(size_t) * 2; // task_id, chunk_id, task_type_len, param_len
+            /// Read the first 4 bytes
+            uint32_t task_data_size = 0;
+            std::memcpy(&task_data_size, combined_data.data(), sizeof(uint32_t));
 
-            if (message.data.size() < task_header_size) {
-                throw std::runtime_error("Message too small for task header");
+            size_t offset = sizeof(uint32_t);
+            if (combined_data.size() < offset + task_data_size) {
+                throw std::runtime_error("Message is smaller than expected task data size");
             }
 
-            // task_type 길이와 parameter 길이 읽기
-            size_t offset = sizeof(uint32_t) * 2; // task_id, chunk_id 이후
-            size_t task_type_len, param_len;
-
-            std::memcpy(&task_type_len, message.data.data() + offset, sizeof(size_t));
-            offset += sizeof(size_t);
-            std::memcpy(&param_len, message.data.data() + offset, sizeof(size_t));
-
-            size_t task_data_size = task_header_size + task_type_len + param_len;
-
-            if (message.data.size() < task_data_size) {
-                throw std::runtime_error("Message too small for complete task data");
-            }
-
-            // Task 데이터 추출 및 역직렬화
-            std::vector<uint8_t> task_data(message.data.begin(), message.data.begin() + task_data_size);
+            /// Extract task data and deserialization
+            std::vector<uint8_t> task_data(combined_data.begin() + offset, combined_data.begin() + offset + task_data_size);
             ProcessingTask task = NetworkUtils::deserializeTask(task_data);
 
-            // 남은 데이터에서 Chunk 역직렬화
-            if (message.data.size() <= task_data_size) {
-                throw std::runtime_error("No chunk data found in message");
+            /// Update offset
+            offset += task_data_size;
+            if (combined_data.size() <= offset) {
+                throw std::runtime_error("No chunk data found after task data");
             }
 
-            std::vector<uint8_t> chunk_data(message.data.begin() + task_data_size, message.data.end());
+            /// Deserialize the rest data (chunk_data)
+            std::vector<uint8_t> chunk_data(combined_data.begin() + offset, combined_data.end());
             PointCloudChunk chunk = NetworkUtils::deserializeChunk(chunk_data);
 
-            // 작업을 큐에 추가
+            /// 작업을 큐에 추가
             {
                 std::lock_guard<std::mutex> lock(task_queue_mutex_);
                 task_queue_.emplace(task, chunk);
@@ -472,7 +486,7 @@ private:
             task_queue_cv_.notify_one();
 
             ILOG << "Received task " << task.task_id
-                << " (type: " << task.task_type
+                << " (type: " << taskStr(task.task_type)
                 << ", chunk: " << chunk.chunk_id
                 << ", points: " << chunk.points.size() << ")";
 
@@ -642,7 +656,7 @@ private:
         */
 
         // 1. 노이즈 제거 필터 (Statistical Outlier Removal)
-        task_processor_->registerProcessor("outlier_filter",
+        task_processor_->registerProcessor(TaskType::OUTLIER_FILTER,
             [](const ProcessingTask& task, const PointCloudChunk& chunk) -> ProcessingResult {
                 ProcessingResult result;
                 result.task_id = task.task_id;
@@ -714,7 +728,7 @@ private:
             });
 
         // 2. 복셀 그리드 다운샘플링
-        task_processor_->registerProcessor("voxel_downsample",
+        task_processor_->registerProcessor(TaskType::VOXEL_DOWNSAMPLE,
             [](const ProcessingTask& task, const PointCloudChunk& chunk) -> ProcessingResult {
                 ProcessingResult result;
                 result.task_id = task.task_id;
@@ -763,7 +777,7 @@ private:
             });
 
         // 3. 평면 세그멘테이션 (RANSAC 기반)
-        task_processor_->registerProcessor("plane_segmentation",
+        task_processor_->registerProcessor(TaskType::PLANE_SEGMENTATION,
             [](const ProcessingTask& task, const PointCloudChunk& chunk) -> ProcessingResult {
                 ProcessingResult result;
                 result.task_id = task.task_id;
@@ -895,7 +909,7 @@ private:
 
         ILOG << "=== Supported Task Types ===";
         for (const auto& task_type : task_types) {
-            ILOG << "- " << task_type;
+            ILOG << "- " << taskStr(task_type);
         }
         ILOG << "============================";
     }
@@ -908,30 +922,40 @@ private:
         ILOG << "=========================";
     }
 
-private:
-    std::unique_ptr<NetworkClient> client_;
-    std::unique_ptr<TaskProcessor> task_processor_;
+    private:
+        DPApp::RuntimeConfig cfg_;
+        std::atomic<bool> force_exit_{ false };  /// 강제 종료 플래그
 
-    std::atomic<bool> running_;
-    std::string server_address_ = "localhost";
-    uint16_t server_port_;
-    size_t processing_threads_;
+        // 작업별 중단 플래그들을 관리
+        std::map<uint32_t, std::shared_ptr<std::atomic<bool>>> active_task_cancellations_;
+        std::mutex cancellation_mutex_;
 
-    /// 작업 큐
-    std::queue<TaskQueueItem> task_queue_;
-    std::mutex task_queue_mutex_;
-    std::condition_variable task_queue_cv_;
+        std::unique_ptr<NetworkClient> client_;
+        std::unique_ptr<TaskProcessor> task_processor_;
 
-    /// 처리 스레드들
-    std::vector<std::thread> processing_thread_pool_;
-    std::thread status_thread_;
+        std::atomic<bool> running_;
+        std::string server_address_ = "localhost";
+        uint16_t server_port_;
+        size_t processing_threads_;
 
-    /// 통계
-    std::mutex stats_mutex_;
-    std::atomic<uint32_t> completed_tasks_{ 0 };
-    std::atomic<uint32_t> failed_tasks_{ 0 };
-    std::atomic<double> total_processing_time_{ 0.0 };
-    std::atomic<double> avg_processing_time_{ 0.0 };
+        /// 작업 큐
+        std::queue<TaskQueueItem> task_queue_;
+        std::mutex task_queue_mutex_;
+        std::condition_variable task_queue_cv_;
+
+        /// 처리 스레드들
+        std::vector<std::thread> processing_thread_pool_;
+        std::thread status_thread_;
+
+        /// Input thread
+        std::thread input_thread_;
+
+        /// 통계
+        std::mutex stats_mutex_;
+        std::atomic<uint32_t> completed_tasks_{ 0 };
+        std::atomic<uint32_t> failed_tasks_{ 0 };
+        std::atomic<double> total_processing_time_{ 0.0 };
+        std::atomic<double> avg_processing_time_{ 0.0 };
 };
 
 /// 전역 변수 (시그널 핸들러용)
