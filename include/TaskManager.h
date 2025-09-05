@@ -336,7 +336,6 @@ namespace DPApp {
             return task_id;
         }
 
-        // BIMê³¼ í¬ì¸íŠ¸í´ë¼ìš°ë"œ í´ë"ë¥¼ ìž…ë ¥ìœ¼ë¡œ ë°›ì•„ ê±°ë¦¬ ê³„ì‚° ìž'ì—…ë"¤ì„ ìƒì„±í•˜ëŠ" ë©"ì†Œë"œ
         std::vector<uint32_t> addBIMComparisonTasks(const BIMComparisonParams& params,
             TaskPriority priority = TaskPriority::NORMAL) {
             std::vector<uint32_t> task_ids;
@@ -1164,15 +1163,6 @@ namespace DPApp {
     namespace PointCloudProcessors {
         /// [Smaple] Filtering based on heights
         ProcessingResult filterPoints(const ProcessingTask& task, const PointCloudChunk& chunk);
-        /// [Smaple] Classification based on heights
-        ProcessingResult classifyPoints(const ProcessingTask& task, const PointCloudChunk& chunk);
-        /// [Smaple] Estimating normal vectors
-        ProcessingResult estimateNormals(const ProcessingTask& task, const PointCloudChunk& chunk);
-        /// [Smaple] Statitical filtering ( mean_z - sigma < inlier < min_z + sigma)
-        ProcessingResult removeOutliers(const ProcessingTask& task, const PointCloudChunk& chunk);
-        /// [Sample] Random down sampling
-        ProcessingResult downsample(const ProcessingTask& task, const PointCloudChunk& chunk);
-
         /// Distances between point cloud and BIM 
         ProcessingResult calculateBIMDistance(const ProcessingTask& task, const PointCloudChunk& chunk);
     }
@@ -1353,163 +1343,7 @@ namespace DPApp {
 
             return result;
         }
-
-        ProcessingResult classifyPoints(const ProcessingTask& task, const PointCloudChunk& chunk) {
-            ProcessingResult result;
-            result.task_id = task.task_id;
-            result.chunk_id = task.chunk_id;
-            result.success = true;
-
-            try {
-                // ê°„ë‹¨í•œ ë†'ì´ ê¸°ë°˜ ë¶„ë¥˜ ì˜ˆì œ
-                result.processed_points = chunk.points;
-
-                for (auto& point : result.processed_points) {
-                    if (point.z < 0) {
-                        point.classification = 2; // Ground
-                    }
-                    else if (point.z < 5) {
-                        point.classification = 1; // Low vegetation
-                    }
-                    else if (point.z < 20) {
-                        point.classification = 4; // Medium vegetation
-                    }
-                    else {
-                        point.classification = 5; // High vegetation
-                    }
-                }
-
-                std::cout << "Classified " << result.processed_points.size() << " points" << std::endl;
-
-            }
-            catch (const std::exception& e) {
-                result.success = false;
-                result.error_message = "Classification error: " + std::string(e.what());
-            }
-
-            return result;
-        }
-
-        ProcessingResult estimateNormals(const ProcessingTask& task, const PointCloudChunk& chunk) {
-            ProcessingResult result;
-            result.task_id = task.task_id;
-            result.chunk_id = task.chunk_id;
-            result.success = true;
-
-            try {
-                // ê°„ë‹¨í•œ ë²•ì„  ë²¡í„° ì¶"ì • (ì‹¤ì œë¡œëŠ" ë" ë³µìž¡í•œ ì•Œê³ ë¦¬ì¦˜ í•„ìš")
-                result.processed_points = chunk.points;
-
-                // ê° í¬ì¸íŠ¸ì— ëŒ€í•´ ê°„ë‹¨í•œ ë²•ì„  ë²¡í„° ê³„ì‚°
-                // ì‹¤ì œë¡œëŠ" k-nearest neighborsë‚˜ radius search ì‚¬ìš©
-                for (size_t i = 0; i < result.processed_points.size(); ++i) {
-                    auto& point = result.processed_points[i];
-
-                    // ë²•ì„  ì •ë³´ë¥¼ RGBì— ì €ìž¥ (ì‹œê°í™"ìš©)
-                    point.r = 127; // Normal X
-                    point.g = 127; // Normal Y
-                    point.b = 255; // Normal Z (ìœ„ìª½ í–¥í•¨)
-                }
-
-                std::cout << "Estimated normals for " << result.processed_points.size() << " points" << std::endl;
-
-            }
-            catch (const std::exception& e) {
-                result.success = false;
-                result.error_message = "Normal estimation error: " + std::string(e.what());
-            }
-
-            return result;
-        }
-
-        ProcessingResult removeOutliers(const ProcessingTask& task, const PointCloudChunk& chunk) {
-            ProcessingResult result;
-            result.task_id = task.task_id;
-            result.chunk_id = task.chunk_id;
-            result.success = true;
-
-            try {
-                // í†µê³„ì  ì•„ì›ƒë¼ì´ì–´ ì œê±° (ê°„ë‹¨í•œ ë²„ì „)
-                if (chunk.points.empty()) {
-                    result.success = false;
-                    result.error_message = "Empty point cloud";
-                    return result;
-                }
-
-                // Z ì¢Œí'œì˜ í‰ê· ê³¼ í'œì¤€íŽ¸ì°¨ ê³„ì‚°
-                double sum_z = 0.0;
-                for (const auto& point : chunk.points) {
-                    sum_z += point.z;
-                }
-                double mean_z = sum_z / chunk.points.size();
-
-                double sum_sq_diff = 0.0;
-                for (const auto& point : chunk.points) {
-                    double diff = point.z - mean_z;
-                    sum_sq_diff += diff * diff;
-                }
-                double std_dev = std::sqrt(sum_sq_diff / chunk.points.size());
-
-                // 2 í'œì¤€íŽ¸ì°¨ ë²"ìœ„ ë‚´ì˜ ì ë"¤ë§Œ ìœ ì§€
-                double threshold = 2.0 * std_dev;
-
-                for (const auto& point : chunk.points) {
-                    if (std::abs(point.z - mean_z) <= threshold) {
-                        result.processed_points.push_back(point);
-                    }
-                }
-
-                std::cout << "Removed outliers: " << chunk.points.size() << " -> "
-                    << result.processed_points.size() << " points" << std::endl;
-
-            }
-            catch (const std::exception& e) {
-                result.success = false;
-                result.error_message = "Outlier removal error: " + std::string(e.what());
-            }
-
-            return result;
-        }
-
-        ProcessingResult downsample(const ProcessingTask& task, const PointCloudChunk& chunk) {
-            ProcessingResult result;
-            result.task_id = task.task_id;
-            result.chunk_id = task.chunk_id;
-            result.success = true;
-
-            try {
-                // íŒŒë¼ë¯¸í„°ì—ì„œ ë‹¤ìš´ìƒ˜í"Œë§ ë¹„ìœ¨ ì½ê¸°
-                double sampling_ratio = 0.1; // ê¸°ë³¸ê°': 10%
-
-                if (task.parameters.size() >= sizeof(double)) {
-                    std::memcpy(&sampling_ratio, task.parameters.data(), sizeof(double));
-                }
-
-                // ë¬´ìž'ìœ„ ë‹¤ìš´ìƒ˜í"Œë§
-                std::random_device rd;
-                std::mt19937 gen(rd());
-                std::uniform_real_distribution<> dis(0.0, 1.0);
-
-                for (const auto& point : chunk.points) {
-                    if (dis(gen) < sampling_ratio) {
-                        result.processed_points.push_back(point);
-                    }
-                }
-
-                std::cout << "Downsampled " << chunk.points.size() << " points to "
-                    << result.processed_points.size() << " points (ratio: "
-                    << sampling_ratio << ")" << std::endl;
-
-            }
-            catch (const std::exception& e) {
-                result.success = false;
-                result.error_message = "Downsampling error: " + std::string(e.what());
-            }
-
-            return result;
-        }
-
-        // BIM ê±°ë¦¬ ê³„ì‚° í"„ë¡œì„¸ì„œ (ìˆ˜ì •ëœ ë²„ì „)
+        // BIM 2 pt distance
         ProcessingResult calculateBIMDistance(const ProcessingTask& task, const PointCloudChunk& chunk) {
             ProcessingResult result;
             result.task_id = task.task_id;

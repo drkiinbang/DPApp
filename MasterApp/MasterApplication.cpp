@@ -281,19 +281,29 @@ private:
     
     void printHelp() {
         ILOG << "";
-        ILOG << "=== DPApp Master Console Commands ===" ;
-        ILOG << "load <file> <task_type>  - Load point cloud and create processing tasks" ;
-        ILOG << "status                   - Show system status" ;
-        ILOG << "slaves                   - List connected slaves" ;
-        ILOG << "tasks                    - List all tasks" ;
-        ILOG << "progress                 - Show overall progress" ;
-        ILOG << "results                  - Show completed results count" ;
-        ILOG << "save <file>              - Save merged results to file" ;
-        ILOG << "clear                    - Clear all completed tasks" ;
-        ILOG << "shutdown [slave_id]      - Shutdown specific slave or all slaves" ;  // 추가
-        ILOG << "help                     - Show this help" ;
-        ILOG << "quit                     - Stop and exit" ;
-        ILOG << "=====================================" ;
+        ILOG << "=== DPApp Master Console Commands ===";
+        ILOG << "load <file> <task_type>  - Load point cloud and create processing tasks.";
+        ILOG << "bim_compare <bim_dir> <pc_dir> - Create BIM distance calculation tasks.";
+        ILOG << "status                   - Show system status";
+        ILOG << "slaves                   - List connected slaves";
+        ILOG << "tasks                    - List all tasks";
+        ILOG << "progress                 - Show overall progress";
+        ILOG << "results                  - Show completed results count";
+        ILOG << "save <file>              - Save merged results to file";
+        ILOG << "clear                    - Clear all completed tasks";
+        ILOG << "shutdown [slave_id]      - Shutdown specific slave or all slaves";
+        ILOG << "help                     - Show this help";
+        ILOG << "quit                     - Stop and exit";
+        ILOG << "=====================================";
+        ILOG << "";
+        ILOG << "--- Available Task Types ---";
+        ILOG << "  Usage for 'load': load C:/data/scan.xyz <task_type_name>";
+        ILOG << "  Usage for 'bim_compare': bim_compare C:/bim_models C:/pc_files";
+        ILOG << "";
+        ILOG << "  [Name]                [Description]";
+        ILOG << "  --------------------  ----------------------------------------------------";
+        ILOG << "  filter                Filters points based on Z-axis height.";
+        ILOG << "  outlier_filter        Removes noise using an advanced SOR filter.";
         ILOG << "";
     }
     
@@ -308,7 +318,7 @@ private:
             
             if (filename.empty() || task_type_str.empty()) {
                 WLOG << "Usage: load <filename> <task_type>" ;
-                WLOG << "Task types: filter, classify, estimate_normals, remove_outliers, downsample" ;
+                WLOG << "Task types: filter, outlier_filter, bim" ;
             } else {
                 auto task_type = strTask(task_type_str);
                 loadAndProcessPointCloud(filename, task_type);
@@ -419,11 +429,7 @@ private:
             default_params.resize(sizeof(double) * 2);
             std::memcpy(default_params.data(), &min_z, sizeof(double));
             std::memcpy(default_params.data() + sizeof(double), &max_z, sizeof(double));
-        } else if (task_type == TaskType::DOWNSAMPLE) {
-            double ratio = 0.1; // 10%
-            default_params.resize(sizeof(double));
-            std::memcpy(default_params.data(), &ratio, sizeof(double));
-        }
+        } 
         
         for (const auto& chunk : chunks) {
             auto chunk_ptr = std::make_shared<PointCloudChunk>(chunk);
