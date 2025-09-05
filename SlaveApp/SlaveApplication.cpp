@@ -71,9 +71,6 @@ public:
         // 작업 처리기 설정
         task_processor_ = std::make_unique<TaskProcessor>();
 
-        // 커스텀 프로세서 등록 (필요한 경우)
-        registerCustomProcessors();
-
         return true;
     }
 
@@ -625,108 +622,6 @@ private:
                 ILOG << "============================";
             }
         }
-    }
-
-    void registerCustomProcessors() {
-        /// registerCustomProcessors :
-        /// Compared to PointCloudProcessors in TaskManager.h
-        /// Custom processor for a specific client
-        /// 설정 파일이나 명령행 옵션에 따라 처리과정이 달라짐
-        ///  외부 라이브러리나 하드웨어에 의존하는 기능 추가 가능
-        
-        ILOG << "Registering custom point cloud processors...";
-
-        /// 필요한 경우 커스텀 프로세서 등록
-        /// 
-        /* sample templet
-        task_processor_->registerProcessor("custom_filter",
-            [](const ProcessingTask& task, const PointCloudChunk& chunk) -> ProcessingResult {
-                ProcessingResult result;
-                result.task_id = task.task_id;
-                result.chunk_id = task.chunk_id;
-                result.success = true;
-
-                // 커스텀 처리 로직
-                result.processed_points = chunk.points; // 임시
-
-                return result;
-            });
-        */
-
-        // 1. 노이즈 제거 필터 (Statistical Outlier Removal)
-        task_processor_->registerProcessor(TaskType::OUTLIER_FILTER,
-            [](const ProcessingTask& task, const PointCloudChunk& chunk) -> ProcessingResult {
-                ProcessingResult result;
-                result.task_id = task.task_id;
-                result.chunk_id = task.chunk_id;
-                result.success = true;
-
-                try {
-                    // 통계적 이상치 제거 알고리즘
-                    std::vector<Point3D> filtered_points;
-                    const double std_dev_threshold = 2.0; // 표준편차 임계값
-                    const int k_neighbors = std::min(10, static_cast<int>(chunk.points.size())); // 이웃 점 개수
-
-                    if (chunk.points.size() < 3) {
-                        result.processed_points = chunk.points;
-                        return result;
-                    }
-
-                    for (const auto& point : chunk.points) {
-                        // 각 점에 대해 k개 이웃점과의 평균 거리 계산
-                        std::vector<double> distances;
-                        for (const auto& neighbor : chunk.points) {
-                            if (&point != &neighbor) {
-                                double dist = std::sqrt(
-                                    std::pow(point.x - neighbor.x, 2) +
-                                    std::pow(point.y - neighbor.y, 2) +
-                                    std::pow(point.z - neighbor.z, 2)
-                                );
-                                distances.push_back(dist);
-                            }
-                        }
-
-                        // 거리들을 정렬하고 k개만 선택
-                        std::sort(distances.begin(), distances.end());
-                        if (distances.size() > k_neighbors) {
-                            distances.resize(k_neighbors);
-                        }
-
-                        if (distances.empty()) {
-                            filtered_points.push_back(point);
-                            continue;
-                        }
-
-                        // 평균과 표준편차 계산
-                        double mean = 0.0;
-                        for (double d : distances) mean += d;
-                        mean /= distances.size();
-
-                        double variance = 0.0;
-                        for (double d : distances) {
-                            variance += std::pow(d - mean, 2);
-                        }
-                        variance /= distances.size();
-                        double std_dev = std::sqrt(variance);
-
-                        // 임계값 내의 점만 유지
-                        if (mean <= std_dev_threshold * std_dev) {
-                            filtered_points.push_back(point);
-                        }
-                    }
-
-                    result.processed_points = filtered_points;
-                }
-                catch (const std::exception& e) {
-                    result.success = false;
-                    result.error_message = "Outlier filter error: " + std::string(e.what());
-                }
-
-                return result;
-            });
-
-        ILOG << "Custom processors registered successfully!";
-        ILOG << "Available processors: outlier_filter, voxel_downsample, plane_segmentation";
     }
 
     void updateStats(bool success, double processing_time) {

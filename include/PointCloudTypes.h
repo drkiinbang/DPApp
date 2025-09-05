@@ -14,9 +14,7 @@ namespace DPApp {
 enum class TaskType : uint8_t {
     UNKNOWN = 0,
     FILTER,
-    BIM_DISTANCE_CALCULATION,
-    // --- 커스텀 타입 추가 ---
-    OUTLIER_FILTER,
+    BIM_DISTANCE_CALCULATION
     };
 
 // Enum을 문자열로 변환 (로깅용)
@@ -24,7 +22,6 @@ inline const char* taskStr(TaskType type) {
     switch (type) {
     case TaskType::FILTER: return "filter";
     case TaskType::BIM_DISTANCE_CALCULATION: return "bim_distance_calculation";
-    case TaskType::OUTLIER_FILTER: return "outlier_filter";
     default: return "unknown";
     }
 }
@@ -33,7 +30,6 @@ inline const char* taskStr(TaskType type) {
 inline TaskType strTask(const std::string& str) {
     if (str == "filter") return TaskType::FILTER;
     if (str == "bim_distance_calculation") return TaskType::BIM_DISTANCE_CALCULATION;
-    if (str == "outlier_filter") return TaskType::OUTLIER_FILTER;
     return TaskType::UNKNOWN;
 }
 // ==========================================================
