@@ -283,7 +283,7 @@ private:
         ILOG << "";
         ILOG << "=== DPApp Master Console Commands ===";
         ILOG << "load <file> <task_type>  - Load point cloud and create processing tasks.";
-        ILOG << "bim_compare <bim_dir> <pc_dir> - Create BIM distance calculation tasks.";
+        ILOG << "bim_compare <bim_folder> <pointcloud_folder> - Compare BIM models with point clouds";
         ILOG << "status                   - Show system status";
         ILOG << "slaves                   - List connected slaves";
         ILOG << "tasks                    - List all tasks";
@@ -298,7 +298,6 @@ private:
         ILOG << "";
         ILOG << "--- Available Task Types ---";
         ILOG << "  Usage for 'load': load C:/data/scan.xyz <task_type_name>";
-        ILOG << "  Usage for 'bim_compare': bim_compare C:/bim_models C:/pc_files";
         ILOG << "";
         ILOG << "  [Name]                [Description]";
         ILOG << "  --------------------  ----------------------------------------------------";
@@ -322,6 +321,19 @@ private:
             } else {
                 auto task_type = strTask(task_type_str);
                 loadAndProcessPointCloud(filename, task_type);
+            }
+        } else if (cmd == "bim_compare") {
+            std::string bim_folder, pointcloud_folder;
+            iss >> bim_folder >> pointcloud_folder;
+
+            if (bim_folder.empty() || pointcloud_folder.empty()) {
+                WLOG << "Usage: bim_compare <bim_folder> <pointcloud_folder>";
+                WLOG << "Example: bim_compare ./bim_models ./point_clouds";
+            }
+            else {
+                auto task_ids = task_manager_->addBIMComparisonTasks(
+                    bim_folder, pointcloud_folder, TaskPriority::NORMAL);
+                ILOG << "Created " << task_ids.size() << " BIM comparison tasks";
             }
         } else if (cmd == "status") {
             printSystemStatus();

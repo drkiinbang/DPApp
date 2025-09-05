@@ -345,7 +345,6 @@ namespace DPApp {
                 std::cout << "BIM folder: " << params.bim_folder_path << std::endl;
                 std::cout << "PointCloud folder: " << params.pointcloud_folder_path << std::endl;
 
-                // 1. í´ë" ìœ íš¨ì„± ê²€ì‚¬
                 if (!std::filesystem::exists(params.bim_folder_path) ||
                     !std::filesystem::is_directory(params.bim_folder_path)) {
                     std::cerr << "BIM folder not found: " << params.bim_folder_path << std::endl;
@@ -358,7 +357,6 @@ namespace DPApp {
                     return task_ids;
                 }
 
-                // 2. í¬ì¸íŠ¸í´ë¼ìš°ë"œ íŒŒì¼ë"¤ ì°¾ê¸° ë° ì •ë³´ ìˆ˜ì§'
                 std::vector<PointCloudFileInfo> pc_files = findPointCloudFiles(
                     params.pointcloud_folder_path, params.pointcloud_file_pattern);
 
