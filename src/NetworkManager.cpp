@@ -156,7 +156,19 @@ void NetworkServer::serverThread() {
             continue;
         }
 
-        std::string client_address = inet_ntoa(client_addr.sin_addr);
+        char client_address_buf[INET_ADDRSTRLEN];
+        const char* addr_result = inet_ntop(AF_INET, &client_addr.sin_addr,
+            client_address_buf, INET_ADDRSTRLEN);
+
+        std::string client_address;
+        if (addr_result != nullptr) {
+            client_address = std::string(client_address_buf);
+        }
+        else {
+            client_address = "unknown";
+            std::cerr << "Failed to convert client address" << std::endl;
+        }
+
         uint16_t client_port = ntohs(client_addr.sin_port);
 
         auto client = std::make_shared<ClientConnection>(client_socket, client_address, client_port);
