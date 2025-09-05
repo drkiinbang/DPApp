@@ -27,6 +27,7 @@
 
 #include "PointCloudTypes.h"
 #include "NetworkManager.h"
+#include "ReadPointFile.h"
 
 namespace DPApp {
 
@@ -900,7 +901,7 @@ namespace DPApp {
             std::vector<PointCloudFileInfo> files;
 
             // ì§€ì›í•˜ëŠ" í¬ì¸íŠ¸í´ë¼ìš°ë"œ íŒŒì¼ í™•ìž¥ìžë"¤
-            std::vector<std::string> supported_extensions = { ".las", ".laz", ".ply", ".pcd", ".xyz", ".pts" };
+            std::vector<std::string> supported_extensions = { ".pts", ".xyz"};
 
             try {
                 for (const auto& entry : std::filesystem::directory_iterator(folder_path)) {
@@ -934,7 +935,6 @@ namespace DPApp {
             return files;
         }
 
-        // í¬ì¸íŠ¸í´ë¼ìš°ë"œ íŒŒì¼ì— ëŒ€í•œ ìž'ì—…ë"¤ ìƒì„±
         std::vector<uint32_t> createTasksForPointCloudFile(const PointCloudFileInfo& pc_file,
             const BIMComparisonParams& params,
             TaskPriority priority) {
@@ -1564,25 +1564,16 @@ namespace DPApp {
             PointCloudFileInfo info(file_path);
 
             try {
-                // ë¹ ë¥¸ ë©"íƒ€ë°ì´í„° ìˆ˜ì§' (ì‹¤ì œ ë¡œë"© ì—†ì´)
                 std::string extension = std::filesystem::path(file_path).extension().string();
                 (std::transform)(extension.begin(), extension.end(), extension.begin(), ::tolower);
 
-                // íŒŒì¼ í¬ê¸° ê¸°ë°˜ ì¶"ì • (ì‹¤ì œë¡œëŠ" í—¤ë" íŒŒì‹±)
                 auto file_size = std::filesystem::file_size(file_path);
 
-                if (extension == ".las" || extension == ".laz") {
-                    // LAS íŒŒì¼ì˜ ëŒ€ëžµì ì¸ í¬ì¸íŠ¸ ìˆ˜ ì¶"ì •
-                    info.point_count = file_size / 28; // ëŒ€ëžµì ì¸ í¬ì¸íŠ¸ë‹¹ ë°"ì´íŠ¸ ìˆ˜
-                }
-                else if (extension == ".xyz" || extension == ".pts") {
-                    // í…ìŠ¤íŠ¸ íŒŒì¼ì˜ ê²½ìš° ë¼ì¸ ìˆ˜ ê¸°ë°˜ ì¶"ì •
-                    std::ifstream file(file_path);
-                    info.point_count = (std::count)(std::istreambuf_iterator<char>(file),
-                        std::istreambuf_iterator<char>(), '\n');
+                if (extension == ".pts" || extension == ".xyz") {
+                    info.point_count = ptsfile::countPointsInFile(file_path);                    
                 }
                 else {
-                    info.point_count = file_size / 20; // ê¸°ë³¸ ì¶"ì •ê°'
+                    throw std::runtime_error("It's not a *.pts file: " + file_path);
                 }
 
                 std::cout << "File info collected: " << info.file_name
