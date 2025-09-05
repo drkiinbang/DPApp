@@ -15,6 +15,9 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #pragma comment(lib, "ws2_32.lib")
+#ifndef INET_ADDRSTRLEN
+#define INET_ADDRSTRLEN 16
+#endif
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -171,6 +174,8 @@ public:
     size_t getClientCount() const;
 
 private:
+    std::string sockaddrToString(const sockaddr_in& addr);
+
     void serverThread();
     void clientHandlerThread(std::shared_ptr<ClientConnection> client);
     void heartbeatThread();

@@ -156,19 +156,7 @@ void NetworkServer::serverThread() {
             continue;
         }
 
-        char client_address_buf[INET_ADDRSTRLEN];
-        const char* addr_result = inet_ntop(AF_INET, &client_addr.sin_addr,
-            client_address_buf, INET_ADDRSTRLEN);
-
-        std::string client_address;
-        if (addr_result != nullptr) {
-            client_address = std::string(client_address_buf);
-        }
-        else {
-            client_address = "unknown";
-            std::cerr << "Failed to convert client address" << std::endl;
-        }
-
+        std::string client_address = sockaddrToString(client_addr);
         uint16_t client_port = ntohs(client_addr.sin_port);
 
         auto client = std::make_shared<ClientConnection>(client_socket, client_address, client_port);
@@ -381,6 +369,20 @@ bool NetworkServer::broadcastMessage(const NetworkMessage& message) {
     }
 
     return success;
+}
+
+std::string NetworkServer::sockaddrToString(const sockaddr_in& addr) {
+    char buffer[INET_ADDRSTRLEN];
+    const char* result = inet_ntop(AF_INET, &addr.sin_addr, buffer, INET_ADDRSTRLEN);
+
+    if (result != nullptr) {
+        return std::string(buffer);
+    }
+    else {
+        /// Error logging
+        WLOG << "Failed to convert sockaddr to string, error: " << errno;
+        return "0.0.0.0";  // 기본값 반환
+    }
 }
 
 } // namespace DPApp
