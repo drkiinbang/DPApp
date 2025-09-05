@@ -1,5 +1,4 @@
-// IntegrationTest.cpp : This file contains the 'main' function. Program execution begins and ends there.
-//
+// IntegrationTest.cpp - Updated for latest codebase
 #include <iostream>
 #include <thread>
 #include <chrono>
@@ -11,6 +10,7 @@
 #include "../../include/PointCloudTypes.h"
 #include "../../include/NetworkManager.h"
 #include "../../include/TaskManager.h"
+#include "../../include/Logger.h"
 
 using namespace DPApp;
 using namespace std::chrono_literals;
@@ -18,7 +18,10 @@ using namespace std::chrono_literals;
 int main_simpleTest() {
     std::cout << "=== Simple Connection Test ===" << std::endl;
 
-    // 서버 시작
+    // Logger 초기화
+    DPApp::Logger::initialize("integration_test.log");
+    DPApp::Logger::setMinLevel(DPApp::LogLevel::INFO);
+
     auto server = std::make_unique<NetworkServer>();
 
     bool client_connected = false;
@@ -40,7 +43,6 @@ int main_simpleTest() {
     std::cout << "Server started on port 9999" << std::endl;
     std::this_thread::sleep_for(std::chrono::seconds(2));
 
-    // 클라이언트 연결
     auto client = std::make_unique<NetworkClient>();
 
     client->setConnectionCallback([](const std::string& client_id, bool connected) {
@@ -54,7 +56,6 @@ int main_simpleTest() {
         return 1;
     }
 
-    // 연결 유지
     std::cout << "Connection established, maintaining for 10 seconds..." << std::endl;
     std::this_thread::sleep_for(std::chrono::seconds(10));
 
@@ -82,7 +83,6 @@ public:
     static std::vector<TestResult> runAllTests();
 
 private:
-    // 테스트 케이스들
     static TestResult testBasicNetworkCommunication();
     static TestResult testMasterSlaveRegistration();
     static TestResult testTaskAssignmentAndExecution();
@@ -90,25 +90,24 @@ private:
     static TestResult testWorkerDisconnectionRecovery();
     static TestResult testDataIntegrity();
     static TestResult testHeartbeatSystem();
+    static TestResult testBIMComparisonTasks();
 
-    // 헬퍼 함수들
-    static bool startMasterInBackground(int port);
-    static bool startSimulatedWorker(const std::string& master_ip, int port, const std::string& worker_id);
-    static void createTestPointCloudData(const std::string& filename);
     static bool waitForCondition(std::function<bool()> condition, int timeout_seconds = 10);
+    static void createTestPointCloudData(const std::string& filename);
     static void cleanupTestFiles();
 };
 
-// 메인 테스트 실행 함수
 std::vector<IntegrationTestFramework::TestResult> IntegrationTestFramework::runAllTests() {
     std::vector<TestResult> results;
 
     std::cout << "=== Starting Integration Tests ===" << std::endl;
 
-    // 테스트 데이터 준비
+    // Logger 초기화
+    DPApp::Logger::initialize("integration_test.log");
+    DPApp::Logger::setMinLevel(DPApp::LogLevel::INFO);
+
     createTestPointCloudData("test_data.xyz");
 
-    // 각 테스트 실행
     std::vector<std::function<TestResult()>> tests = {
         testBasicNetworkCommunication,
         testMasterSlaveRegistration,
@@ -116,7 +115,8 @@ std::vector<IntegrationTestFramework::TestResult> IntegrationTestFramework::runA
         testMultipleWorkersScenario,
         testWorkerDisconnectionRecovery,
         testDataIntegrity,
-        testHeartbeatSystem
+        testHeartbeatSystem,
+        testBIMComparisonTasks
     };
 
     for (auto& test : tests) {
@@ -134,13 +134,11 @@ std::vector<IntegrationTestFramework::TestResult> IntegrationTestFramework::runA
         }
         std::cout << std::endl;
 
-        // 테스트 간 정리 시간
         std::this_thread::sleep_for(1s);
     }
 
     cleanupTestFiles();
 
-    // 결과 요약
     int passed = 0, failed = 0;
     for (const auto& result : results) {
         if (result.passed) passed++; else failed++;
@@ -152,7 +150,6 @@ std::vector<IntegrationTestFramework::TestResult> IntegrationTestFramework::runA
     return results;
 }
 
-// Test 1: 기본 네트워크 통신
 IntegrationTestFramework::TestResult IntegrationTestFramework::testBasicNetworkCommunication() {
     TestResult result{ "Basic Network Communication", false, "", 0 };
 
@@ -193,7 +190,6 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testBasicNetworkC
             return result;
         }
 
-        // 연결 확인 - SimpleTest와 동일하게 10초 대기
         std::cout << "Waiting for callbacks..." << std::endl;
         bool success = waitForCondition([&]() {
             return server_received_connection.load() && client_callback_called.load();
@@ -207,7 +203,7 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testBasicNetworkC
         }
 
         std::cout << "Connection established, maintaining..." << std::endl;
-        std::this_thread::sleep_for(3s); // 연결 유지
+        std::this_thread::sleep_for(3s);
 
         std::cout << "Disconnecting..." << std::endl;
         client->disconnect();
@@ -224,13 +220,12 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testBasicNetworkC
     return result;
 }
 
-// Test 2: Master-Slave 등록
 IntegrationTestFramework::TestResult IntegrationTestFramework::testMasterSlaveRegistration() {
     TestResult result{ "Master-Slave Registration", false, "", 0 };
 
     try {
         auto server = std::make_unique<NetworkServer>();
-        auto task_manager = std::make_unique<TaskManager>(300);
+        auto task_manager = std::make_unique<TaskManager>(300); // timeout_seconds 매개변수 추가
 
         std::atomic<int> registered_slaves{ 0 };
         std::atomic<int> connected_clients{ 0 };
@@ -265,7 +260,6 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testMasterSlaveRe
         std::cout << "Server started on 8082, waiting for stabilization..." << std::endl;
         std::this_thread::sleep_for(2s);
 
-        // 여러 워커 시뮬레이션 - 순차적으로 연결
         std::vector<std::unique_ptr<NetworkClient>> clients;
         for (int i = 0; i < 3; ++i) {
             std::cout << "Creating client " << i << "..." << std::endl;
@@ -274,8 +268,6 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testMasterSlaveRe
             if (client->connect("127.0.0.1", 8082)) {
                 clients.push_back(std::move(client));
                 std::cout << "Client " << i << " connected" << std::endl;
-
-                // 클라이언트 간 연결 간격
                 std::this_thread::sleep_for(1s);
             }
             else {
@@ -285,12 +277,11 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testMasterSlaveRe
 
         std::cout << "All clients connected, waiting for registration..." << std::endl;
 
-        // 등록 확인 - 더 긴 타임아웃과 상세한 로깅
         bool registration_success = waitForCondition([&]() {
             std::cout << "Checking registration: registered=" << registered_slaves.load()
                 << ", connected=" << connected_clients.load() << std::endl;
             return registered_slaves.load() >= 3;
-            }, 30); // 30초로 증가
+            }, 30);
 
         if (!registration_success) {
             result.error_message = "Slave registration timeout - registered: " +
@@ -309,7 +300,6 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testMasterSlaveRe
             return result;
         }
 
-        // 안전한 종료
         for (auto& client : clients) {
             client->disconnect();
         }
@@ -326,7 +316,6 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testMasterSlaveRe
     return result;
 }
 
-// Test 3: 작업 할당 및 실행
 IntegrationTestFramework::TestResult IntegrationTestFramework::testTaskAssignmentAndExecution() {
     TestResult result{ "Task Assignment and Execution", false, "", 0 };
 
@@ -341,21 +330,18 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testTaskAssignmen
             chunk->points.emplace_back(i * 0.1, i * 0.1, i * 0.1);
         }
 
-        // 작업 추가
+        // 올바른 TaskType enum 사용
         std::vector<uint8_t> params;
-        uint32_t task_id = task_manager->addTask("filter", chunk, params);
+        uint32_t task_id = task_manager->addTask(TaskType::FILTER, chunk, params);
 
-        // 워커 등록
         task_manager->registerSlave("test_worker");
 
-        // 작업 할당
         bool assigned = task_manager->assignTasksToSlaves();
         if (!assigned) {
             result.error_message = "Failed to assign tasks";
             return result;
         }
 
-        // 할당된 작업 확인
         auto assigned_tasks = task_manager->getTasksByStatus(TaskStatus::ASSIGNED);
         if (assigned_tasks.empty()) {
             result.error_message = "No tasks were assigned";
@@ -367,7 +353,7 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testTaskAssignmen
         proc_result.task_id = task_id;
         proc_result.chunk_id = 1;
         proc_result.success = true;
-        proc_result.processed_points = chunk->points; // 단순히 원본 복사
+        proc_result.processed_points = chunk->points;
 
         bool completed = task_manager->completeTask(task_id, proc_result);
         if (!completed) {
@@ -375,7 +361,6 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testTaskAssignmen
             return result;
         }
 
-        // 완료된 작업 확인
         auto completed_tasks = task_manager->getTasksByStatus(TaskStatus::COMPLETED);
         if (completed_tasks.empty()) {
             result.error_message = "Task was not marked as completed";
@@ -391,7 +376,6 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testTaskAssignmen
     return result;
 }
 
-// Test 4: 다중 워커 시나리오
 IntegrationTestFramework::TestResult IntegrationTestFramework::testMultipleWorkersScenario() {
     TestResult result{ "Multiple Workers Scenario", false, "", 0 };
 
@@ -404,8 +388,12 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testMultipleWorke
             return result;
         }
 
-        // 여러 작업 생성
+        // 여러 작업 생성 - 다양한 TaskType 사용
         std::vector<uint32_t> task_ids;
+        std::vector<TaskType> task_types = {
+            TaskType::FILTER
+        };
+
         for (int i = 0; i < 5; ++i) {
             auto chunk = std::make_shared<PointCloudChunk>();
             chunk->chunk_id = i;
@@ -414,7 +402,8 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testMultipleWorke
             }
 
             std::vector<uint8_t> params;
-            uint32_t task_id = task_manager->addTask("filter", chunk, params);
+            TaskType task_type = task_types[i % task_types.size()];
+            uint32_t task_id = task_manager->addTask(task_type, chunk, params);
             task_ids.push_back(task_id);
         }
 
@@ -423,7 +412,6 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testMultipleWorke
             task_manager->registerSlave("worker_" + std::to_string(i));
         }
 
-        // 작업 할당
         bool assigned = task_manager->assignTasksToSlaves();
         if (!assigned) {
             result.error_message = "Failed to assign tasks to multiple workers";
@@ -431,9 +419,8 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testMultipleWorke
             return result;
         }
 
-        // 할당 확인
         auto assigned_tasks = task_manager->getTasksByStatus(TaskStatus::ASSIGNED);
-        if (assigned_tasks.size() < 3) { // 최소 3개는 할당되어야 함
+        if (assigned_tasks.size() < 3) {
             result.error_message = "Insufficient tasks assigned to workers";
             server->stop();
             return result;
@@ -449,20 +436,18 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testMultipleWorke
     return result;
 }
 
-// Test 5: 워커 연결 해제 복구
 IntegrationTestFramework::TestResult IntegrationTestFramework::testWorkerDisconnectionRecovery() {
     TestResult result{ "Worker Disconnection Recovery", false, "", 0 };
 
     try {
         auto task_manager = std::make_unique<TaskManager>(300);
 
-        // 워커 등록 및 작업 할당
         task_manager->registerSlave("worker_1");
 
         auto chunk = std::make_shared<PointCloudChunk>();
         chunk->chunk_id = 1;
         std::vector<uint8_t> params;
-        uint32_t task_id = task_manager->addTask("filter", chunk, params);
+        uint32_t task_id = task_manager->addTask(TaskType::FILTER, chunk, params);
 
         task_manager->assignTasksToSlaves();
 
@@ -494,7 +479,6 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testWorkerDisconn
     return result;
 }
 
-// Test 6: 데이터 무결성
 IntegrationTestFramework::TestResult IntegrationTestFramework::testDataIntegrity() {
     TestResult result{ "Data Integrity", false, "", 0 };
 
@@ -507,8 +491,16 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testDataIntegrity
         original_chunk.min_z = 0.0;   original_chunk.max_z = 15.0;
 
         for (int i = 0; i < 10; ++i) {
-            original_chunk.points.emplace_back(i * 1.0, i * 0.5, i * 1.5,
-                i * 10.0f, 255, 128, 64);
+            Point3D point;
+            point.x = i * 1.0;
+            point.y = i * 0.5;
+            point.z = i * 1.5;
+            point.intensity = i * 10.0f;
+            point.r = 255;
+            point.g = 128;
+            point.b = 64;
+            point.classification = i % 10;
+            original_chunk.points.push_back(point);
         }
 
         // 직렬화
@@ -538,6 +530,29 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testDataIntegrity
                 result.error_message = "Point coordinate mismatch at index " + std::to_string(i);
                 return result;
             }
+
+            if (orig.r != deser.r || orig.g != deser.g || orig.b != deser.b) {
+                result.error_message = "Point color mismatch at index " + std::to_string(i);
+                return result;
+            }
+        }
+
+        // Task 직렬화/역직렬화 테스트
+        ProcessingTask original_task;
+        original_task.task_id = 123;
+        original_task.chunk_id = 456;
+        original_task.task_type = TaskType::BIM_DISTANCE_CALCULATION;
+        original_task.parameters = { 1, 2, 3, 4, 5 };
+
+        auto task_serialized = NetworkUtils::serializeTask(original_task);
+        auto task_deserialized = NetworkUtils::deserializeTask(task_serialized);
+
+        if (task_deserialized.task_id != original_task.task_id ||
+            task_deserialized.chunk_id != original_task.chunk_id ||
+            task_deserialized.task_type != original_task.task_type ||
+            task_deserialized.parameters != original_task.parameters) {
+            result.error_message = "Task serialization/deserialization failed";
+            return result;
         }
 
         result.passed = true;
@@ -549,17 +564,13 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testDataIntegrity
     return result;
 }
 
-// Test 7: 하트비트 시스템
 IntegrationTestFramework::TestResult IntegrationTestFramework::testHeartbeatSystem() {
     TestResult result{ "Heartbeat System", false, "", 0 };
 
     try {
         auto task_manager = std::make_unique<TaskManager>(300);
 
-        // 워커 등록
         task_manager->registerSlave("heartbeat_worker");
-
-        // 초기 하트비트
         task_manager->updateSlaveHeartbeat("heartbeat_worker");
 
         auto slaves = task_manager->getAllSlaves();
@@ -568,7 +579,6 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testHeartbeatSyst
             return result;
         }
 
-        // 하트비트가 기록되었는지 확인
         bool found_worker = false;
         for (const auto& slave : slaves) {
             if (slave.slave_id == "heartbeat_worker" && slave.is_active) {
@@ -582,6 +592,31 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testHeartbeatSyst
             return result;
         }
 
+        // 타임아웃 테스트 (짧은 타임아웃으로 설정)
+        auto short_timeout_manager = std::make_unique<TaskManager>(1); // 1초 타임아웃
+        short_timeout_manager->registerSlave("timeout_test_worker");
+
+        // 하트비트 없이 2초 대기
+        std::this_thread::sleep_for(2s);
+
+        // 타임아웃 체크 수행
+        short_timeout_manager->checkTimeouts();
+
+        auto slaves_after_timeout = short_timeout_manager->getAllSlaves();
+        bool worker_still_active = false;
+        for (const auto& slave : slaves_after_timeout) {
+            if (slave.slave_id == "timeout_test_worker" && slave.is_active) {
+                worker_still_active = true;
+                break;
+            }
+        }
+
+        // 타임아웃된 워커는 비활성화되어야 함
+        if (worker_still_active) {
+            result.error_message = "Worker should be inactive after timeout";
+            return result;
+        }
+
         result.passed = true;
     }
     catch (const std::exception& e) {
@@ -591,7 +626,101 @@ IntegrationTestFramework::TestResult IntegrationTestFramework::testHeartbeatSyst
     return result;
 }
 
-// 헬퍼 함수들
+IntegrationTestFramework::TestResult IntegrationTestFramework::testBIMComparisonTasks() {
+    TestResult result{ "BIM Comparison Tasks", false, "", 0 };
+
+    try {
+        auto task_manager = std::make_unique<TaskManager>(300);
+
+        // BIM 비교 작업을 위한 테스트 데이터 생성
+        auto chunk = std::make_shared<PointCloudChunk>();
+        chunk->chunk_id = 1;
+        for (int i = 0; i < 50; ++i) {
+            Point3D point;
+            point.x = i * 0.1;
+            point.y = i * 0.1;
+            point.z = i * 0.1;
+            chunk->points.push_back(point);
+        }
+
+        // BIM 비교 파라미터 생성
+        std::string bim_folder = "./test_bim";
+        std::string bim_pattern = "*.gltf";
+        std::string pc_file = "./test_pc.las";
+        float distance_threshold = 10.0f;
+        bool enable_color_coding = true;
+
+        std::vector<uint8_t> parameters;
+
+        // BIM 폴더 경로
+        uint32_t bim_path_len = static_cast<uint32_t>(bim_folder.length());
+        parameters.insert(parameters.end(),
+            reinterpret_cast<const uint8_t*>(&bim_path_len),
+            reinterpret_cast<const uint8_t*>(&bim_path_len) + sizeof(uint32_t));
+        parameters.insert(parameters.end(), bim_folder.begin(), bim_folder.end());
+
+        // BIM 파일 패턴
+        uint32_t bim_pattern_len = static_cast<uint32_t>(bim_pattern.length());
+        parameters.insert(parameters.end(),
+            reinterpret_cast<const uint8_t*>(&bim_pattern_len),
+            reinterpret_cast<const uint8_t*>(&bim_pattern_len) + sizeof(uint32_t));
+        parameters.insert(parameters.end(), bim_pattern.begin(), bim_pattern.end());
+
+        // 원본 Point Cloud 파일 경로
+        uint32_t pc_path_len = static_cast<uint32_t>(pc_file.length());
+        parameters.insert(parameters.end(),
+            reinterpret_cast<const uint8_t*>(&pc_path_len),
+            reinterpret_cast<const uint8_t*>(&pc_path_len) + sizeof(uint32_t));
+        parameters.insert(parameters.end(), pc_file.begin(), pc_file.end());
+
+        // 거리 임계값과 색상 코딩 플래그
+        parameters.insert(parameters.end(),
+            reinterpret_cast<const uint8_t*>(&distance_threshold),
+            reinterpret_cast<const uint8_t*>(&distance_threshold) + sizeof(float));
+
+        uint8_t color_flag = enable_color_coding ? 1 : 0;
+        parameters.push_back(color_flag);
+
+        // BIM 비교 작업 생성
+        uint32_t task_id = task_manager->addTask(TaskType::BIM_DISTANCE_CALCULATION, chunk, parameters);
+
+        if (task_id == 0) {
+            result.error_message = "Failed to create BIM comparison task";
+            return result;
+        }
+
+        // 워커 등록 및 작업 할당
+        task_manager->registerSlave("bim_worker");
+        bool assigned = task_manager->assignTasksToSlaves();
+
+        if (!assigned) {
+            result.error_message = "Failed to assign BIM comparison task";
+            return result;
+        }
+
+        auto assigned_tasks = task_manager->getTasksByStatus(TaskStatus::ASSIGNED);
+        bool bim_task_found = false;
+        for (const auto& task : assigned_tasks) {
+            if (task.task_type == TaskType::BIM_DISTANCE_CALCULATION) {
+                bim_task_found = true;
+                break;
+            }
+        }
+
+        if (!bim_task_found) {
+            result.error_message = "BIM comparison task was not assigned";
+            return result;
+        }
+
+        result.passed = true;
+    }
+    catch (const std::exception& e) {
+        result.error_message = std::string("Exception: ") + e.what();
+    }
+
+    return result;
+}
+
 bool IntegrationTestFramework::waitForCondition(std::function<bool()> condition, int timeout_seconds) {
     auto start = std::chrono::steady_clock::now();
     while (std::chrono::steady_clock::now() - start < std::chrono::seconds(timeout_seconds)) {
@@ -616,16 +745,14 @@ void IntegrationTestFramework::createTestPointCloudData(const std::string& filen
 
 void IntegrationTestFramework::cleanupTestFiles() {
     std::remove("test_data.xyz");
+    DPApp::Logger::shutdown();
 }
 
-// 메인 테스트 실행 프로그램
 int main() {
-
     bool simpleTest = false;
 
     if (simpleTest) {
-        main_simpleTest();
-        return 0;
+        return main_simpleTest();
     }
 
     std::cout << "DPApp Integration Test Suite" << std::endl;
@@ -633,7 +760,6 @@ int main() {
 
     auto results = IntegrationTestFramework::runAllTests();
 
-    // 실패한 테스트가 있으면 1 반환
     for (const auto& result : results) {
         if (!result.passed) {
             return 1;
