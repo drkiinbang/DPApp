@@ -709,8 +709,9 @@ namespace DPApp {
             std::lock_guard<std::mutex> tasks_lock(tasks_mutex_);
 
             auto now = std::chrono::steady_clock::now();
-            int timed_out_count = 0;
 
+            /// Check task timeout
+            int timed_out_count = 0;
             for (auto& [task_id, task_info] : tasks_) {
                 if (task_info.status == TaskStatus::ASSIGNED || task_info.status == TaskStatus::IN_PROGRESS) {
                     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
@@ -733,6 +734,22 @@ namespace DPApp {
 
                         // ìž¬ì‹œë„ë¥¼ ìœ„í•´ ë‹¤ì‹œ ëŒ€ê¸° ìƒíƒœë¡œ ë³€ê²½
                         failTask(task_id, "Task timeout");
+                    }
+                }
+            }
+
+            /// Check slave timeout
+            int timed_out_slaves = 0;
+            for (auto& [slave_id, slave_info] : slaves_) {
+                if (slave_info.is_active) {
+                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                        now - slave_info.last_heartbeat).count();
+
+                    if (elapsed > static_cast<int64_t>(task_timeout_seconds_)) {
+                        slave_info.is_active = false;  // 비활성화
+                        timed_out_slaves++;
+                        std::cout << "Slave " << slave_id << " timed out after "
+                            << elapsed << " seconds" << std::endl;
                     }
                 }
             }

@@ -284,13 +284,13 @@ void NetworkServer::heartbeatThread() {
                 auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
                     now - client->last_heartbeat).count();
                 
-                if (elapsed > cfg_.heartbeat_timeout_seconds) {  // 30초 타임아웃
+                if (elapsed > cfg_.heartbeat_timeout_seconds) {
                     disconnected_clients.push_back(client_id);
                 }
             }
         }
         
-        // 타임아웃된 클라이언트 제거
+        /// Remove timeout clients
         for (const auto& client_id : disconnected_clients) {
             disconnectClient(client_id);
         }
