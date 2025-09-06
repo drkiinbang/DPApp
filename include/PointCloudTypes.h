@@ -17,7 +17,7 @@ enum class TaskType : uint8_t {
     BIM_DISTANCE_CALCULATION
     };
 
-// Enum을 문자열로 변환 (로깅용)
+/// TaskType to string
 inline const char* taskStr(TaskType type) {
     switch (type) {
     case TaskType::FILTER: return "filter";
@@ -26,20 +26,19 @@ inline const char* taskStr(TaskType type) {
     }
 }
 
-// 문자열을 Enum으로 변환 (사용자 입력 처리용)
+/// String to TaskType
 inline TaskType strTask(const std::string& str) {
     if (str == "filter") return TaskType::FILTER;
     if (str == "bim_distance_calculation") return TaskType::BIM_DISTANCE_CALCULATION;
     return TaskType::UNKNOWN;
 }
-// ==========================================================
 
-// 3D 포인트 구조체
+/// 3D point struct
 struct Point3D {
     double x, y, z;
-    float intensity;        // 강도값 (LAS 파일용)
-    uint8_t r, g, b;       // RGB 색상값
-    uint16_t classification; // 분류 정보
+    float intensity; /// intensity (for las)
+    uint8_t r, g, b; /// RGB
+    uint16_t classification; /// classification info
     
     Point3D() : x(0), y(0), z(0), intensity(0), r(0), g(0), b(0), classification(0) {}
     Point3D(double x_, double y_, double z_) : x(x_), y(y_), z(z_), intensity(0), r(0), g(0), b(0), classification(0) {}
@@ -47,7 +46,7 @@ struct Point3D {
         : x(x_), y(y_), z(z_), intensity(intensity_), r(r_), g(g_), b(b_), classification(0) {}
 };
 
-// 포인트클라우드 헤더 정보
+/// Pointcloud heade info
 struct PointCloudHeader {
     std::string filename;
     uint64_t point_count;
@@ -58,19 +57,19 @@ struct PointCloudHeader {
     PointCloudHeader() : point_count(0), min_x(0), min_y(0), min_z(0), max_x(0), max_y(0), max_z(0) {}
 };
 
-// 포인트클라우드 청크 (작업 단위)
+/// Pointcloud chunk
 struct PointCloudChunk {
     uint32_t chunk_id;
     std::vector<Point3D> points;
     PointCloudHeader header;
     
-    // 바운딩 박스
+    /// Bounding box
     double min_x, min_y, min_z;
     double max_x, max_y, max_z;
     
     PointCloudChunk() : chunk_id(0), min_x(0), min_y(0), min_z(0), max_x(0), max_y(0), max_z(0) {}
     
-    /// 바운딩 박스 계산
+    /// Compute bounding box
     void calculateBounds() {
         if (points.empty()) {
             min_x = min_y = min_z = 0;
@@ -92,41 +91,41 @@ struct PointCloudChunk {
         }
     }
     
-    // 청크 크기 반환 (바이트)
+    /// Get chunk size in byte
     size_t getSize() const {
         return sizeof(PointCloudChunk) + points.size() * sizeof(Point3D);
     }
 };
 
-// 처리 작업 정의
+/// Processing task definition
 struct ProcessingTask {
     uint32_t task_id;
     uint32_t chunk_id;
-    TaskType task_type;      // "filter", "classification", "normal_estimation" 등
-    std::vector<uint8_t> parameters; // 작업별 파라미터 (직렬화됨)
+    TaskType task_type;
+    std::vector<uint8_t> parameters;
     
     ProcessingTask() : task_id(0), chunk_id(0), task_type(TaskType::UNKNOWN) {}
 };
 
-// 처리 결과
+/// Processing result
 struct ProcessingResult {
     uint32_t task_id;
     uint32_t chunk_id;
     bool success;
     std::string error_message;
-    std::vector<Point3D> processed_points;  // 처리된 포인트들
-    std::vector<uint8_t> result_data;       // 추가 결과 데이터
+    std::vector<Point3D> processed_points; /// Processed points
+    std::vector<uint8_t> result_data; /// Additional result data
     
     ProcessingResult() : task_id(0), chunk_id(0), success(false) {}
 };
 
-// 전체 포인트클라우드 관리
+/// Pointcloud class
 class PointCloud {
 public:
     PointCloud() { clear(); }
     ~PointCloud() {}
     
-    // 파일 로드/저장
+    /// Load a pointcloud file
     bool loadFromFile(const std::string& filename) {
         std::ifstream file(filename);
         if (!file.is_open()) {
@@ -136,7 +135,7 @@ public:
         clear();
         header_.filename = filename;
 
-        // 간단한 XYZ 파일 형식으로 로드
+        /// Load a simple xyz format file
         std::string line;
         while (std::getline(file, line)) {
             if (line.empty() || line[0] == '#') continue;
@@ -147,7 +146,7 @@ public:
             uint8_t r = 255, g = 255, b = 255;
 
             if (iss >> x >> y >> z) {
-                // 추가 데이터가 있으면 읽기
+                /// It additional info available
                 iss >> intensity >> r >> g >> b;
 
                 Point3D point(x, y, z, intensity, r, g, b);
@@ -168,14 +167,14 @@ public:
             return false;
         }
 
-        // 헤더 정보 작성
+        /// Create header info
         file << "# Point Cloud Data\n";
         file << "# Points: " << points_.size() << "\n";
         file << "# Bounds: [" << header_.min_x << "," << header_.min_y << "," << header_.min_z
             << "] to [" << header_.max_x << "," << header_.max_y << "," << header_.max_z << "]\n";
         file << "# Format: X Y Z Intensity R G B\n";
 
-        // 포인트 데이터 저장
+        /// Store point data
         for (const auto& point : points_) {
             file << point.x << " " << point.y << " " << point.z << " "
                 << point.intensity << " "
@@ -188,7 +187,7 @@ public:
         return true;
     }
     
-    // 청크 분할
+    /// Chunk split
     std::vector<PointCloudChunk> splitIntoChunks(size_t max_points_per_chunk) {
         std::vector<PointCloudChunk> chunks;
 
@@ -214,7 +213,7 @@ public:
         return chunks;
     }
     
-    // 청크 병합
+    /// Merge chunks
     void mergeChunks(const std::vector<PointCloudChunk>& chunks) {
         clear();
 
@@ -225,26 +224,28 @@ public:
         updateBounds();
     }
     
-    // 포인트 추가/삭제
+    /// Add a point
     void addPoint(const Point3D& point) {
         points_.push_back(point);
     }
 
+    /// Add points
     void addPoints(const std::vector<Point3D>& points) {
         points_.insert(points_.end(), points.begin(), points.end());
     }
     
+    /// Clear points
     void clear() {
         points_.clear();
         header_ = PointCloudHeader();
     }
     
-    // 정보 조회
+    ///  Get pointcloud info
     size_t getPointCount() const { return points_.size(); }
     const PointCloudHeader& getHeader() const { return header_; }
     const std::vector<Point3D>& getPoints() const { return points_; }
     
-    // 바운딩 박스 업데이트
+    /// Update bounding box
     void updateBounds() {
         if (points_.empty()) {
             header_.min_x = header_.min_y = header_.min_z = 0;
