@@ -135,7 +135,6 @@ namespace las {
 
         static constexpr std::size_t PROGRESS_INTERVAL = 50000;
         static constexpr int MAX_CLASSIFICATION = 256;
-        static constexpr std::size_t EXPECTED_POINTS_RESERVE = 1000000;
 
         // Static classification names using function to avoid initialization order issues
         [[nodiscard]] static const std::unordered_map<int, std::string_view>& getClassificationNames() noexcept {
@@ -246,6 +245,27 @@ namespace las {
             T old_value = std::move(obj);
             obj = std::forward<U>(new_value);
             return old_value;
+        }
+
+        std::size_t getAvailableMemoryMB() const {
+            MEMORYSTATUSEX memInfo;
+            memInfo.dwLength = sizeof(MEMORYSTATUSEX);
+            GlobalMemoryStatusEx(&memInfo);
+
+            return static_cast<std::size_t>(memInfo.ullAvailPhys / (1024 * 1024));
+        }
+
+        std::size_t calculateOptimalReserveSize(std::size_t total_points,
+            std::size_t estimated_filtered) const {
+            const std::size_t max_memory_mb = getAvailableMemoryMB();
+            const std::size_t point_size = sizeof(PointData);
+            const std::size_t max_points = (max_memory_mb * 1024 * 1024) / point_size / 2; /// 50%
+
+            return (std::min)({
+                estimated_filtered,
+                max_points,
+                total_points
+                });
         }
 
     public:
@@ -371,10 +391,9 @@ namespace las {
                 }
             }
 
-            auto retval = printoutmsg.str();
-            std::cout << retval;
+            std::cout << printoutmsg.str();
 
-            return retval;
+            return printoutmsg.str();
         }
 
         [[nodiscard]] bool loadAllPoints() {
@@ -424,6 +443,7 @@ namespace las {
             I64 seek_index = static_cast<I64>(start_idx);
 
             if (!reader_->seek(seek_index)) {
+                std::cerr << "reader_->seek(" << seek_index << "\n";
                 return false;
             }
 
@@ -453,8 +473,11 @@ namespace las {
                 return false;
             }
 
+            const auto total_points = static_cast<std::size_t>(reader_->npoints);
+            const auto reserve_size = calculateOptimalReserveSize(total_points, total_points / 10);
+
             loaded_points_.clear();
-            loaded_points_.reserve(EXPECTED_POINTS_RESERVE);
+            loaded_points_.reserve(reserve_size);
 
             reader_->seek(0);
             std::size_t count = 0, total_count = 0;

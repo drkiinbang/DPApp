@@ -148,7 +148,6 @@ LASZIP_DLL_EXPORT=;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefin
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\include\LasLibWrapper.hpp" />
-    <ClInclude Include="SimpleLasReader.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

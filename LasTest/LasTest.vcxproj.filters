@@ -23,9 +23,6 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="SimpleLasReader.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="..\include\LasLibWrapper.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
