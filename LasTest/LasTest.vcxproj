@@ -113,7 +113,7 @@ _USE_MATH_DEFINES;
 LASZIP_DLL_EXPORT=;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>../vendors/LAStools/include/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../vendors/LAStools/include/;../include/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -134,7 +134,7 @@ _USE_MATH_DEFINES;
 LASZIP_DLL_EXPORT=;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>../vendors/LAStools/include/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../vendors/LAStools/include/;../include/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -147,7 +147,7 @@ LASZIP_DLL_EXPORT=;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefin
     <ClCompile Include="LasTest.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="LasLibWrapper.hpp" />
+    <ClInclude Include="..\include\LasLibWrapper.hpp" />
     <ClInclude Include="SimpleLasReader.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
