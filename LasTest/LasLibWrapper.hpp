@@ -323,89 +323,58 @@ namespace las {
             header_info_.reset();
         }
 
-        void printHeader() const {
+        std::string printHeader() const {
             if (!reader_ || !header_info_) {
                 std::cerr << "File is not open\n";
-                return;
+                return std::string("");
             }
 
             const auto& info = *header_info_;
+            std::stringstream printoutmsg;
 
-            std::cout << "\n========== File Header Information ==========\n";
-            std::cout << "File signature: " << info.file_signature << '\n';
-            std::cout << "LAS version: " << static_cast<int>(info.version_major)
+            printoutmsg << "\n========== File Header Information ==========\n";
+            printoutmsg << "File signature: " << info.file_signature << '\n';
+            printoutmsg << "LAS version: " << static_cast<int>(info.version_major)
                 << '.' << static_cast<int>(info.version_minor) << '\n';
-            std::cout << "System identifier: " << info.system_identifier << '\n';
-            std::cout << "Generating software: " << info.generating_software << '\n';
-            std::cout << "Creation date: " << info.file_creation_day
+            printoutmsg << "System identifier: " << info.system_identifier << '\n';
+            printoutmsg << "Generating software: " << info.generating_software << '\n';
+            printoutmsg << "Creation date: " << info.file_creation_day
                 << "/" << info.file_creation_year << '\n';
 
-            std::cout << "\nPoint Information:\n";
-            std::cout << "Point count: " << info.number_of_point_records << '\n';
-            std::cout << "Point data format: " << static_cast<int>(info.point_data_format) << '\n';
-            std::cout << "Point record length: " << info.point_data_record_length << " bytes\n";
+            printoutmsg << "\nPoint Information:\n";
+            printoutmsg << "Point count: " << info.number_of_point_records << '\n';
+            printoutmsg << "Point data format: " << static_cast<int>(info.point_data_format) << '\n';
+            printoutmsg << "Point record length: " << info.point_data_record_length << " bytes\n";
 
-            std::cout << "\nBounding Box:\n";
-            std::cout << std::fixed << std::setprecision(2);
-            std::cout << "X: [" << info.bounds.min_x << ", " << info.bounds.max_x
+            printoutmsg << "\nBounding Box:\n";
+            printoutmsg << std::fixed << std::setprecision(2);
+            printoutmsg << "X: [" << info.bounds.min_x << ", " << info.bounds.max_x
                 << "] (width: " << info.bounds.width() << ")\n";
-            std::cout << "Y: [" << info.bounds.min_y << ", " << info.bounds.max_y
+            printoutmsg << "Y: [" << info.bounds.min_y << ", " << info.bounds.max_y
                 << "] (height: " << info.bounds.height() << ")\n";
-            std::cout << "Z: [" << info.bounds.min_z << ", " << info.bounds.max_z
+            printoutmsg << "Z: [" << info.bounds.min_z << ", " << info.bounds.max_z
                 << "] (depth: " << info.bounds.depth() << ")\n";
 
-            std::cout << "\nCoordinate Transform:\n";
-            std::cout << std::scientific << std::setprecision(6);
-            std::cout << "X scale: " << info.coordinate_transform.x_scale
+            printoutmsg << "\nCoordinate Transform:\n";
+            printoutmsg << std::scientific << std::setprecision(6);
+            printoutmsg << "X scale: " << info.coordinate_transform.x_scale
                 << ", offset: " << info.coordinate_transform.x_offset << '\n';
-            std::cout << "Y scale: " << info.coordinate_transform.y_scale
+            printoutmsg << "Y scale: " << info.coordinate_transform.y_scale
                 << ", offset: " << info.coordinate_transform.y_offset << '\n';
-            std::cout << "Z scale: " << info.coordinate_transform.z_scale
+            printoutmsg << "Z scale: " << info.coordinate_transform.z_scale
                 << ", offset: " << info.coordinate_transform.z_offset << '\n';
 
-            std::cout << "\nPoints by return:\n";
+            printoutmsg << "\nPoints by return:\n";
             for (std::size_t i = 0; i < info.points_by_return.size(); ++i) {
                 if (info.points_by_return[i] > 0) {
-                    std::cout << "Return " << (i + 1) << ": " << info.points_by_return[i] << '\n';
+                    printoutmsg << "Return " << (i + 1) << ": " << info.points_by_return[i] << '\n';
                 }
             }
-        }
 
-        void printSamplePoints(int max_points = 10) const {
-            if (!reader_) {
-                std::cerr << "File is not open\n";
-                return;
-            }
+            auto retval = printoutmsg.str();
+            std::cout << retval;
 
-            std::cout << "\n========== Sample Point Data ==========\n";
-            std::cout << "No.\tX\t\tY\t\tZ\t\tIntensity\tClass\tReturn\tRGB\n";
-            std::cout << "---------------------------------------------------------------\n";
-
-            reader_->seek(0);
-            int count = 0;
-
-            while (reader_->read_point() && count < max_points) {
-                ++count;
-                const auto point_data = extractPointData(reader_->point);
-
-                std::cout << count << '\t'
-                    << std::fixed << std::setprecision(2)
-                    << point_data.x << '\t' << point_data.y << '\t' << point_data.z << '\t'
-                    << point_data.intensity << '\t' << static_cast<int>(point_data.classification) << '\t'
-                    << static_cast<int>(point_data.return_number) << '/'
-                    << static_cast<int>(point_data.number_of_returns) << '\t';
-
-                if (point_data.hasRGB()) {
-                    std::cout << '(' << point_data.rgb[0] << ','
-                        << point_data.rgb[1] << ',' << point_data.rgb[2] << ')';
-                }
-                else {
-                    std::cout << "-";
-                }
-                std::cout << '\n';
-            }
-
-            std::cout << "Total " << count << " points displayed.\n";
+            return retval;
         }
 
         [[nodiscard]] bool loadAllPoints() {
@@ -452,17 +421,21 @@ namespace las {
             loaded_points_.clear();
             loaded_points_.reserve(end_idx - start_idx);
 
-            reader_->seek(0);
-            std::size_t current_idx = 0;
+            I64 seek_index = static_cast<I64>(start_idx);
 
-            while (reader_->read_point() && current_idx < end_idx) {
-                if (current_idx >= start_idx) {
-                    loaded_points_.emplace_back(extractPointData(reader_->point));
-                }
-                ++current_idx;
+            if (!reader_->seek(seek_index)) {
+                return false;
+            }
 
-                if (current_idx % PROGRESS_INTERVAL == 0) {
-                    displayProgress(current_idx, end_idx, "Loading range");
+            std::size_t points_to_read = end_idx - start_idx;
+            std::size_t count = 0;
+
+            while (reader_->read_point() && count < points_to_read) {
+                loaded_points_.emplace_back(extractPointData(reader_->point));
+                ++count;
+
+                if ((start_idx + count) % PROGRESS_INTERVAL == 0 || count == points_to_read) {
+                    displayProgress(start_idx + count, end_idx, "Loading range (random access)");
                 }
             }
 
@@ -471,7 +444,7 @@ namespace las {
             return true;
         }
 
-        // Load points with filter using template and SFINAE
+        /// Load points with filter using template and SFINAE
         template<typename Filter, typename = std::enable_if_t<
             std::is_invocable_r_v<bool, Filter, const PointData&>>>
             [[nodiscard]] bool loadFilteredPoints(Filter&& filter) {
