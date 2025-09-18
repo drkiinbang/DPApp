@@ -1,7 +1,7 @@
 // LasTest.cpp : This file contains the 'main' function. Program execution begins and ends there.
 //
 
-#include "LasLibWrapper.hpp"
+#include "LaslibWrapper.hpp"
 
 int main() {
 
