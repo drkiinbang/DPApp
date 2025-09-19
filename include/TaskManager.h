@@ -1,6 +1,6 @@
 #pragma once
 
-// Windowsì˜ min/max ë§¤í¬ë¡œì™€ std::min/max ì¶©ëŒ ë°©ì§€
+// Prevent Windows min/max macros from interfering with std::min/max
 #ifdef _WIN32
 #define NOMINMAX
 #endif
@@ -31,11 +31,12 @@
 
 namespace DPApp {
 
-    // BIM ë©"ì‹œ ì •ì  êµ¬ì¡°ì²´
+    /**
+     * @brief 3D mesh vertex structure with basic vector operations
+     */
     struct MeshVertex {
         float x, y, z;
 
-        // 기본 생성자를 명시적으로 정의
         MeshVertex() : x(0.0f), y(0.0f), z(0.0f) {}
 
         MeshVertex(float x_, float y_, float z_)
@@ -50,7 +51,7 @@ namespace DPApp {
             : x(static_cast<float>(x_)), y(static_cast<float>(y_)), z(static_cast<float>(z_)) {
         }
 
-        // ë²¡í„° ì—°ì‚°ì„ ìœ„í•œ ì—°ì‚°ìž ì˜¤ë²„ë¡œë"©
+        // Vector operations
         MeshVertex operator-(const MeshVertex& other) const {
             return MeshVertex(x - other.x, y - other.y, z - other.z);
         }
@@ -72,18 +73,21 @@ namespace DPApp {
         }
     };
 
-    // BIM ë©"ì‹œ ì‚¼ê°í˜• êµ¬ì¡°ì²´
+    /**
+     * @brief Triangle mesh element with utility functions
+     */
     struct MeshTriangle {
         MeshVertex v0, v1, v2;
 
-        // 기본 생성자를 명시적으로 정의
         MeshTriangle() : v0(), v1(), v2() {}
 
         MeshTriangle(const MeshVertex& vertex0, const MeshVertex& vertex1, const MeshVertex& vertex2)
             : v0(vertex0), v1(vertex1), v2(vertex2) {
         }
 
-        // ì‚¼ê°í˜•ì˜ ì¤'ì‹¬ì  ê³„ì‚°
+        /**
+         * @brief Calculate triangle center point
+         */
         MeshVertex center() const {
             return MeshVertex(
                 (v0.x + v1.x + v2.x) / 3.0f,
@@ -92,12 +96,13 @@ namespace DPApp {
             );
         }
 
-        // ì‚¼ê°í˜•ì˜ ë²•ì„  ë²¡í„° ê³„ì‚°
+        /**
+         * @brief Calculate triangle normal vector
+         */
         MeshVertex normal() const {
             MeshVertex edge1 = v1 - v0;
             MeshVertex edge2 = v2 - v0;
 
-            // ì™¸ì  ê³„ì‚°
             MeshVertex cross(
                 edge1.y * edge2.z - edge1.z * edge2.y,
                 edge1.z * edge2.x - edge1.x * edge2.z,
@@ -109,11 +114,13 @@ namespace DPApp {
                 return cross * (1.0f / len);
             }
 
-            return MeshVertex(0.0f, 0.0f, 1.0f); // ê¸°ë³¸ ë²•ì„ 
+            return MeshVertex(0.0f, 0.0f, 1.0f);
         }
     };
 
-    // BIM ë©"ì‹œ ë°ì´í„° êµ¬ì¡°ì²´
+    /**
+     * @brief BIM (Building Information Model) data container
+     */
     struct BIMData {
         std::vector<MeshTriangle> triangles;
         std::string source_file;
@@ -124,7 +131,9 @@ namespace DPApp {
             model_name = std::filesystem::path(file).stem().string();
         }
 
-        // ë°"ìš´ë"© ë°•ìŠ¤ ê³„ì‚°
+        /**
+         * @brief Calculate bounding box of the BIM model
+         */
         void calculateBounds(MeshVertex& min_bounds, MeshVertex& max_bounds) const {
             if (triangles.empty()) return;
 
@@ -144,7 +153,9 @@ namespace DPApp {
         }
     };
 
-    // ê±°ë¦¬ ê³„ì‚° ê²°ê³¼ êµ¬ì¡°ì²´
+    /**
+     * @brief Result structure for distance calculations
+     */
     struct DistanceResult {
         uint32_t point_index;
         float distance_to_mesh;
@@ -156,7 +167,9 @@ namespace DPApp {
         DistanceResult() : point_index(0), distance_to_mesh((std::numeric_limits<float>::max)()) {}
     };
 
-    // í¬ì¸íŠ¸í´ë¼ìš°ë"œ íŒŒì¼ ì •ë³´
+    /**
+     * @brief Point cloud file information structure
+     */
     struct PointCloudFileInfo {
         std::string file_path;
         std::string file_name;
@@ -170,15 +183,17 @@ namespace DPApp {
         }
     };
 
-    // BIM-í¬ì¸íŠ¸í´ë¼ìš°ë"œ ë¹„êµ ìž'ì—… íŒŒë¼ë¯¸í„°
+    /**
+     * @brief Parameters for BIM-PointCloud comparison tasks
+     */
     struct BIMComparisonParams {
         std::string bim_folder_path;
         std::string pointcloud_folder_path;
-        std::string bim_file_pattern;        // ê¸°ë³¸ê°': "*.gltf"
-        std::string pointcloud_file_pattern; // ê¸°ë³¸ê°': "*.las"
-        uint32_t max_points_per_chunk;       // ì²­í‚¹ì„ ìœ„í•œ ìµœëŒ€ í¬ì¸íŠ¸ ìˆ˜
-        float distance_threshold;            // ìµœëŒ€ ê±°ë¦¬ ìž„ê³„ê°' (ë¯¸í„°)
-        bool enable_color_coding;            // ê±°ë¦¬ ê¸°ë°˜ ìƒ‰ìƒ ì½"ë"© í™œì„±í™"
+        std::string bim_file_pattern;        // Default: "*.gltf"
+        std::string pointcloud_file_pattern; // Default: "*.las"
+        uint32_t max_points_per_chunk;       // Maximum points per processing chunk
+        float distance_threshold;            // Distance threshold in meters
+        bool enable_color_coding;            // Enable distance-based color coding
 
         BIMComparisonParams()
             : bim_file_pattern("*.gltf"), pointcloud_file_pattern("*.las"),
@@ -187,17 +202,21 @@ namespace DPApp {
         }
     };
 
-    // ìž'ì—… ìƒíƒœ ì •ì˜
+    /**
+     * @brief Task execution status enumeration
+     */
     enum class TaskStatus {
-        PENDING,        // ëŒ€ê¸° ì¤'
-        ASSIGNED,       // í• ë‹¹ë¨
-        IN_PROGRESS,    // ì§„í–‰ ì¤'
-        COMPLETED,      // ì™„ë£Œë¨
-        FAILED,         // ì‹¤íŒ¨
-        TIMEOUT         // íƒ€ìž„ì•„ì›ƒ
+        PENDING,        // Waiting for assignment
+        ASSIGNED,       // Assigned to a worker
+        IN_PROGRESS,    // Currently processing
+        COMPLETED,      // Successfully completed
+        FAILED,         // Failed execution
+        TIMEOUT         // Timed out
     };
 
-    // ìž'ì—… ìš°ì„ ìˆœìœ„
+    /**
+     * @brief Task priority levels
+     */
     enum class TaskPriority {
         LOW = 0,
         NORMAL = 1,
@@ -205,7 +224,9 @@ namespace DPApp {
         CRITICAL = 3
     };
 
-    // í™•ìž¥ëœ ìž'ì—… ì •ë³´
+    /**
+     * @brief General task information structure
+     */
     struct TaskInfo {
         uint32_t task_id;
         uint32_t chunk_id;
@@ -226,7 +247,9 @@ namespace DPApp {
             created_time(std::chrono::steady_clock::now()) {
         }
 
-        // ìž'ì—… ì‹¤í–‰ ì‹œê°„ ê³„ì‚°
+        /**
+         * @brief Calculate task execution time in seconds
+         */
         double getExecutionTime() const {
             if (status != TaskStatus::COMPLETED) return 0.0;
 
@@ -236,7 +259,9 @@ namespace DPApp {
         }
     };
 
-    // ìŠ¬ë ˆì´ë¸Œ ì›Œì»¤ ì •ë³´
+    /**
+     * @brief Slave worker information and statistics
+     */
     struct SlaveWorkerInfo {
         std::string slave_id;
         bool is_active;
@@ -245,7 +270,7 @@ namespace DPApp {
         std::chrono::steady_clock::time_point last_heartbeat;
         uint32_t completed_tasks;
         uint32_t failed_tasks;
-        double avg_processing_time;  // ì´ˆ ë‹¨ìœ„
+        double avg_processing_time;  // Average processing time in seconds
         std::vector<std::string> supported_task_types;
 
         SlaveWorkerInfo() : is_active(false), is_busy(false), completed_tasks(0),
@@ -253,13 +278,17 @@ namespace DPApp {
             last_heartbeat(std::chrono::steady_clock::now()) {
         }
 
-        // ì„±ê³µë¥  ê³„ì‚°
+        /**
+         * @brief Calculate success rate percentage
+         */
         double getSuccessRate() const {
             uint32_t total = completed_tasks + failed_tasks;
             return total > 0 ? static_cast<double>(completed_tasks) / total : 1.0;
         }
 
-        // ì„±ëŠ¥ ì ìˆ˜ ê³„ì‚°
+        /**
+         * @brief Calculate overall performance score
+         */
         double getPerformanceScore() const {
             double success_rate = getSuccessRate();
             double speed_factor = avg_processing_time > 0 ? 1.0 / avg_processing_time : 1.0;
@@ -267,27 +296,32 @@ namespace DPApp {
         }
     };
 
-    // ìž'ì—… ë¶„ë°° ì „ëžµ
+    /**
+     * @brief Task distribution strategies
+     */
     enum class TaskDistributionStrategy {
-        ROUND_ROBIN,        // ìˆœì°¨ ë¶„ë°°
-        LOAD_BALANCED,      // ë¶€í•˜ ê· í˜•
-        PERFORMANCE_BASED,  // ì„±ëŠ¥ ê¸°ë°˜
-        TASK_TYPE_AWARE     // ìž'ì—… íƒ€ìž… ì¸ì‹
+        ROUND_ROBIN,        // Sequential distribution
+        LOAD_BALANCED,      // Load-based distribution
+        PERFORMANCE_BASED,  // Performance-based distribution
+        TASK_TYPE_AWARE     // Task type aware distribution
     };
 
-    // í¬ì¸íŠ¸í´ë¼ìš°ë"œ íŒŒì¼ ë¡œë" ìœ í‹¸ë¦¬í‹° (ì „ë°© ì„ ì–¸)
+    /**
+     * @brief Point cloud loading utilities
+     */
     namespace PointCloudLoader {
-        std::vector<std::shared_ptr<PointCloudChunk>> loadPointCloudFileInChunks(
-            const std::string& file_path, uint32_t max_points_per_chunk = 100000);
-        std::shared_ptr<PointCloudChunk> loadPointCloudFile(const std::string& file_path);
+        std::vector<std::shared_ptr<PointCloudChunk>> loadPointCloudFileInChunks(const std::string& file_path, uint32_t max_points_per_chunk = 100000);
+
         std::shared_ptr<PointCloudChunk> loadLASFile(const std::string& file_path);
-        std::shared_ptr<PointCloudChunk> loadPLYFile(const std::string& file_path);
-        std::shared_ptr<PointCloudChunk> loadPCDFile(const std::string& file_path);
+        
         std::shared_ptr<PointCloudChunk> loadXYZFile(const std::string& file_path);
+        
         PointCloudFileInfo getPointCloudFileInfo(const std::string& file_path);
     }
 
-    // ìž'ì—… ê´€ë¦¬ìž (Masterìš©)
+    /**
+     * @brief Task Manager class for distributed processing (Master node)
+     */
     class TaskManager {
     private:
         std::atomic<bool> stopping_{ false };
@@ -313,7 +347,9 @@ namespace DPApp {
             return stopping_;
         }
 
-        // ìž'ì—… ê´€ë¦¬
+        /**
+         * @brief Add a new task to the processing queue
+         */
         uint32_t addTask(TaskType task_type,
             std::shared_ptr<PointCloudChunk> chunk,
             const std::vector<uint8_t>& parameters,
@@ -337,8 +373,13 @@ namespace DPApp {
             return task_id;
         }
 
-        std::vector<uint32_t> addBIMComparisonTasks(const BIMComparisonParams& params,
+        /**
+         * @brief Add BIM comparison tasks for point cloud processing
+         */
+        std::vector<uint32_t> addBIMComparisonTasks(
+            const BIMComparisonParams& params, 
             TaskPriority priority = TaskPriority::NORMAL) {
+
             std::vector<uint32_t> task_ids;
 
             try {
@@ -368,9 +409,9 @@ namespace DPApp {
 
                 std::cout << "Found " << pc_files.size() << " point cloud files" << std::endl;
 
-                // 3. ê° í¬ì¸íŠ¸í´ë¼ìš°ë"œ íŒŒì¼ì— ëŒ€í•´ ìž'ì—… ìƒì„±
+                // Create tasks for each point cloud file
                 for (const auto& pc_file : pc_files) {
-                    // íŒŒì¼ì„ ì²­í¬ë¡œ ë¶„í• í•˜ì—¬ ìž'ì—… ìƒì„±
+                    // Create multiple tasks by chunking the file
                     std::vector<uint32_t> file_task_ids = createTasksForPointCloudFile(
                         pc_file, params, priority);
 
@@ -387,7 +428,9 @@ namespace DPApp {
             return task_ids;
         }
 
-        // ê°„ë‹¨í•œ BIM ë¹„êµ ìž'ì—… ì¶"ê°€ (í´ë" ê²½ë¡œë§Œìœ¼ë¡œ)
+        /**
+         * @brief Simplified BIM comparison task creation (overload)
+         */
         std::vector<uint32_t> addBIMComparisonTasks(const std::string& bim_folder_path,
             const std::string& pointcloud_folder_path,
             TaskPriority priority = TaskPriority::NORMAL) {
@@ -398,6 +441,9 @@ namespace DPApp {
             return addBIMComparisonTasks(params, priority);
         }
 
+        /**
+         * @brief Remove a task from the manager
+         */
         bool removeTask(uint32_t task_id) {
             std::lock_guard<std::mutex> lock(tasks_mutex_);
 
@@ -411,6 +457,9 @@ namespace DPApp {
             return true;
         }
 
+        /**
+         * @brief Clear all tasks from the manager
+         */
         void clearAllTasks() {
             std::lock_guard<std::mutex> lock(tasks_mutex_);
             size_t count = tasks_.size();
@@ -418,21 +467,26 @@ namespace DPApp {
             std::cout << "Cleared " << count << " tasks" << std::endl;
         }
 
-        // ìž'ì—… ë¶„ë°°
+        /**
+         * @brief Set task distribution strategy
+         */
         void setDistributionStrategy(TaskDistributionStrategy strategy) {
             distribution_strategy_ = strategy;
             std::cout << "Distribution strategy changed to: " << static_cast<int>(strategy) << std::endl;
         }
 
+        /**
+         * @brief Assign pending tasks to available slave workers
+         */
         bool assignTasksToSlaves() {
             if (stopping_) {
-                return false;  // ì¢…ë£Œ ìš"ì²­ì‹œ ìƒˆ ìž'ì—… í• ë‹¹ ì¤'ì§€
+                return false;  // Don't assign tasks when stopping
             }
 
             std::lock_guard<std::mutex> tasks_lock(tasks_mutex_);
             std::lock_guard<std::mutex> slaves_lock(slaves_mutex_);
 
-            // ëŒ€ê¸° ì¤'ì¸ ìž'ì—…ë"¤ì„ ìš°ì„ ìˆœìœ„ ìˆœìœ¼ë¡œ ì •ë ¬
+            // Find pending tasks and sort by priority
             std::vector<uint32_t> pending_tasks;
             for (auto& [task_id, task_info] : tasks_) {
                 if (task_info.status == TaskStatus::PENDING) {
@@ -444,7 +498,7 @@ namespace DPApp {
                 return false;
             }
 
-            // ìš°ì„ ìˆœìœ„ ê¸°ì¤€ìœ¼ë¡œ ì •ë ¬
+            // Sort by priority (highest first)
             (std::sort)(pending_tasks.begin(), pending_tasks.end(),
                 [this](uint32_t a, uint32_t b) {
                     return tasks_[a].priority > tasks_[b].priority;
@@ -461,7 +515,7 @@ namespace DPApp {
                     task_info.assigned_slave = selected_slave;
                     task_info.assigned_time = std::chrono::steady_clock::now();
 
-                    // ìŠ¬ë ˆì´ë¸Œë¥¼ ë°"ìœ ìƒíƒœë¡œ ì„¤ì •
+                    // Update slave status
                     slaves_[selected_slave].is_busy = true;
                     slaves_[selected_slave].current_task_id = std::to_string(task_id);
 
@@ -477,7 +531,9 @@ namespace DPApp {
             return assigned_count > 0;
         }
 
-        // ìž'ì—… ìƒíƒœ ê´€ë¦¬
+        /**
+         * @brief Update task status
+         */
         bool updateTaskStatus(uint32_t task_id, TaskStatus status) {
             std::lock_guard<std::mutex> lock(tasks_mutex_);
 
@@ -498,6 +554,9 @@ namespace DPApp {
             return true;
         }
 
+        /**
+         * @brief Complete a task with results
+         */
         bool completeTask(uint32_t task_id, const ProcessingResult& result) {
             std::lock_guard<std::mutex> tasks_lock(tasks_mutex_);
             std::lock_guard<std::mutex> slaves_lock(slaves_mutex_);
@@ -514,13 +573,13 @@ namespace DPApp {
                 task_info.status = TaskStatus::COMPLETED;
                 completed_results_.push_back(result);
 
-                // BIM ë¹„êµ ê²°ê³¼ì¸ ê²½ìš° ë³„ë„ë¡œ ì €ìž¥
+                // Store BIM comparison results if applicable
                 if (task_info.task_type == TaskType::BIM_DISTANCE_CALCULATION) {
                     std::lock_guard<std::mutex> bim_lock(bim_results_mutex_);
-                    // BIM ê²°ê³¼ë¥¼ ë³„ë„ ì €ìž¥í•˜ëŠ" ë¡œì§ì€ í•„ìš"ì‹œ êµ¬í˜„
+                    // Additional BIM result storage logic would go here
                 }
 
-                // ìŠ¬ë ˆì´ë¸Œ í†µê³„ ì—…ë°ì´íŠ¸
+                // Update slave statistics
                 if (!task_info.assigned_slave.empty()) {
                     auto slave_it = slaves_.find(task_info.assigned_slave);
                     if (slave_it != slaves_.end()) {
@@ -528,7 +587,7 @@ namespace DPApp {
                         slave_it->second.current_task_id.clear();
                         slave_it->second.completed_tasks++;
 
-                        // ì²˜ë¦¬ ì‹œê°„ ê³„ì‚°
+                        // Calculate processing time
                         auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::steady_clock::now() - task_info.assigned_time).count() / 1000.0;
 
@@ -545,13 +604,15 @@ namespace DPApp {
                 std::cout << "Task " << task_id << " completed successfully" << std::endl;
             }
             else {
-                //failTask(task_id, result.error_message);
                 failTaskInternal(task_id, result.error_message);
             }
 
             return true;
         }
 
+        /**
+         * @brief Mark a task as failed
+         */
         bool failTask(uint32_t task_id, const std::string& error_message) {
             std::lock_guard<std::mutex> tasks_lock(tasks_mutex_);
             std::lock_guard<std::mutex> slaves_lock(slaves_mutex_);
@@ -560,7 +621,9 @@ namespace DPApp {
             return true;
         }
 
-        // ìŠ¬ë ˆì´ë¸Œ ê´€ë¦¬
+        /**
+         * @brief Register a new slave worker
+         */
         void registerSlave(const std::string& slave_id) {
             std::lock_guard<std::mutex> lock(slaves_mutex_);
 
@@ -573,13 +636,16 @@ namespace DPApp {
             std::cout << "Slave registered: " << slave_id << std::endl;
         }
 
+        /**
+         * @brief Unregister a slave worker and reassign its tasks
+         */
         void unregisterSlave(const std::string& slave_id) {
             std::lock_guard<std::mutex> slaves_lock(slaves_mutex_);
             std::lock_guard<std::mutex> tasks_lock(tasks_mutex_);
 
             auto slave_it = slaves_.find(slave_id);
             if (slave_it != slaves_.end()) {
-                // í•´ë‹¹ ìŠ¬ë ˆì´ë¸Œì— í• ë‹¹ëœ ìž'ì—…ë"¤ì„ ë‹¤ì‹œ ëŒ€ê¸° ìƒíƒœë¡œ ë³€ê²½
+                // Reassign tasks from the unregistered slave back to pending
                 int reassigned_tasks = 0;
                 for (auto& [task_id, task_info] : tasks_) {
                     if (task_info.assigned_slave == slave_id &&
@@ -595,6 +661,9 @@ namespace DPApp {
             }
         }
 
+        /**
+         * @brief Update slave heartbeat timestamp
+         */
         void updateSlaveHeartbeat(const std::string& slave_id) {
             std::lock_guard<std::mutex> lock(slaves_mutex_);
 
@@ -604,7 +673,7 @@ namespace DPApp {
             }
         }
 
-        // ìƒíƒœ ì¡°íšŒ
+        // Status query methods
         std::vector<TaskInfo> getTasksByStatus(TaskStatus status) {
             std::lock_guard<std::mutex> lock(tasks_mutex_);
 
@@ -629,7 +698,7 @@ namespace DPApp {
             return result;
         }
 
-        // í†µê³„
+        // Statistics methods
         size_t getPendingTaskCount() {
             std::lock_guard<std::mutex> lock(tasks_mutex_);
 
@@ -683,11 +752,14 @@ namespace DPApp {
             return count;
         }
 
+        /**
+         * @brief Calculate overall processing progress
+         */
         double getOverallProgress() {
             std::lock_guard<std::mutex> lock(tasks_mutex_);
 
             if (tasks_.empty()) {
-                return 1.0; // ìž'ì—…ì´ ì—†ìœ¼ë©´ 100%
+                return 1.0; // 100% if no tasks
             }
 
             std::vector<TaskStatus> statuses;
@@ -700,18 +772,23 @@ namespace DPApp {
             return static_cast<double>(completed) / statuses.size();
         }
 
-        // íƒ€ìž„ì•„ì›ƒ ì²˜ë¦¬
+        /**
+         * @brief Set task timeout in seconds
+         */
         void setTaskTimeout(uint32_t timeout_seconds) {
             task_timeout_seconds_ = timeout_seconds;
             std::cout << "Task timeout set to " << timeout_seconds << " seconds" << std::endl;
         }
 
+        /**
+         * @brief Check for timed out tasks and slaves
+         */
         void checkTimeouts() {
             std::lock_guard<std::mutex> tasks_lock(tasks_mutex_);
 
             auto now = std::chrono::steady_clock::now();
 
-            /// Check task timeout
+            // Check task timeouts
             int timed_out_count = 0;
             for (auto& [task_id, task_info] : tasks_) {
                 if (task_info.status == TaskStatus::ASSIGNED || task_info.status == TaskStatus::IN_PROGRESS) {
@@ -723,7 +800,7 @@ namespace DPApp {
                         task_info.status = TaskStatus::TIMEOUT;
                         timed_out_count++;
 
-                        // ìŠ¬ë ˆì´ë¸Œ í•´ì œ
+                        // Release slave
                         if (!task_info.assigned_slave.empty()) {
                             std::lock_guard<std::mutex> slaves_lock(slaves_mutex_);
                             auto slave_it = slaves_.find(task_info.assigned_slave);
@@ -733,13 +810,13 @@ namespace DPApp {
                             }
                         }
 
-                        // ìž¬ì‹œë„ë¥¼ ìœ„í•´ ë‹¤ì‹œ ëŒ€ê¸° ìƒíƒœë¡œ ë³€ê²½
+                        // Retry or fail permanently
                         failTask(task_id, "Task timeout");
                     }
                 }
             }
 
-            /// Check slave timeout
+            // Check slave timeouts
             int timed_out_slaves = 0;
             for (auto& [slave_id, slave_info] : slaves_) {
                 if (slave_info.is_active) {
@@ -747,7 +824,7 @@ namespace DPApp {
                         now - slave_info.last_heartbeat).count();
 
                     if (elapsed > static_cast<int64_t>(task_timeout_seconds_)) {
-                        slave_info.is_active = false;  // 비활성화
+                        slave_info.is_active = false;  // Deactivate
                         timed_out_slaves++;
                         std::cout << "Slave " << slave_id << " timed out after "
                             << elapsed << " seconds" << std::endl;
@@ -760,7 +837,7 @@ namespace DPApp {
             }
         }
 
-        // ê²°ê³¼ ìˆ˜ì§'
+        // Result management
         std::vector<ProcessingResult> getCompletedResults() {
             std::lock_guard<std::mutex> lock(results_mutex_);
             return completed_results_;
@@ -773,12 +850,17 @@ namespace DPApp {
             std::cout << "Cleared " << count << " completed results" << std::endl;
         }
 
-        // BIM ë¹„êµ ê²°ê³¼ ì „ìš© ë©"ì†Œë"œë"¤
+        /**
+         * @brief Get BIM comparison results
+         */
         std::vector<DistanceResult> getBIMComparisonResults() {
             std::lock_guard<std::mutex> lock(bim_results_mutex_);
             return bim_comparison_results_;
         }
 
+        /**
+         * @brief Save BIM comparison results to CSV file
+         */
         void saveBIMComparisonResults(const std::string& output_file_path) {
             std::lock_guard<std::mutex> lock(bim_results_mutex_);
 
@@ -789,14 +871,14 @@ namespace DPApp {
                     return;
                 }
 
-                // CSV í—¤ë" ìž'ì„±
+                // CSV header
                 output_file << "PointIndex,Distance(m),SourceFile,ClosestBIMFile,"
                     << "ClosestTriangleV0X,ClosestTriangleV0Y,ClosestTriangleV0Z,"
                     << "ClosestTriangleV1X,ClosestTriangleV1Y,ClosestTriangleV1Z,"
                     << "ClosestTriangleV2X,ClosestTriangleV2Y,ClosestTriangleV2Z,"
                     << "ClosestPointX,ClosestPointY,ClosestPointZ\n";
 
-                // ê²°ê³¼ ë°ì´í„° ìž'ì„±
+                // Write data rows
                 for (const auto& result : bim_comparison_results_) {
                     output_file << result.point_index << ","
                         << result.distance_to_mesh << ","
@@ -818,7 +900,9 @@ namespace DPApp {
             }
         }
 
-        // í†µê³„ ë¦¬í¬íŠ¸ ìƒì„±
+        /**
+         * @brief Print comprehensive statistics
+         */
         void printStatistics() {
             std::lock_guard<std::mutex> tasks_lock(tasks_mutex_);
             std::lock_guard<std::mutex> slaves_lock(slaves_mutex_);
@@ -845,7 +929,7 @@ namespace DPApp {
             std::cout << "==============================\n" << std::endl;
         }
 
-        // ì½œë°± ì„¤ì •
+        // Callback setup
         using TaskCompletedCallback = std::function<void(const TaskInfo&, const ProcessingResult&)>;
         using TaskFailedCallback = std::function<void(const TaskInfo&, const std::string&)>;
 
@@ -858,6 +942,9 @@ namespace DPApp {
         }
 
     private:
+        /**
+         * @brief Internal task failure handling with retry logic
+         */
         void failTaskInternal(uint32_t task_id, const std::string& error_message) {
             auto task_it = tasks_.find(task_id);
             if (task_it == tasks_.end()) {
@@ -873,7 +960,7 @@ namespace DPApp {
                     slave_it->second.is_busy = false;
                     slave_it->second.current_task_id.clear();
                     slave_it->second.failed_tasks++;
-                    
+
                     auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::steady_clock::now() - task_info.assigned_time).count() / 1000.0;
 
@@ -895,13 +982,15 @@ namespace DPApp {
             }
         }
 
-        // í¬ì¸íŠ¸í´ë¼ìš°ë"œ íŒŒì¼ ì°¾ê¸°
+        /**
+         * @brief Find point cloud files in directory
+         */
         std::vector<PointCloudFileInfo> findPointCloudFiles(const std::string& folder_path,
             const std::string& file_pattern) {
             std::vector<PointCloudFileInfo> files;
 
-            // ì§€ì›í•˜ëŠ" í¬ì¸íŠ¸í´ë¼ìš°ë"œ íŒŒì¼ í™•ìž¥ìžë"¤
-            std::vector<std::string> supported_extensions = { ".pts", ".xyz"};
+            // Supported point cloud file extensions
+            std::vector<std::string> supported_extensions = { ".pts", ".xyz" };
 
             try {
                 for (const auto& entry : std::filesystem::directory_iterator(folder_path)) {
@@ -909,16 +998,16 @@ namespace DPApp {
                         std::string file_path = entry.path().string();
                         std::string file_extension = entry.path().extension().string();
 
-                        // í™•ìž¥ìžë¥¼ ì†Œë¬¸ìžë¡œ ë³€í™˜
+                        // Convert to lowercase for comparison
                         (std::transform)(file_extension.begin(), file_extension.end(),
                             file_extension.begin(), ::tolower);
 
-                        // ì§€ì›í•˜ëŠ" í™•ìž¥ìžì¸ì§€ í™•ì¸
+                        // Check if file extension is supported
                         if ((std::find)(supported_extensions.begin(), supported_extensions.end(),
                             file_extension) != supported_extensions.end()) {
                             PointCloudFileInfo file_info(file_path);
 
-                            // íŒŒì¼ ì •ë³´ ìˆ˜ì§' (ì‹¤ì œ ë¡œë"œ ì—†ì´ ë©"íƒ€ë°ì´í„°ë§Œ)
+                            // Get file information (simplified, should use actual file readers)
                             file_info = PointCloudLoader::getPointCloudFileInfo(file_path);
 
                             files.push_back(file_info);
@@ -935,13 +1024,16 @@ namespace DPApp {
             return files;
         }
 
+        /**
+         * @brief Create tasks for a single point cloud file
+         */
         std::vector<uint32_t> createTasksForPointCloudFile(const PointCloudFileInfo& pc_file,
             const BIMComparisonParams& params,
             TaskPriority priority) {
             std::vector<uint32_t> task_ids;
 
             try {
-                // í¬ì¸íŠ¸í´ë¼ìš°ë"œ íŒŒì¼ì„ ì²­í¬ë¡œ ë¡œë"œ
+                // Load point cloud file in chunks
                 std::vector<std::shared_ptr<PointCloudChunk>> chunks =
                     PointCloudLoader::loadPointCloudFileInChunks(pc_file.file_path, params.max_points_per_chunk);
 
@@ -952,12 +1044,12 @@ namespace DPApp {
 
                 std::cout << "Loaded " << pc_file.file_path << " into " << chunks.size() << " chunks" << std::endl;
 
-                // ê° ì²­í¬ì— ëŒ€í•´ BIM ë¹„êµ ìž'ì—… ìƒì„±
+                // Create BIM comparison task for each chunk
                 for (auto& chunk : chunks) {
-                    // BIM í´ë" ê²½ë¡œì™€ íŒŒì¼ íŒ¨í„´ì„ íŒŒë¼ë¯¸í„°ë¡œ íŒ¨í‚¹
+                    // Encode task parameters
                     std::vector<uint8_t> parameters;
 
-                    // BIM í´ë" ê²½ë¡œ íŒ¨í‚¹
+                    // Encode BIM folder path
                     uint32_t bim_path_len = static_cast<uint32_t>(params.bim_folder_path.length());
                     parameters.insert(parameters.end(),
                         reinterpret_cast<const uint8_t*>(&bim_path_len),
@@ -965,7 +1057,7 @@ namespace DPApp {
                     parameters.insert(parameters.end(),
                         params.bim_folder_path.begin(), params.bim_folder_path.end());
 
-                    // BIM íŒŒì¼ íŒ¨í„´ íŒ¨í‚¹
+                    // Encode BIM file pattern
                     uint32_t bim_pattern_len = static_cast<uint32_t>(params.bim_file_pattern.length());
                     parameters.insert(parameters.end(),
                         reinterpret_cast<const uint8_t*>(&bim_pattern_len),
@@ -973,7 +1065,7 @@ namespace DPApp {
                     parameters.insert(parameters.end(),
                         params.bim_file_pattern.begin(), params.bim_file_pattern.end());
 
-                    // ì›ë³¸ í¬ì¸íŠ¸í´ë¼ìš°ë"œ íŒŒì¼ ê²½ë¡œ íŒ¨í‚¹
+                    // Encode source point cloud file path
                     uint32_t pc_path_len = static_cast<uint32_t>(pc_file.file_path.length());
                     parameters.insert(parameters.end(),
                         reinterpret_cast<const uint8_t*>(&pc_path_len),
@@ -981,7 +1073,7 @@ namespace DPApp {
                     parameters.insert(parameters.end(),
                         pc_file.file_path.begin(), pc_file.file_path.end());
 
-                    // ì¶"ê°€ íŒŒë¼ë¯¸í„° (ê±°ë¦¬ ìž„ê³„ê°', ìƒ‰ìƒ ì½"ë"© ë"±)
+                    // Encode additional parameters (distance threshold, color coding flag)
                     parameters.insert(parameters.end(),
                         reinterpret_cast<const uint8_t*>(&params.distance_threshold),
                         reinterpret_cast<const uint8_t*>(&params.distance_threshold) + sizeof(float));
@@ -989,7 +1081,7 @@ namespace DPApp {
                     uint8_t color_coding = params.enable_color_coding ? 1 : 0;
                     parameters.push_back(color_coding);
 
-                    // ìž'ì—… ì¶"ê°€
+                    // Add task
                     uint32_t task_id = addTask(TaskType::BIM_DISTANCE_CALCULATION, chunk, parameters, priority);
                     task_ids.push_back(task_id);
                 }
@@ -1003,7 +1095,7 @@ namespace DPApp {
             return task_ids;
         }
 
-        // ìž'ì—… ë¶„ë°° ì „ëžµ êµ¬í˜„
+        // Task distribution strategy implementations
         std::string selectSlaveForTask(const TaskInfo& task) {
             switch (distribution_strategy_) {
             case TaskDistributionStrategy::ROUND_ROBIN:
@@ -1092,7 +1184,7 @@ namespace DPApp {
                 }
             }
 
-            // ì§€ì›í•˜ëŠ" ìŠ¬ë ˆì´ë¸Œê°€ ì—†ìœ¼ë©´ ì¼ë°˜ì ì¸ ì„±ëŠ¥ ê¸°ë°˜ ì„ íƒ
+            // Fallback to performance-based if no matching slave found
             return best_slave.empty() ? selectSlavePerformanceBased() : best_slave;
         }
 
@@ -1101,7 +1193,7 @@ namespace DPApp {
             if (slave_it != slaves_.end()) {
                 SlaveWorkerInfo& slave_info = slave_it->second;
 
-                // í‰ê·  ì²˜ë¦¬ ì‹œê°„ ì—…ë°ì´íŠ¸ (ì´ë™í‰ê· )
+                // Update average processing time (exponential moving average)
                 uint32_t total_tasks = slave_info.completed_tasks + slave_info.failed_tasks;
                 if (total_tasks > 0) {
                     slave_info.avg_processing_time =
@@ -1113,11 +1205,12 @@ namespace DPApp {
             }
         }
 
+        // Member variables
         std::map<uint32_t, TaskInfo> tasks_;
         std::map<std::string, SlaveWorkerInfo> slaves_;
         std::vector<ProcessingResult> completed_results_;
 
-        // BIM ë¹„êµ ê²°ê³¼ë¥¼ ë³„ë„ë¡œ ì €ìž¥
+        // BIM comparison results storage
         std::vector<DistanceResult> bim_comparison_results_;
 
         std::mutex tasks_mutex_;
@@ -1128,37 +1221,41 @@ namespace DPApp {
         std::atomic<uint32_t> next_task_id_;
         TaskDistributionStrategy distribution_strategy_;
         uint32_t task_timeout_seconds_;
-        size_t current_slave_index_;  // Round-robinìš©
+        size_t current_slave_index_;  // For round-robin
 
         TaskCompletedCallback task_completed_callback_;
         TaskFailedCallback task_failed_callback_;
     };
 
-    // ìž'ì—… ì²˜ë¦¬ê¸° (Slaveìš©)
+    /**
+     * @brief Task Processor class for individual workers (Slave nodes)
+     */
     class TaskProcessor {
     public:
         TaskProcessor();
         ~TaskProcessor();
 
-        // ì²˜ë¦¬ê¸° ë"±ë¡
+        // Processor function type definition
         using ProcessorFunction = std::function<ProcessingResult(const ProcessingTask&, const PointCloudChunk&)>;
 
         void registerProcessor(const TaskType task_type, ProcessorFunction processor);
         void unregisterProcessor(const TaskType task_type);
 
-        // ìž'ì—… ì²˜ë¦¬
+        // Task processing
         ProcessingResult processTask(const ProcessingTask& task, const PointCloudChunk& chunk);
 
-        // ì§€ì›ë˜ëŠ" ìž'ì—… íƒ€ìž… ì¡°íšŒ
+        // Supported task type queries
         std::vector<TaskType> getSupportedTaskTypes();
         bool supportsTaskType(const TaskType task_type);
 
-        // í†µê³„
+        // Statistics
         uint32_t getProcessedTaskCount() const { return processed_task_count_; }
         uint32_t getFailedTaskCount() const { return failed_task_count_; }
         double getAverageProcessingTime() const { return avg_processing_time_; }
 
-        // í"„ë¡œì„¸ì„œ ì„±ëŠ¥ í†µê³„
+        /**
+         * @brief Get processing statistics by task type
+         */
         std::map<TaskType, uint32_t> getTaskTypeStatistics() const {
             std::lock_guard<std::mutex> lock(processors_mutex_);
             return task_type_stats_;
@@ -1174,64 +1271,73 @@ namespace DPApp {
         std::atomic<double> avg_processing_time_;
     };
 
-    // ê¸°ë³¸ í¬ì¸íŠ¸í´ë¼ìš°ë"œ ì²˜ë¦¬ í•¨ìˆ˜ë"¤
+    /**
+     * @brief Basic point cloud processing functions
+     */
     namespace PointCloudProcessors {
-        /// [Smaple] Filtering based on heights
-        ProcessingResult filterPoints(const ProcessingTask& task, const PointCloudChunk& chunk);
-        /// Distances between point cloud and BIM 
+        /// Distance calculation between point cloud and BIM models
         ProcessingResult calculateBIMDistance(const ProcessingTask& task, const PointCloudChunk& chunk);
+        /// Convert pts
+        ProcessingResult convertPts(const ProcessingTask& task, const PointCloudChunk& chunk);
     }
 
-    // BIM íŒŒì¼ ë¡œë" ìœ í‹¸ë¦¬í‹°
+    /**
+     * @brief BIM file loading utilities
+     */
     namespace BIMLoader {
-        // GLTF/GLB íŒŒì¼ì—ì„œ ë©"ì‹œ ë°ì´í„°ë¥¼ ë¡œë"œí•˜ëŠ" í•¨ìˆ˜
+        // Load BIM data from GLTF/GLB files (would require tinygltf or assimp)
         BIMData loadBIMData(const std::string& file_path);
 
-        // í´ë"ì—ì„œ BIM íŒŒì¼ë"¤ì„ ì°¾ì•„ ë¡œë"œí•˜ëŠ" í•¨ìˆ˜
+        // Load all BIM files from a folder
         std::vector<BIMData> loadBIMDataFromFolder(const std::string& folder_path,
             const std::string& file_pattern = "*.gltf");
 
-        // BIM íŒŒì¼ ì •ë³´ë§Œ ìˆ˜ì§' (ì‹¤ì œ ë¡œë"© ì—†ì´)
+        // Find BIM files (without loading, for metadata only)
         std::vector<std::string> findBIMFiles(const std::string& folder_path,
             const std::string& file_pattern = "*.gltf");
     }
 
-    // ê±°ë¦¬ ê³„ì‚° ìœ í‹¸ë¦¬í‹°
+    /**
+     * @brief Distance calculation utilities
+     */
     namespace DistanceCalculator {
-        // ì ì—ì„œ ì‚¼ê°í˜•ê¹Œì§€ì˜ ìµœë‹¨ ê±°ë¦¬ ê³„ì‚°
+        // Calculate distance from point to triangle
         float pointToTriangleDistance(const MeshVertex& point, const MeshTriangle& triangle, MeshVertex& closest_point);
 
-        // ì ì—ì„œ ë©"ì‹œê¹Œì§€ì˜ ìµœë‹¨ ê±°ë¦¬ ê³„ì‚°
+        // Calculate distance from point to mesh
         DistanceResult pointToMeshDistance(const MeshVertex& point, const BIMData& bim_data);
 
-        // í¬ì¸íŠ¸ í´ë¼ìš°ë"œì™€ BIM ë°ì´í„° ê°„ì˜ ê±°ë¦¬ ê³„ì‚°
+        // Calculate distances between point cloud and multiple BIM models
         std::vector<DistanceResult> calculateDistances(const PointCloudChunk& chunk,
             const std::vector<BIMData>& bim_data_list,
             const std::string& source_file = "");
 
-        // ë¹ ë¥¸ ê±°ë¦¬ ê³„ì‚°ì„ ìœ„í•œ ê³µê°„ ë¶„í•  êµ¬ì¡°
+        /**
+         * @brief Spatial indexing for fast distance queries
+         */
         class SpatialIndex {
         public:
             void buildIndex(const std::vector<BIMData>& bim_data_list);
             std::vector<size_t> queryNearbyTriangles(const MeshVertex& point, float radius);
         private:
-            // ì‹¤ì œ êµ¬í˜„ì—ì„œëŠ" octree, kd-tree ë"± ì‚¬ìš©
+            // Could implement octree, kd-tree, or other spatial data structures
             std::vector<MeshTriangle> all_triangles_;
             std::vector<size_t> triangle_indices_;
         };
     }
 
     ///
-    /// Implementation (ë‚˜ë¨¸ì§€ êµ¬í˜„ë¶€ëŠ" ê°™ì•„ì„œ ìƒëžµ)
+    /// Implementation Section
     ///
 
     /// TaskProcessor Implementation
     TaskProcessor::TaskProcessor()
         : processed_task_count_(0), failed_task_count_(0), avg_processing_time_(0.0) {
 
-        registerProcessor(TaskType::FILTER, PointCloudProcessors::filterPoints);
-        /// BIM to PTS
+        /// BIM distance calculation
         registerProcessor(TaskType::BIM_DISTANCE_CALCULATION, PointCloudProcessors::calculateBIMDistance);
+        /// PTS converting
+        registerProcessor(TaskType::CONVERT_PTS, PointCloudProcessors::convertPts);
 
         std::cout << "TaskProcessor initialized with " << processors_.size() << " processors" << std::endl;
     }
@@ -1274,7 +1380,7 @@ namespace DPApp {
                 return result;
             }
 
-            // í"„ë¡œì„¸ì„œ ì‹¤í–‰
+            // Execute processor
             result = it->second(task, chunk);
 
             if (result.success) {
@@ -1292,7 +1398,7 @@ namespace DPApp {
             failed_task_count_++;
         }
 
-        // ì²˜ë¦¬ ì‹œê°„ ì—…ë°ì´íŠ¸
+        // Update processing time statistics
         auto end_time = std::chrono::steady_clock::now();
         auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
             end_time - start_time).count() / 1000.0;
@@ -1324,41 +1430,6 @@ namespace DPApp {
     /// PointCloudProcessors Implementation
     namespace PointCloudProcessors {
 
-        ProcessingResult filterPoints(const ProcessingTask& task, const PointCloudChunk& chunk) {
-            ProcessingResult result;
-            result.task_id = task.task_id;
-            result.chunk_id = task.chunk_id;
-            result.success = true;
-
-            try {
-                // íŒŒë¼ë¯¸í„° íŒŒì‹± (ê°„ë‹¨í•œ ì˜ˆì œ)
-                double min_z = -100.0;
-                double max_z = 100.0;
-
-                if (task.parameters.size() >= 16) {
-                    std::memcpy(&min_z, task.parameters.data(), sizeof(double));
-                    std::memcpy(&max_z, task.parameters.data() + sizeof(double), sizeof(double));
-                }
-
-                // Z ì¢Œí'œ í•„í„°ë§
-                for (const auto& point : chunk.points) {
-                    if (point.z >= min_z && point.z <= max_z) {
-                        result.processed_points.push_back(point);
-                    }
-                }
-
-                std::cout << "Filtered " << chunk.points.size() << " points to "
-                    << result.processed_points.size() << " points" << std::endl;
-
-            }
-            catch (const std::exception& e) {
-                result.success = false;
-                result.error_message = "Filter error: " + std::string(e.what());
-            }
-
-            return result;
-        }
-        // BIM 2 pt distance
         ProcessingResult calculateBIMDistance(const ProcessingTask& task, const PointCloudChunk& chunk) {
             ProcessingResult result;
             result.task_id = task.task_id;
@@ -1366,7 +1437,7 @@ namespace DPApp {
             result.success = true;
 
             try {
-                // íŒŒë¼ë¯¸í„° íŒŒì‹±
+                // Parameter parsing
                 if (task.parameters.size() < sizeof(uint32_t) * 3) {
                     result.success = false;
                     result.error_message = "Invalid parameters for BIM distance calculation";
@@ -1375,7 +1446,7 @@ namespace DPApp {
 
                 size_t offset = 0;
 
-                // BIM í´ë" ê²½ë¡œ ì¶"ì¶œ
+                // Extract BIM folder path
                 uint32_t bim_path_len;
                 std::memcpy(&bim_path_len, task.parameters.data() + offset, sizeof(uint32_t));
                 offset += sizeof(uint32_t);
@@ -1384,7 +1455,7 @@ namespace DPApp {
                     reinterpret_cast<const char*>(task.parameters.data() + offset), bim_path_len);
                 offset += bim_path_len;
 
-                // BIM íŒŒì¼ íŒ¨í„´ ì¶"ì¶œ
+                // Extract BIM file pattern
                 uint32_t bim_pattern_len;
                 std::memcpy(&bim_pattern_len, task.parameters.data() + offset, sizeof(uint32_t));
                 offset += sizeof(uint32_t);
@@ -1393,7 +1464,7 @@ namespace DPApp {
                     reinterpret_cast<const char*>(task.parameters.data() + offset), bim_pattern_len);
                 offset += bim_pattern_len;
 
-                // ì›ë³¸ í¬ì¸íŠ¸í´ë¼ìš°ë"œ íŒŒì¼ ê²½ë¡œ ì¶"ì¶œ
+                // Extract source point cloud file path
                 uint32_t pc_path_len;
                 std::memcpy(&pc_path_len, task.parameters.data() + offset, sizeof(uint32_t));
                 offset += sizeof(uint32_t);
@@ -1402,7 +1473,7 @@ namespace DPApp {
                     reinterpret_cast<const char*>(task.parameters.data() + offset), pc_path_len);
                 offset += pc_path_len;
 
-                // ì¶"ê°€ íŒŒë¼ë¯¸í„°ë"¤
+                // Extract additional parameters
                 float distance_threshold = 10.0f;
                 bool enable_color_coding = true;
 
@@ -1420,7 +1491,7 @@ namespace DPApp {
                 std::cout << "  Source PC file: " << std::filesystem::path(source_pc_file).filename().string() << std::endl;
                 std::cout << "  Distance threshold: " << distance_threshold << "m" << std::endl;
 
-                // BIM ë°ì´í„° ë¡œë"œ
+                // Load BIM data
                 std::vector<BIMData> bim_data_list = BIMLoader::loadBIMDataFromFolder(
                     bim_folder_path, bim_file_pattern);
 
@@ -1432,33 +1503,33 @@ namespace DPApp {
 
                 std::cout << "  Loaded " << bim_data_list.size() << " BIM files" << std::endl;
 
-                // ê±°ë¦¬ ê³„ì‚°
+                // Calculate distances
                 std::vector<DistanceResult> distance_results =
                     DistanceCalculator::calculateDistances(chunk, bim_data_list, source_pc_file);
 
-                // ê²°ê³¼ë¥¼ ì²˜ë¦¬ëœ í¬ì¸íŠ¸ì— ë°˜ì˜
+                // Copy input points and update with distance information
                 result.processed_points = chunk.points;
 
                 for (size_t i = 0; i < distance_results.size() && i < result.processed_points.size(); ++i) {
                     const auto& dist_result = distance_results[i];
                     auto& point = result.processed_points[i];
 
-                    // ê±°ë¦¬ ì •ë³´ë¥¼ intensity í•„ë"œì— ì €ìž¥ (ë¯¸í„° ë‹¨ìœ„ë¥¼ ë°€ë¦¬ë¯¸í„°ë¡œ ë³€í™˜)
+                    // Store distance in intensity field (convert meters to millimeters, clamped to uint16_t range)
                     point.intensity = static_cast<uint16_t>((std::min)(dist_result.distance_to_mesh * 1000, 65535.0f));
 
-                    // ê±°ë¦¬ ê¸°ë°˜ ìƒ‰ìƒ ì½"ë"©
+                    // Distance-based color coding
                     if (enable_color_coding) {
                         float normalized_distance = (std::min)(dist_result.distance_to_mesh / distance_threshold, 1.0f);
 
-                        // ìƒ‰ìƒ ê·¸ë¼ë°ì´ì…˜: íŒŒëž'(ë©€ìŒ) -> ì´ˆë¡(ì¤'ê°„) -> ë¹¨ê°•(ê°€ê¹Œì›€)
+                        // Color gradient: Blue (close) -> Green (medium) -> Red (far)
                         if (normalized_distance < 0.5f) {
-                            // ê°€ê¹Œìš´ ê±°ë¦¬: ë¹¨ê°• -> ë…¸ëž'
+                            // Close distance: Blue -> Green
                             point.r = 255;
                             point.g = static_cast<uint8_t>(normalized_distance * 2.0f * 255);
                             point.b = 0;
                         }
                         else {
-                            // ë¨¼ ê±°ë¦¬: ë…¸ëž' -> íŒŒëž'
+                            // Far distance: Green -> Red
                             point.r = static_cast<uint8_t>((2.0f - normalized_distance * 2.0f) * 255);
                             point.g = static_cast<uint8_t>((2.0f - normalized_distance * 2.0f) * 255);
                             point.b = static_cast<uint8_t>((normalized_distance * 2.0f - 1.0f) * 255);
@@ -1477,6 +1548,21 @@ namespace DPApp {
             return result;
         }
 
+        ProcessingResult convertPts(const ProcessingTask& task, const PointCloudChunk& chunk) {
+            ProcessingResult result;
+            result.task_id = task.task_id;
+            result.chunk_id = task.chunk_id;
+            result.success = true;
+
+
+
+            /*NOT completed yet*/
+
+
+
+            return result;
+        }
+
     } // namespace PointCloudProcessors
 
     // PointCloudLoader Implementation
@@ -1490,7 +1576,7 @@ namespace DPApp {
             try {
                 std::cout << "Loading point cloud file: " << file_path << std::endl;
 
-                // íŒŒì¼ í™•ìž¥ìžì— ë"°ë¥¸ ë¡œë" ì„ íƒ
+                // Determine file type by extension
                 std::string extension = std::filesystem::path(file_path).extension().string();
                 (std::transform)(extension.begin(), extension.end(), extension.begin(), ::tolower);
 
@@ -1498,12 +1584,6 @@ namespace DPApp {
 
                 if (extension == ".las" || extension == ".laz") {
                     full_chunk = loadLASFile(file_path);
-                }
-                else if (extension == ".ply") {
-                    full_chunk = loadPLYFile(file_path);
-                }
-                else if (extension == ".pcd") {
-                    full_chunk = loadPCDFile(file_path);
                 }
                 else if (extension == ".xyz" || extension == ".pts") {
                     full_chunk = loadXYZFile(file_path);
@@ -1520,13 +1600,13 @@ namespace DPApp {
 
                 std::cout << "Loaded " << full_chunk->points.size() << " points" << std::endl;
 
-                // ì²­í‚¹ ìˆ˜í–‰
+                // Chunk management
                 if (full_chunk->points.size() <= max_points_per_chunk) {
-                    // ì²­í‚¹ì´ í•„ìš"ì—†ëŠ" ê²½ìš°
+                    // Single chunk if under limit
                     chunks.push_back(full_chunk);
                 }
                 else {
-                    // ì²­í‚¹ ìˆ˜í–‰
+                    // Split into multiple chunks
                     size_t total_points = full_chunk->points.size();
                     size_t chunk_count = (total_points + max_points_per_chunk - 1) / max_points_per_chunk;
 
@@ -1555,11 +1635,6 @@ namespace DPApp {
             return chunks;
         }
 
-        std::shared_ptr<PointCloudChunk> loadPointCloudFile(const std::string& file_path) {
-            auto chunks = loadPointCloudFileInChunks(file_path, UINT32_MAX);
-            return chunks.empty() ? nullptr : chunks[0];
-        }
-
         PointCloudFileInfo getPointCloudFileInfo(const std::string& file_path) {
             PointCloudFileInfo info(file_path);
 
@@ -1570,7 +1645,7 @@ namespace DPApp {
                 auto file_size = std::filesystem::file_size(file_path);
 
                 if (extension == ".pts" || extension == ".xyz") {
-                    info.point_count = ptsfile::countPointsInFile(file_path);                    
+                    info.point_count = ptsfile::countPointsInFile(file_path);
                 }
                 else {
                     throw std::runtime_error("It's not a *.pts file: " + file_path);
@@ -1588,16 +1663,15 @@ namespace DPApp {
             return info;
         }
 
-        // íŒŒì¼ í˜•ì‹ë³„ ë¡œë"ë"¤ (ê°„ë‹¨í•œ êµ¬í˜„, ì‹¤ì œë¡œëŠ" í•´ë‹¹ ë¼ì´ë¸ŒëŸ¬ë¦¬ ì‚¬ìš©)
+        // File format specific loaders (simplified implementations)
         std::shared_ptr<PointCloudChunk> loadLASFile(const std::string& file_path) {
             auto chunk = std::make_shared<PointCloudChunk>();
             chunk->chunk_id = 0;
 
-            // TODO: libLAS ë˜ëŠ" PDAL ë¼ì´ë¸ŒëŸ¬ë¦¬ ì‚¬ìš©
-            // í˜„ìž¬ëŠ" ë"ë¯¸ êµ¬í˜„
+            // TODO: Implement using libLAS or PDAL
             std::cout << "Loading LAS file: " << file_path << " (dummy implementation)" << std::endl;
 
-            // ë"ë¯¸ ë°ì´í„° ìƒì„± (ì‹¤ì œ êµ¬í˜„ì‹œ ì œê±°)
+            // Dummy data generation (replace with actual LAS reader)
             for (int i = 0; i < 1000; ++i) {
                 Point3D point;
                 point.x = static_cast<float>(i) * 0.1f;
@@ -1609,26 +1683,6 @@ namespace DPApp {
                 point.b = static_cast<uint8_t>((i * 3) % 255);
                 chunk->points.push_back(point);
             }
-
-            return chunk;
-        }
-
-        std::shared_ptr<PointCloudChunk> loadPLYFile(const std::string& file_path) {
-            auto chunk = std::make_shared<PointCloudChunk>();
-            chunk->chunk_id = 0;
-
-            // TODO: miniply ë˜ëŠ" tinyply ë¼ì´ë¸ŒëŸ¬ë¦¬ ì‚¬ìš©
-            std::cout << "Loading PLY file: " << file_path << " (dummy implementation)" << std::endl;
-
-            return chunk;
-        }
-
-        std::shared_ptr<PointCloudChunk> loadPCDFile(const std::string& file_path) {
-            auto chunk = std::make_shared<PointCloudChunk>();
-            chunk->chunk_id = 0;
-
-            // TODO: PCL ë¼ì´ë¸ŒëŸ¬ë¦¬ ì‚¬ìš©
-            std::cout << "Loading PCD file: " << file_path << " (dummy implementation)" << std::endl;
 
             return chunk;
         }
@@ -1650,14 +1704,14 @@ namespace DPApp {
                 while (std::getline(file, line)) {
                     line_count++;
 
-                    // ë¹ˆ ì¤„ì´ë‚˜ ì£¼ì„ ê±´ë„ˆë›°ê¸°
+                    // Skip empty lines and comments
                     if (line.empty() || line[0] == '#') continue;
 
                     std::istringstream iss(line);
                     Point3D point;
 
                     if (iss >> point.x >> point.y >> point.z) {
-                        // ì¶"ê°€ ì •ë³´ê°€ ìžˆë‹¤ë©´ ì²˜ë¦¬ (ê°•ë„, ìƒ‰ìƒ ë"±)
+                        // Try to read additional fields (intensity, colors)
                         float temp_intensity = 0;
                         int temp_r = 128, temp_g = 128, temp_b = 128;
 
@@ -1672,7 +1726,7 @@ namespace DPApp {
                         chunk->points.push_back(point);
                     }
 
-                    // ì§„í–‰ìƒí™© ì¶œë ¥ (í° íŒŒì¼ì˜ ê²½ìš°)
+                    // Progress indicator for large files
                     if (line_count % 100000 == 0) {
                         std::cout << "Loaded " << chunk->points.size() << " points..." << std::endl;
                     }
@@ -1700,14 +1754,13 @@ namespace DPApp {
             try {
                 std::cout << "Loading BIM file: " << file_path << std::endl;
 
-                // ì‹¤ì œ êµ¬í˜„ì—ì„œëŠ" tinygltf, assimp ë"±ì˜ ë¼ì´ë¸ŒëŸ¬ë¦¬ ì‚¬ìš© í•„ìš"
-                // TODO: GLTF/GLB íŒŒì¼ íŒŒì‹± êµ¬í˜„
+                // TODO: Implement actual GLTF/GLB loading using tinygltf, assimp, etc.
 
-                // ì˜ˆì œìš© ë"ë¯¸ ë°ì´í„° (ì‹¤ì œë¡œëŠ" íŒŒì¼ì—ì„œ ë¡œë"œ)
+                // Dummy implementation (replace with actual file parsing)
                 if (std::filesystem::exists(file_path)) {
-                    // ê°„ë‹¨í•œ í…ŒìŠ¤íŠ¸ìš© ì‚¬ê°í˜• ë' ê°œ (ë°•ìŠ¤ í˜•íƒœ)
+                    // Create a simple test geometry (box)
 
-                    // ë°"ë‹¥ë©´
+                    // Floor
                     MeshVertex v1(0.0f, 0.0f, 0.0f);
                     MeshVertex v2(10.0f, 0.0f, 0.0f);
                     MeshVertex v3(10.0f, 10.0f, 0.0f);
@@ -1716,7 +1769,7 @@ namespace DPApp {
                     bim_data.triangles.emplace_back(v1, v2, v3);
                     bim_data.triangles.emplace_back(v1, v3, v4);
 
-                    // ìœ—ë©´
+                    // Ceiling
                     MeshVertex v5(0.0f, 0.0f, 3.0f);
                     MeshVertex v6(10.0f, 0.0f, 3.0f);
                     MeshVertex v7(10.0f, 10.0f, 3.0f);
@@ -1725,7 +1778,7 @@ namespace DPApp {
                     bim_data.triangles.emplace_back(v5, v7, v6);
                     bim_data.triangles.emplace_back(v5, v8, v7);
 
-                    // ì¸¡ë©´ë"¤ë„ ì¶"ê°€ ê°€ëŠ¥...
+                    // Additional walls could be added here...
 
                     std::cout << "Loaded " << bim_data.triangles.size() << " triangles from " << file_path << std::endl;
                 }
@@ -1751,7 +1804,7 @@ namespace DPApp {
                     return bim_data_list;
                 }
 
-                // íŒ¨í„´ì— ë§žëŠ" íŒŒì¼ë"¤ ì°¾ê¸°
+                // Determine file extension from pattern
                 std::string extension = ".gltf";
                 if (file_pattern.find(".glb") != std::string::npos) {
                     extension = ".glb";
@@ -1828,14 +1881,15 @@ namespace DPApp {
     namespace DistanceCalculator {
 
         float pointToTriangleDistance(const MeshVertex& point, const MeshTriangle& triangle, MeshVertex& closest_point) {
-            // ì ì—ì„œ ì‚¼ê°í˜•ê¹Œì§€ì˜ ìµœë‹¨ê±°ë¦¬ ê³„ì‚° (3D)
-            // ì´ëŠ" ë³µìž¡í•œ ê¸°í•˜í•™ì  ê³„ì‚°ì´ë¯€ë¡œ ê°„ë‹¨í•œ êµ¬í˜„ë§Œ ì œì‹œ
+            // Calculate distance from point to triangle in 3D space
+            // This is a simplified implementation - a complete version would implement
+            // proper barycentric coordinate calculations and edge/vertex distance handling
 
             const MeshVertex& v0 = triangle.v0;
             const MeshVertex& v1 = triangle.v1;
             const MeshVertex& v2 = triangle.v2;
 
-            // ì‚¼ê°í˜• í‰ë©´ì˜ ë²•ì„  ë²¡í„°
+            // Calculate triangle normal
             MeshVertex edge1 = v1 - v0;
             MeshVertex edge2 = v2 - v0;
             MeshVertex normal = MeshVertex(
@@ -1849,15 +1903,18 @@ namespace DPApp {
                 normal = normal * (1.0f / normal_length);
             }
 
-            // ì ì—ì„œ ì‚¼ê°í˜• í‰ë©´ê¹Œì§€ì˜ ìˆ˜ì§ ê±°ë¦¬
+            // Calculate distance from point to triangle plane
             MeshVertex to_point = point - v0;
             float plane_distance = std::abs(to_point.dot(normal));
 
-            // ì ì„ ì‚¼ê°í˜• í‰ë©´ì— íˆ¬ì˜
+            // Project point onto triangle plane
             MeshVertex projected_point = point - normal * (to_point.dot(normal));
 
-            // íˆ¬ì˜ëœ ì ì´ ì‚¼ê°í˜• ë‚´ë¶€ì— ìžˆëŠ"ì§€ í™•ì¸ (barycentric coordinates)
-            // ê°„ë‹¨í™"ëœ êµ¬í˜„: ì‚¼ê°í˜•ì˜ ì¤'ì‹¬ì  ì‚¬ìš©
+            // Simplified: use triangle center as closest point
+            // TODO: Implement proper barycentric coordinate calculation
+            // 1. Project point onto triangle plane
+            // 2. Check if projected point is inside triangle using barycentric coordinates
+            // 3. If inside, distance is plane distance; if outside, find closest edge/vertex
             closest_point = triangle.center();
 
             float dx = point.x - closest_point.x;
@@ -1865,11 +1922,6 @@ namespace DPApp {
             float dz = point.z - closest_point.z;
 
             return std::sqrt(dx * dx + dy * dy + dz * dz);
-
-            // TODO: ì‹¤ì œ êµ¬í˜„ì—ì„œëŠ" ë‹¤ìŒê³¼ ê°™ì€ ì •í™•í•œ ê³„ì‚° í•„ìš":
-            // 1. ì ì„ ì‚¼ê°í˜• í‰ë©´ì— íˆ¬ì˜
-            // 2. íˆ¬ì˜ëœ ì ì´ ì‚¼ê°í˜• ë‚´ë¶€ì— ìžˆëŠ"ì§€ í™•ì¸ (barycentric coordinates)
-            // 3. ë‚´ë¶€ì— ìžˆìœ¼ë©´ í‰ë©´ê¹Œì§€ì˜ ê±°ë¦¬, ì™¸ë¶€ì— ìžˆìœ¼ë©´ ê°€ìž¥ ê°€ê¹Œìš´ ëª¨ì„œë¦¬/ì •ì ê¹Œì§€ì˜ ê±°ë¦¬
         }
 
         DistanceResult pointToMeshDistance(const MeshVertex& point, const BIMData& bim_data) {
@@ -1902,7 +1954,7 @@ namespace DPApp {
             std::cout << "Calculating distances for " << chunk.points.size()
                 << " points against " << bim_data_list.size() << " BIM models" << std::endl;
 
-            // ì§„í–‰ìƒí™© ì¶"ì ì„ ìœ„í•œ ë³€ìˆ˜ë"¤
+            // Progress tracking
             size_t processed_points = 0;
             size_t total_points = chunk.points.size();
             auto start_time = std::chrono::steady_clock::now();
@@ -1910,7 +1962,7 @@ namespace DPApp {
             for (size_t i = 0; i < chunk.points.size(); ++i) {
                 const auto& point = chunk.points[i];
 
-                // í¬ì¸íŠ¸í´ë¼ìš°ë"œ ì ì„ ë©"ì‹œ ì •ì ìœ¼ë¡œ ë³€í™˜
+                // Convert point cloud point to mesh vertex
                 MeshVertex mesh_point(point.x, point.y, point.z);
 
                 DistanceResult point_result;
@@ -1918,7 +1970,7 @@ namespace DPApp {
                 point_result.distance_to_mesh = (std::numeric_limits<float>::max)();
                 point_result.source_point_file = source_file;
 
-                // ëª¨ë"  BIM ë°ì´í„°ì— ëŒ€í•´ ìµœë‹¨ ê±°ë¦¬ ì°¾ê¸°
+                // Find minimum distance to all BIM models
                 for (const auto& bim_data : bim_data_list) {
                     DistanceResult temp_result = pointToMeshDistance(mesh_point, bim_data);
 
@@ -1933,7 +1985,7 @@ namespace DPApp {
                 results.push_back(point_result);
                 processed_points++;
 
-                // ì§„í–‰ìƒí™© ì¶œë ¥ (10% ê°„ê²©)
+                // Progress indicator (every 10%)
                 if (processed_points % (total_points / 10 + 1) == 0) {
                     auto current_time = std::chrono::steady_clock::now();
                     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count();
@@ -1944,14 +1996,14 @@ namespace DPApp {
                 }
             }
 
-            // í†µê³„ ì¶œë ¥
+            // Final statistics
             if (!results.empty()) {
                 auto min_max = (std::minmax_element)(results.begin(), results.end(),
                     [](const DistanceResult& a, const DistanceResult& b) {
                         return a.distance_to_mesh < b.distance_to_mesh;
                     });
 
-                // í‰ê·  ê±°ë¦¬ ê³„ì‚°
+                // Calculate average distance
                 double sum_distance = 0.0;
                 for (const auto& result : results) {
                     sum_distance += result.distance_to_mesh;
@@ -1972,7 +2024,7 @@ namespace DPApp {
             return results;
         }
 
-        // SpatialIndex Implementation (ê°„ë‹¨í•œ ë²„ì „)
+        // SpatialIndex Implementation (simplified version)
         void SpatialIndex::buildIndex(const std::vector<BIMData>& bim_data_list) {
             all_triangles_.clear();
             triangle_indices_.clear();
@@ -1999,7 +2051,7 @@ namespace DPApp {
         std::vector<size_t> SpatialIndex::queryNearbyTriangles(const MeshVertex& point, float radius) {
             std::vector<size_t> nearby_triangles;
 
-            // ê°„ë‹¨í•œ ì„ í˜• ê²€ìƒ‰ (ì‹¤ì œë¡œëŠ" octree, kd-tree ë"± ì‚¬ìš©)
+            // Simplified spatial query (actual implementation would use octree, kd-tree, etc.)
             for (size_t i = 0; i < all_triangles_.size(); ++i) {
                 const auto& triangle = all_triangles_[i];
                 MeshVertex center = triangle.center();

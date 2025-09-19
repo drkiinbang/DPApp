@@ -13,14 +13,14 @@ namespace DPApp {
 
 enum class TaskType : uint8_t {
     UNKNOWN = 0,
-    FILTER,
+    CONVERT_PTS,
     BIM_DISTANCE_CALCULATION
     };
 
 /// TaskType to string
 inline const char* taskStr(TaskType type) {
     switch (type) {
-    case TaskType::FILTER: return "filter";
+    case TaskType::CONVERT_PTS: return "convert_pts";
     case TaskType::BIM_DISTANCE_CALCULATION: return "bim_distance_calculation";
     default: return "unknown";
     }
@@ -28,7 +28,7 @@ inline const char* taskStr(TaskType type) {
 
 /// String to TaskType
 inline TaskType strTask(const std::string& str) {
-    if (str == "filter") return TaskType::FILTER;
+    if (str == "convert_pts") return TaskType::CONVERT_PTS;
     if (str == "bim_distance_calculation") return TaskType::BIM_DISTANCE_CALCULATION;
     return TaskType::UNKNOWN;
 }

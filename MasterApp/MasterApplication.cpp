@@ -301,8 +301,7 @@ private:
         ILOG << "";
         ILOG << "  [Name]                [Description]";
         ILOG << "  --------------------  ----------------------------------------------------";
-        ILOG << "  filter                Filters points based on Z-axis height.";
-        ILOG << "  outlier_filter        Removes noise using an advanced SOR filter.";
+        ILOG << "  convert_pts           Convert pts to pointclouds2.";
         ILOG << "";
     }
     
@@ -317,7 +316,7 @@ private:
             
             if (filename.empty() || task_type_str.empty()) {
                 WLOG << "Usage: load <filename> <task_type>" ;
-                WLOG << "Task types: filter, outlier_filter, bim" ;
+                WLOG << "Task types: convert_pts, bim" ;
             } else {
                 auto task_type = strTask(task_type_str);
                 loadAndProcessPointCloud(filename, task_type);
@@ -436,12 +435,13 @@ private:
         std::vector<uint8_t> default_params; // 기본 파라미터
         
         // 작업 타입에 따른 기본 파라미터 설정
-        if (task_type == TaskType::FILTER) {
+        /*if (task_type == TaskType::FILTER) {
             double min_z = -100.0, max_z = 100.0;
             default_params.resize(sizeof(double) * 2);
             std::memcpy(default_params.data(), &min_z, sizeof(double));
             std::memcpy(default_params.data() + sizeof(double), &max_z, sizeof(double));
-        } 
+        }
+        */
         
         for (const auto& chunk : chunks) {
             auto chunk_ptr = std::make_shared<PointCloudChunk>(chunk);
