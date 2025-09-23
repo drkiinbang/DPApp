@@ -189,22 +189,6 @@ namespace DPApp {
         }
 
         /**
-         * @brief Remove a task from the manager
-         */
-        bool removeTask(uint32_t task_id) {
-            std::lock_guard<std::mutex> lock(tasks_mutex_);
-
-            auto it = tasks_.find(task_id);
-            if (it == tasks_.end()) {
-                return false;
-            }
-
-            std::cout << "Task removed: " << task_id << std::endl;
-            tasks_.erase(it);
-            return true;
-        }
-
-        /**
          * @brief Clear all tasks from the manager
          */
         void clearAllTasks() {
