@@ -12,6 +12,8 @@
 
 namespace DPApp {
 
+    const int heartbeat_interval = 10;
+
     //========================================
     // NetworkMessage Implementation
     //========================================
@@ -80,23 +82,23 @@ namespace DPApp {
             while (total_bytes_received < bytes_to_receive) {
                 int bytes_received = recv(socket_fd, reinterpret_cast<char*>(buffer.data()) + total_bytes_received, static_cast<int>(bytes_to_receive - total_bytes_received), 0);
                 if (bytes_received == 0) {
-                    // 연결이 정상적으로 종료됨
-                    ILOG << "연결 정상 종료";
+                    ILOG << "연결 정상 종료: bytes_received == 0";
                     return false;
                 }
                 else if (bytes_received < 0) {
 #ifdef _WIN32
                     int error = WSAGetLastError();
                     if (error == WSAEWOULDBLOCK || error == WSAEINTR) {
-                        // 논블로킹 소켓이나 인터럽트의 경우 재시도
-                        ILOG << "연결 정상 종료";
+                        ILOG << "논블로킹 소켓이나 인터럽트의 경우 재시도";
                         continue;
                     }
 #else
                     if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+                        ILOG << "errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR";
                         continue;
                     }
 #endif
+                    ILOG << "연결 종료: bytes_received < 0";
                     return false;
                 }
                 total_bytes_received += bytes_received;
@@ -346,7 +348,7 @@ namespace DPApp {
 
     void NetworkServer::clientHandlerThread(std::shared_ptr<ClientConnection> client) {
         std::string current_client_id = client->slave_id;
-        ILOG << "Client handler started for temporary ID: " << current_client_id;
+        ILOG << "Client handler started [ID: " << current_client_id << ", Address: " << client->address << ":" << client->port << "]";
         while (client->is_active && running_) {
             try {
                 std::vector<uint8_t> header_buffer;
@@ -582,7 +584,7 @@ namespace DPApp {
 
     void NetworkClient::heartbeatThread() {
         while (connected_ && !shutdown_requested_) {
-            std::this_thread::sleep_for(std::chrono::seconds(10));
+            std::this_thread::sleep_for(std::chrono::seconds(heartbeat_interval));
             if (connected_ && !shutdown_requested_) {
                 NetworkMessage heartbeat(MessageType::HEARTBEAT, std::vector<uint8_t>(slave_id_.begin(), slave_id_.end()));
                 if (!sendMessage(heartbeat)) {
