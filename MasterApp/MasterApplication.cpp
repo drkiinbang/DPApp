@@ -1,3 +1,15 @@
+/// User's command: "load file.xyz convert_pts"
+/// ↓
+/// processCommand()
+///     ↓
+///     loadAndProcessPointCloud()           ← including work-flow
+///     ↓
+///     PointCloudLoader::loadPointCloudFileInChunks()  ← load a file
+///         ↓
+///         createTasksFromChunks()              ← create a task
+///         ↓
+///         TaskManager::addTask()               ← add a task
+
 #include <iostream>
 #include <string>
 #include <thread>
@@ -18,6 +30,22 @@ using namespace DPApp;
 class MasterApplication {
 private:
     DPApp::RuntimeConfig cfg_;
+    TaskType current_task_type_;
+    std::vector<uint8_t> current_parameters_;
+
+    std::unique_ptr<NetworkServer> server_;
+    std::unique_ptr<TaskManager> task_manager_;
+    std::unique_ptr<RestApiServer> api_server_;
+
+    std::atomic<bool> running_;
+    uint16_t server_port_;
+    uint16_t api_port_;
+    uint32_t max_points_per_chunk_ = 10000;
+    bool daemon_mode_ = false;
+
+    std::thread task_assignment_thread_;
+    std::thread status_thread_;
+    std::thread timeout_thread_;
 
 public:
     bool isDaemonMode() const { return daemon_mode_; }
@@ -29,13 +57,12 @@ public:
     }
 
     bool initialize(int argc, char* argv[]) {
-        /// Initialize logger
         std::time_t t = std::time(nullptr);
         std::tm tm{};
 #ifdef _WIN32
-        localtime_s(&tm, &t); // Windows
+        localtime_s(&tm, &t);
 #else
-        localtime_r(&t, &tm); // Linux/Unix
+        localtime_r(&t, &tm);
 #endif
         char logFilename[512];
         std::strftime(logFilename, sizeof(logFilename), "MasterApp_%Y-%m-%d_%H-%M-%S.log", &tm);
@@ -44,7 +71,6 @@ public:
 
         parseCommandLine(argc, argv);
 
-        /// Set network server
         server_ = std::make_unique<NetworkServer>();
         server_->setMessageCallback([this](const NetworkMessage& msg, const std::string& client_id) {
             handleMessage(msg, client_id);
@@ -54,8 +80,26 @@ public:
             handleConnection(client_id, connected);
             });
 
-        // 작업 관리자 설정
-        task_manager_ = std::make_unique<TaskManager>(cfg_.task_timeout_seconds);
+        setupRestApiRoutes();
+        return true;
+    }
+
+    bool initializeTaskManager(TaskType task_type) {
+        current_task_type_ = task_type;
+        current_parameters_.clear();
+
+        if (task_type == TaskType::CONVERT_PTS) {
+            double offset[3] = { 0.0, 0.0, 0.0 };
+            current_parameters_.resize(sizeof(double) * 3);
+            std::memcpy(current_parameters_.data(), offset, sizeof(double) * 3);
+        }
+
+        task_manager_ = std::make_unique<TaskManager>(
+            cfg_.task_timeout_seconds,
+            current_task_type_,
+            current_parameters_
+        );
+
         task_manager_->setTaskCompletedCallback([this](const TaskInfo& task, const ProcessingResult& result) {
             handleTaskCompleted(task, result);
             });
@@ -64,12 +108,10 @@ public:
             handleTaskFailed(task, error);
             });
 
-        // REST API 서버 설정
-        setupRestApiRoutes();
-
+        ILOG << "TaskManager initialized for task type: " << taskStr(task_type);
         return true;
     }
-    
+
     bool start() {
         if (running_) return false;
 
@@ -80,13 +122,11 @@ public:
         ILOG << "REST API Port: " << api_port_;
         ILOG << "Max points per chunk: " << max_points_per_chunk_;
 
-        // 네트워크 서버 시작
         if (!server_->start(server_port_)) {
             ELOG << "Failed to start network server";
             return false;
         }
 
-        // REST API 서버 시작
         if (!api_server_->start(api_port_)) {
             ELOG << "Failed to start REST API server";
             return false;
@@ -94,39 +134,36 @@ public:
 
         running_ = true;
 
-        // 백그라운드 스레드 시작
         task_assignment_thread_ = std::thread(&MasterApplication::taskAssignmentLoop, this);
         status_thread_ = std::thread(&MasterApplication::statusLoop, this);
         timeout_thread_ = std::thread(&MasterApplication::timeoutLoop, this);
 
         ILOG << "Master server started successfully";
         ILOG << "REST API available at: http://localhost:" << api_port_ << "/api";
-
         return true;
     }
-    
+
     void stop() {
         if (!running_) return;
 
         ILOG << "Stopping master server...";
 
         shutdownAllSlaves();
-        std::this_thread::sleep_for(std::chrono::milliseconds(500)); // 메시지 전송을 위한 짧은 대기
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
         running_ = false;
 
-        /// 1. 새로운 작업 할당 중지
-        task_manager_->requestStop();
+        if (task_manager_) {
+            task_manager_->requestStop();
+        }
 
-        /// 2. 진행 중인 작업 완료 대기 (타임아웃 포함)
         auto start_time = std::chrono::steady_clock::now();
-        while (task_manager_->getActiveTaskCount() > 0 &&
+        while (task_manager_ && task_manager_->getActiveTaskCount() > 0 &&
             std::chrono::steady_clock::now() - start_time < std::chrono::seconds(30)) {
             ILOG << "Waiting for " << task_manager_->getActiveTaskCount() << " active tasks to complete...";
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }
 
-        /// 3. 스레드 종료 대기
         if (task_assignment_thread_.joinable()) {
             task_assignment_thread_.join();
         }
@@ -137,7 +174,6 @@ public:
             timeout_thread_.join();
         }
 
-        /// 4. 서버들 종료
         if (api_server_) {
             api_server_->stop();
         }
@@ -147,7 +183,7 @@ public:
 
         ILOG << "Master server stopped";
     }
-    
+
     void run() {
         if (!start()) {
             return;
@@ -160,13 +196,12 @@ public:
             runInteractive();
         }
     }
-    
+
     void runDaemon() {
         ILOG << "Master server running in daemon mode...";
         ILOG << "REST API: http://localhost:" << api_port_ << "/api";
         ILOG << "Use REST API to control the server.";
 
-        // 메인 스레드는 단순히 대기
         while (running_) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
@@ -181,28 +216,28 @@ public:
         }
     }
 
-    // 포인트클라우드 파일 로드 및 처리 시작
     bool loadAndProcessPointCloud(const std::string& filename, const TaskType task_type) {
-        auto point_cloud = std::make_shared<PointCloud>();
-        
+        if (!task_manager_ || task_manager_->getCurrentTaskType() != task_type) {
+            if (!initializeTaskManager(task_type)) {
+                ELOG << "Failed to initialize TaskManager for task type: " << taskStr(task_type);
+                return false;
+            }
+        }
+
         ILOG << "Loading point cloud: " << filename;
-        
-        if (!point_cloud->loadFromFile(filename)) {
+        ILOG << "Task type: " << taskStr(task_type);
+
+        auto chunks = PointCloudLoader::loadPointCloudFileInChunks(filename, max_points_per_chunk_);
+
+        if (chunks.empty()) {
             ELOG << "Failed to load point cloud file: " << filename;
             return false;
         }
-        
-        ILOG << "Loaded " << point_cloud->getPointCount() << " points";
-        
-        /// 청크로 분할
-        ILOG << "Splitting into chunks...";
-        auto chunks = point_cloud->splitIntoChunks(max_points_per_chunk_);
-        
-        ILOG << "Created " << chunks.size() << " chunks";
-        
-        // 작업 생성
-        createTasksFromChunks(chunks, task_type);
-        
+
+        ILOG << "Loaded " << chunks.size() << " chunks";
+
+        createTasksFromChunks(chunks);
+
         return true;
     }
 
@@ -235,7 +270,7 @@ private:
             }
         }
     }
-    
+
     void shutdownSlave(const std::string& slave_id) {
         NetworkMessage shutdown_msg(MessageType::SHUTDOWN, std::vector<uint8_t>());
 
@@ -270,20 +305,19 @@ private:
     }
 
     void printUsage() {
-        ILOG << "Usage: master [options]" ;
-        ILOG << "Options:" ;
-        ILOG << "  -p, --port <port>        Main server port (default: 8080)" ;
-        ILOG << "  --api-port <port>        REST API port (default: 8081)" ;
-        ILOG << "  -d, --daemon             Run in daemon mode" ;
-        ILOG << "  -c, --chunk-size <size>  Max points per chunk (default: 10000)" ;
-        ILOG << "  -h, --help               Show this help message" ;
+        ILOG << "Usage: master [options]";
+        ILOG << "Options:";
+        ILOG << "  -p, --port <port>        Main server port (default: 8080)";
+        ILOG << "  --api-port <port>        REST API port (default: 8081)";
+        ILOG << "  -d, --daemon             Run in daemon mode";
+        ILOG << "  -c, --chunk-size <size>  Max points per chunk (default: 10000)";
+        ILOG << "  -h, --help               Show this help message";
     }
-    
+
     void printHelp() {
         ILOG << "";
         ILOG << "=== DPApp Master Console Commands ===";
         ILOG << "load <file> <task_type>  - Load point cloud and create processing tasks.";
-        ILOG << "bim_compare <bim_folder> <pointcloud_folder> - Compare BIM models with point clouds";
         ILOG << "status                   - Show system status";
         ILOG << "slaves                   - List connected slaves";
         ILOG << "tasks                    - List all tasks";
@@ -296,63 +330,73 @@ private:
         ILOG << "quit                     - Stop and exit";
         ILOG << "=====================================";
         ILOG << "";
-        ILOG << "--- Available Task Types ---";
+        ILOG << "--- Available Task Types (one per session) ---";
         ILOG << "  Usage for 'load': load C:/data/scan.xyz <task_type_name>";
         ILOG << "";
         ILOG << "  [Name]                [Description]";
         ILOG << "  --------------------  ----------------------------------------------------";
-        ILOG << "  convert_pts           Convert pts to pointclouds2.";
+        ILOG << "  convert_pts           Convert points with coordinate adjustments";
+        ILOG << "  bim                   Calculate distances from origin";
+        ILOG << "  ";
+        ILOG << "  Note: Only one task type can be processed per session.";
+        ILOG << "        Restart the application to change task type.";
         ILOG << "";
     }
-    
+
     void processCommand(const std::string& command) {
         std::istringstream iss(command);
         std::string cmd;
         iss >> cmd;
-        
+
         if (cmd == "load") {
             std::string filename, task_type_str;
             iss >> filename >> task_type_str;
-            
-            if (filename.empty() || task_type_str.empty()) {
-                WLOG << "Usage: load <filename> <task_type>" ;
-                WLOG << "Task types: convert_pts, bim" ;
-            } else {
-                auto task_type = strTask(task_type_str);
-                loadAndProcessPointCloud(filename, task_type);
-            }
-        } else if (cmd == "bim_compare") {
-            std::string bim_folder, pointcloud_folder;
-            iss >> bim_folder >> pointcloud_folder;
 
-            if (bim_folder.empty() || pointcloud_folder.empty()) {
-                WLOG << "Usage: bim_compare <bim_folder> <pointcloud_folder>";
-                WLOG << "Example: bim_compare ./bim_models ./point_clouds";
+            if (filename.empty() || task_type_str.empty()) {
+                WLOG << "Usage: load <filename> <task_type>";
+                WLOG << "Task types: convert_pts, bim";
+                WLOG << "Note: Only one task type per session";
             }
             else {
-                auto task_ids = task_manager_->addBIMComparisonTasks(
-                    bim_folder, pointcloud_folder, TaskPriority::NORMAL);
-                ILOG << "Created " << task_ids.size() << " BIM comparison tasks";
+                auto task_type = strTask(task_type_str);
+
+                if (task_manager_ && task_manager_->getCurrentTaskType() != task_type) {
+                    WLOG << "Cannot change task type during session.";
+                    WLOG << "Current task type: " << taskStr(task_manager_->getCurrentTaskType());
+                    WLOG << "Requested task type: " << taskStr(task_type);
+                    WLOG << "Please restart the application to change task type.";
+                    return;
+                }
+
+                loadAndProcessPointCloud(filename, task_type);
             }
-        } else if (cmd == "status") {
+        }
+        else if (cmd == "status") {
             printSystemStatus();
-        } else if (cmd == "slaves") {
+        }
+        else if (cmd == "slaves") {
             printSlaveStatus();
-        } else if (cmd == "tasks") {
+        }
+        else if (cmd == "tasks") {
             printTaskStatus();
-        } else if (cmd == "progress") {
+        }
+        else if (cmd == "progress") {
             printProgress();
-        } else if (cmd == "results") {
+        }
+        else if (cmd == "results") {
             printResults();
-        } else if (cmd == "save") {
+        }
+        else if (cmd == "save") {
             std::string filename;
             iss >> filename;
             if (filename.empty()) {
                 WLOG << "Usage: save <filename>";
-            } else {
+            }
+            else {
                 saveResults(filename);
             }
-        } else if (cmd == "clear") {
+        }
+        else if (cmd == "clear") {
             clearCompletedTasks();
         }
         else if (cmd == "shutdown") {
@@ -360,257 +404,481 @@ private:
             iss >> slave_id;
 
             if (slave_id.empty()) {
-                /// 모든 슬레이브 종료
                 shutdownAllSlaves();
             }
             else {
-                /// 특정 슬레이브 종료
                 shutdownSlave(slave_id);
             }
-        } else if (cmd == "help") {
+        }
+        else if (cmd == "help") {
             printHelp();
-        } else if (cmd == "quit" || cmd == "exit") {
+        }
+        else if (cmd == "quit" || cmd == "exit") {
             stop();
-        } else if (!cmd.empty()) {
+        }
+        else if (!cmd.empty()) {
             WLOG << "Unknown command: " << cmd;
             WLOG << "Type 'help' for available commands";
         }
     }
-    
+
     void handleMessage(const NetworkMessage& message, const std::string& client_id) {
         switch (message.header.type) {
-            case MessageType::SLAVE_REGISTER:
-                ILOG << "Slave registration from: " << client_id ;
+        case MessageType::SLAVE_REGISTER:
+            ILOG << "Slave registration from: " << client_id;
+            if (task_manager_) {
                 task_manager_->registerSlave(client_id);
-                break;
-                
-            case MessageType::SLAVE_UNREGISTER:
-                ILOG << "Slave unregistration from: " << client_id ;
+            }
+            break;
+
+        case MessageType::SLAVE_UNREGISTER:
+            ILOG << "Slave unregistration from: " << client_id;
+            if (task_manager_) {
                 task_manager_->unregisterSlave(client_id);
-                break;
-                
-            case MessageType::HEARTBEAT:
+            }
+            break;
+
+        case MessageType::HEARTBEAT:
+            if (task_manager_) {
                 task_manager_->updateSlaveHeartbeat(client_id);
-                break;
-                
-            case MessageType::TASK_RESULT:
-                handleTaskResult(message, client_id);
-                break;
-                
-            default:
-                WLOG << "Unknown message type from " << client_id ;
-                break;
+            }
+            break;
+
+        case MessageType::TASK_RESULT:
+            handleTaskResult(message, client_id);
+            break;
+
+        default:
+            WLOG << "Unknown message type from " << client_id;
+            break;
         }
     }
-    
+
     void handleConnection(const std::string& client_id, bool connected) {
         if (connected) {
-            ILOG << "Client connected: " << client_id ;
-        } else {
-            ILOG << "Client disconnected: " << client_id ;
-            task_manager_->unregisterSlave(client_id);
+            ILOG << "Client connected: " << client_id;
+        }
+        else {
+            ILOG << "Client disconnected: " << client_id;
+            if (task_manager_) {
+                task_manager_->unregisterSlave(client_id);
+            }
         }
     }
-    
+
     void handleTaskResult(const NetworkMessage& message, const std::string& client_id) {
         try {
             ProcessingResult result = NetworkUtils::deserializeResult(message.data);
-            task_manager_->completeTask(result.task_id, result);
-        } catch (const std::exception& e) {
-            ELOG << "Error processing task result from " << client_id 
-                      << ": " << e.what() ;
+            if (task_manager_) {
+                task_manager_->completeTask(result.task_id, result);
+            }
+        }
+        catch (const std::exception& e) {
+            ELOG << "Error processing task result from " << client_id
+                << ": " << e.what();
         }
     }
-    
+
     void handleTaskCompleted(const TaskInfo& task, const ProcessingResult& result) {
-        ILOG << "Task " << task.task_id << " completed by " 
-                  << task.assigned_slave ;
+        ILOG << "Task " << task.task_id << " completed by "
+            << task.assigned_slave;
     }
-    
+
     void handleTaskFailed(const TaskInfo& task, const std::string& error) {
-        WLOG << "Task " << task.task_id << " failed: " << error ;
+        WLOG << "Task " << task.task_id << " failed: " << error;
     }
-    
-    void createTasksFromChunks(const std::vector<PointCloudChunk>& chunks, const TaskType task_type) {
-        std::vector<uint8_t> default_params; // 기본 파라미터
-        
-        // 작업 타입에 따른 기본 파라미터 설정
-        /*if (task_type == TaskType::FILTER) {
-            double min_z = -100.0, max_z = 100.0;
-            default_params.resize(sizeof(double) * 2);
-            std::memcpy(default_params.data(), &min_z, sizeof(double));
-            std::memcpy(default_params.data() + sizeof(double), &max_z, sizeof(double));
-        }
-        */
-        
-        for (const auto& chunk : chunks) {
-            auto chunk_ptr = std::make_shared<PointCloudChunk>(chunk);
-            uint32_t task_id = task_manager_->addTask(task_type, chunk_ptr, default_params);
-            ILOG << "Created task " << task_id << " for chunk " << chunk.chunk_id 
-                      << " (" << chunk.points.size() << " points)" ;
+
+    void createTasksFromChunks(const std::vector<std::shared_ptr<PointCloudChunk>>& chunks) {
+        ILOG << "Creating " << chunks.size() << " tasks for " << taskStr(current_task_type_);
+
+        for (const auto& chunk_ptr : chunks) {
+            uint32_t task_id = task_manager_->addTask(chunk_ptr);
+            ILOG << "Created task " << task_id << " for chunk " << chunk_ptr->chunk_id
+                << " (" << chunk_ptr->points.size() << " points)";
         }
     }
-    
+
     void taskAssignmentLoop() {
         while (running_) {
-            // 작업 할당 시도
-            task_manager_->assignTasksToSlaves();
-            
-            // 할당된 작업들을 슬레이브에게 전송
-            sendAssignedTasks();
-            
+            if (task_manager_) {
+                task_manager_->assignTasksToSlaves();
+                sendAssignedTasks();
+            }
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     }
-    
+
     void sendAssignedTasks() {
+        if (!task_manager_) return;
+
         auto tasks = task_manager_->getTasksByStatus(TaskStatus::ASSIGNED);
-        
+
         for (auto& task_info : tasks) {
-            // 작업을 IN_PROGRESS로 변경
             task_manager_->updateTaskStatus(task_info.task_id, TaskStatus::IN_PROGRESS);
-            
-            // ProcessingTask 구조체 생성
+
             ProcessingTask task;
             task.task_id = task_info.task_id;
             task.chunk_id = task_info.chunk_id;
             task.task_type = task_info.task_type;
             task.parameters = task_info.parameters;
-            
-            /// 메시지 생성 (작업 정보 + 청크 데이터)
+
             auto task_data = NetworkUtils::serializeTask(task);
             auto chunk_data = NetworkUtils::serializeChunk(*task_info.chunk_data);
-            
-            /// 합친 데이터 생성
+
             std::vector<uint8_t> combined_data;
             uint32_t task_data_size = static_cast<uint32_t>(task_data.size());
-            /// Insert 4byte data (task_data_size)
             combined_data.insert(combined_data.end(),
                 reinterpret_cast<uint8_t*>(&task_data_size),
                 reinterpret_cast<uint8_t*>(&task_data_size) + sizeof(uint32_t));
 
-            /// Insert task_data
             combined_data.insert(combined_data.end(), task_data.begin(), task_data.end());
-            /// Insert chunk_data
             combined_data.insert(combined_data.end(), chunk_data.begin(), chunk_data.end());
-            
+
             NetworkMessage message(MessageType::TASK_ASSIGNMENT, combined_data);
-            
+
             if (server_->sendMessage(task_info.assigned_slave, message)) {
-                ILOG << "Task " << task_info.task_id 
-                          << " sent to " << task_info.assigned_slave ;
-            } else {
-                ELOG << "Failed to send task " << task_info.task_id 
-                          << " to " << task_info.assigned_slave ;
+                ILOG << "Task " << task_info.task_id
+                    << " sent to " << task_info.assigned_slave;
+            }
+            else {
+                ELOG << "Failed to send task " << task_info.task_id
+                    << " to " << task_info.assigned_slave;
                 task_manager_->failTask(task_info.task_id, "Failed to send task");
             }
         }
     }
-    
+
     void statusLoop() {
         while (running_) {
             std::this_thread::sleep_for(std::chrono::seconds(30));
-            
+
             if (running_) {
-                ILOG << "=== Status Update ===" ;
+                ILOG << "=== Status Update ===";
                 printProgress();
-                ILOG << "Connected slaves: " << server_->getClientCount() ;
-                ILOG << "===================" ;
+                ILOG << "Connected slaves: " << server_->getClientCount();
+                ILOG << "===================";
             }
         }
     }
-    
+
     void timeoutLoop() {
         while (running_) {
-            task_manager_->checkTimeouts();
+            if (task_manager_) {
+                task_manager_->checkTimeouts();
+            }
             std::this_thread::sleep_for(std::chrono::seconds(10));
         }
     }
-    
+
     void printSystemStatus() {
-        ILOG << "=== System Status ===" ;
-        ILOG << "Server running: " << (server_->isRunning() ? "Yes" : "No") ;
-        ILOG << "Server port: " << server_port_ ;
-        ILOG << "Connected slaves: " << server_->getClientCount() ;
-        printProgress();
-        ILOG << "===================" ;
-    }
-    
-    void printSlaveStatus() {
-        auto slaves = task_manager_->getAllSlaves();
-        
-        ILOG << "=== Slave Status ===" ;
-        ILOG << "Total slaves: " << slaves.size() ;
-        
-        for (const auto& slave : slaves) {
-            ILOG << "Slave: " << slave.slave_id ;
-            ILOG << "  Active: " << (slave.is_active ? "Yes" : "No") ;
-            ILOG << "  Busy: " << (slave.is_busy ? "Yes" : "No") ;
-            ILOG << "  Completed tasks: " << slave.completed_tasks ;
-            ILOG << "  Failed tasks: " << slave.failed_tasks ;
-            ILOG << "  Avg processing time: " << slave.avg_processing_time << "s" ;
+        ILOG << "=== System Status ===";
+        ILOG << "Server running: " << (server_->isRunning() ? "Yes" : "No");
+        ILOG << "Server port: " << server_port_;
+        ILOG << "Connected slaves: " << server_->getClientCount();
+        if (task_manager_) {
+            ILOG << "Current task type: " << taskStr(task_manager_->getCurrentTaskType());
         }
-        ILOG << "==================" ;
+        else {
+            ILOG << "No task session active";
+        }
+        printProgress();
+        ILOG << "===================";
     }
-    
+
+    void printSlaveStatus() {
+        if (!task_manager_) {
+            ILOG << "No task session active - no slaves registered";
+            return;
+        }
+
+        auto slaves = task_manager_->getAllSlaves();
+
+        ILOG << "=== Slave Status ===";
+        ILOG << "Total slaves: " << slaves.size();
+
+        for (const auto& slave : slaves) {
+            ILOG << "Slave: " << slave.slave_id;
+            ILOG << "  Active: " << (slave.is_active ? "Yes" : "No");
+            ILOG << "  Busy: " << (slave.is_busy ? "Yes" : "No");
+            ILOG << "  Completed tasks: " << slave.completed_tasks;
+            ILOG << "  Failed tasks: " << slave.failed_tasks;
+            ILOG << "  Avg processing time: " << slave.avg_processing_time << "s";
+        }
+        ILOG << "==================";
+    }
+
     void printTaskStatus() {
-        ILOG << "=== Task Status ===" ;
-        ILOG << "Pending: " << task_manager_->getPendingTaskCount() ;
-        ILOG << "Active: " << task_manager_->getActiveTaskCount() ;
-        ILOG << "Completed: " << task_manager_->getCompletedTaskCount() ;
-        ILOG << "Failed: " << task_manager_->getFailedTaskCount() ;
-        ILOG << "==================" ;
+        if (!task_manager_) {
+            ILOG << "No task session active";
+            return;
+        }
+
+        ILOG << "=== Task Status ===";
+        ILOG << "Task type: " << taskStr(task_manager_->getCurrentTaskType());
+        ILOG << "Pending: " << task_manager_->getPendingTaskCount();
+        ILOG << "Active: " << task_manager_->getActiveTaskCount();
+        ILOG << "Completed: " << task_manager_->getCompletedTaskCount();
+        ILOG << "Failed: " << task_manager_->getFailedTaskCount();
+        ILOG << "==================";
     }
-    
+
     void printProgress() {
+        if (!task_manager_) {
+            ILOG << "Overall progress: No active session";
+            return;
+        }
+
         double progress = task_manager_->getOverallProgress();
-        ILOG << "Overall progress: " << (progress * 100) << "%" ;
+        ILOG << "Overall progress: " << (progress * 100) << "%";
     }
-    
+
     void printResults() {
+        if (!task_manager_) {
+            ILOG << "No task session active - no results";
+            return;
+        }
+
         auto results = task_manager_->getCompletedResults();
-        ILOG << "Completed results: " << results.size() ;
-        
-        // 간단한 통계
+        ILOG << "Completed results: " << results.size();
+
         size_t total_processed_points = 0;
         for (const auto& result : results) {
             total_processed_points += result.processed_points.size();
         }
-        
-        ILOG << "Total processed points: " << total_processed_points ;
+
+        ILOG << "Total processed points: " << total_processed_points;
     }
-    
+
     void saveResults(const std::string& filename) {
-        auto results = task_manager_->getCompletedResults();
-        
-        if (results.empty()) {
-            WLOG << "No results to save" ;
+        if (!task_manager_) {
+            WLOG << "No task session active - no results to save";
             return;
         }
-        
-        // 결과 병합
-        PointCloud merged_cloud;
+
+        auto results = task_manager_->getCompletedResults();
+
+        if (results.empty()) {
+            WLOG << "No results to save";
+            return;
+        }
+
+        std::ofstream outfile(filename);
+        if (!outfile.is_open()) {
+            WLOG << "Failed to open output file: " << filename;
+            return;
+        }
+
+        size_t total_points = 0;
+
         for (const auto& result : results) {
-            merged_cloud.addPoints(result.processed_points);
+            for (const auto& point : result.processed_points) {
+                outfile << point.x << " " << point.y << " " << point.z;
+
+                if (point.intensity > 0) {
+                    outfile << " " << point.intensity;
+                }
+                if (point.r != 128 || point.g != 128 || point.b != 128) {
+                    outfile << " " << static_cast<int>(point.r)
+                        << " " << static_cast<int>(point.g)
+                        << " " << static_cast<int>(point.b);
+                }
+
+                outfile << "\n";
+                total_points++;
+            }
         }
-        
-        if (merged_cloud.saveToFile(filename)) {
-            ILOG << "Results saved to: " << filename ;
-            ILOG << "Total points: " << merged_cloud.getPointCount() ;
-        } else {
-            WLOG << "Failed to save results to: " << filename ;
-        }
-    }
-    
-    void clearCompletedTasks() {
-        task_manager_->clearCompletedResults();
-        ILOG << "Completed tasks cleared" ;
+
+        outfile.close();
+
+        ILOG << "Results saved to: " << filename;
+        ILOG << "Total points: " << total_points;
     }
 
-    // Add these missing handler functions to MasterApplication.cpp
-// Place these in the private REST API handlers section
+    void clearCompletedTasks() {
+        if (!task_manager_) {
+            WLOG << "No task session active - no tasks to clear";
+            return;
+        }
+
+        task_manager_->clearCompletedResults();
+        ILOG << "Completed tasks cleared";
+    }
+
+    void setupRestApiRoutes() {
+        api_server_ = std::make_unique<RestApiServer>();
+
+        api_server_->GET("/api/status", [this](const HttpRequest& req) {
+            return handleGetStatus(req);
+            });
+
+        api_server_->GET("/api/slaves", [this](const HttpRequest& req) {
+            return handleGetSlaves(req);
+            });
+
+        api_server_->GET("/api/slaves/{id}", [this](const HttpRequest& req) {
+            return handleGetSlave(req);
+            });
+
+        api_server_->POST("/api/slaves/{id}/shutdown", [this](const HttpRequest& req) {
+            return handleShutdownSlave(req);
+            });
+
+        api_server_->POST("/api/slaves/shutdown", [this](const HttpRequest& req) {
+            return handleShutdownAllSlaves(req);
+            });
+
+        api_server_->GET("/api/tasks", [this](const HttpRequest& req) {
+            return handleGetTasks(req);
+            });
+
+        api_server_->GET("/api/tasks/{id}", [this](const HttpRequest& req) {
+            return handleGetTask(req);
+            });
+
+        api_server_->DEL("/api/tasks", [this](const HttpRequest& req) {
+            return handleClearTasks(req);
+            });
+
+        api_server_->POST("/api/files/load", [this](const HttpRequest& req) {
+            return handleLoadFile(req);
+            });
+
+        api_server_->GET("/api/progress", [this](const HttpRequest& req) {
+            return handleGetProgress(req);
+            });
+
+        api_server_->GET("/api/results", [this](const HttpRequest& req) {
+            return handleGetResults(req);
+            });
+
+        api_server_->POST("/api/results/save", [this](const HttpRequest& req) {
+            return handleSaveResults(req);
+            });
+
+        api_server_->POST("/api/shutdown", [this](const HttpRequest& req) {
+            return handleShutdownServer(req);
+            });
+
+        api_server_->GET("/api/health", [this](const HttpRequest& req) {
+            HttpResponse response;
+            response.status_code = 200;
+            response.body = R"({"success": true, "status": "healthy", "timestamp": ")" + getCurrentTimestamp() + "\"}";
+            return response;
+            });
+    }
+
+    HttpResponse handleGetStatus(const HttpRequest& req) {
+        std::ostringstream json;
+        json << "{\n";
+        json << "  \"success\": true,\n";
+        json << "  \"data\": {\n";
+        json << "    \"server_running\": " << (server_->isRunning() ? "true" : "false") << ",\n";
+        json << "    \"server_port\": " << server_port_ << ",\n";
+        json << "    \"api_port\": " << api_port_ << ",\n";
+        json << "    \"connected_slaves\": " << server_->getClientCount() << ",\n";
+
+        if (task_manager_) {
+            json << "    \"current_task_type\": \"" << taskStr(task_manager_->getCurrentTaskType()) << "\",\n";
+            json << "    \"pending_tasks\": " << task_manager_->getPendingTaskCount() << ",\n";
+            json << "    \"active_tasks\": " << task_manager_->getActiveTaskCount() << ",\n";
+            json << "    \"completed_tasks\": " << task_manager_->getCompletedTaskCount() << ",\n";
+            json << "    \"failed_tasks\": " << task_manager_->getFailedTaskCount() << ",\n";
+            json << "    \"overall_progress\": " << std::fixed << std::setprecision(2) << (task_manager_->getOverallProgress() * 100) << ",\n";
+        }
+        else {
+            json << "    \"current_task_type\": null,\n";
+            json << "    \"pending_tasks\": 0,\n";
+            json << "    \"active_tasks\": 0,\n";
+            json << "    \"completed_tasks\": 0,\n";
+            json << "    \"failed_tasks\": 0,\n";
+            json << "    \"overall_progress\": 0,\n";
+        }
+
+        json << "    \"timestamp\": \"" << getCurrentTimestamp() << "\"\n";
+        json << "  }\n";
+        json << "}";
+
+        HttpResponse response;
+        response.body = json.str();
+        return response;
+    }
+
+    HttpResponse handleGetSlaves(const HttpRequest& req) {
+        if (!task_manager_) {
+            HttpResponse response;
+            response.body = R"({"success": false, "error": "No task session active"})";
+            return response;
+        }
+
+        auto slaves = task_manager_->getAllSlaves();
+
+        std::ostringstream json;
+        json << "{\n";
+        json << "  \"success\": true,\n";
+        json << "  \"data\": {\n";
+        json << "    \"total_slaves\": " << slaves.size() << ",\n";
+        json << "    \"slaves\": [\n";
+
+        for (size_t i = 0; i < slaves.size(); ++i) {
+            const auto& slave = slaves[i];
+            json << "      {\n";
+            json << "        \"id\": \"" << slave.slave_id << "\",\n";
+            json << "        \"active\": " << (slave.is_active ? "true" : "false") << ",\n";
+            json << "        \"busy\": " << (slave.is_busy ? "true" : "false") << ",\n";
+            json << "        \"completed_tasks\": " << slave.completed_tasks << ",\n";
+            json << "        \"failed_tasks\": " << slave.failed_tasks << ",\n";
+            json << "        \"avg_processing_time\": " << std::fixed << std::setprecision(2) << slave.avg_processing_time << "\n";
+            json << "      }";
+            if (i < slaves.size() - 1) json << ",";
+            json << "\n";
+        }
+
+        json << "    ]\n";
+        json << "  }\n";
+        json << "}";
+
+        HttpResponse response;
+        response.body = json.str();
+        return response;
+    }
+
+    HttpResponse handleGetSlave(const HttpRequest& req) {
+        if (!task_manager_) {
+            return createErrorResponse(400, "No task session active");
+        }
+
+        std::string slave_id = req.path_params.at("id");
+        auto slaves = task_manager_->getAllSlaves();
+
+        for (const auto& slave : slaves) {
+            if (slave.slave_id == slave_id) {
+                std::ostringstream json;
+                json << "{\n";
+                json << "  \"success\": true,\n";
+                json << "  \"data\": {\n";
+                json << "    \"id\": \"" << slave.slave_id << "\",\n";
+                json << "    \"active\": " << (slave.is_active ? "true" : "false") << ",\n";
+                json << "    \"busy\": " << (slave.is_busy ? "true" : "false") << ",\n";
+                json << "    \"completed_tasks\": " << slave.completed_tasks << ",\n";
+                json << "    \"failed_tasks\": " << slave.failed_tasks << ",\n";
+                json << "    \"avg_processing_time\": " << std::fixed << std::setprecision(2) << slave.avg_processing_time << "\n";
+                json << "  }\n";
+                json << "}";
+
+                HttpResponse response;
+                response.body = json.str();
+                return response;
+            }
+        }
+
+        return createErrorResponse(404, "Slave not found");
+    }
 
     HttpResponse handleGetTasks(const HttpRequest& req) {
+        if (!task_manager_) {
+            return createErrorResponse(400, "No task session active");
+        }
+
         auto pending_tasks = task_manager_->getTasksByStatus(TaskStatus::PENDING);
         auto active_tasks = task_manager_->getTasksByStatus(TaskStatus::IN_PROGRESS);
         auto completed_tasks = task_manager_->getTasksByStatus(TaskStatus::COMPLETED);
@@ -620,79 +888,13 @@ private:
         json << "{\n";
         json << "  \"success\": true,\n";
         json << "  \"data\": {\n";
+        json << "    \"task_type\": \"" << taskStr(task_manager_->getCurrentTaskType()) << "\",\n";
         json << "    \"summary\": {\n";
         json << "      \"pending_count\": " << pending_tasks.size() << ",\n";
         json << "      \"active_count\": " << active_tasks.size() << ",\n";
         json << "      \"completed_count\": " << completed_tasks.size() << ",\n";
         json << "      \"failed_count\": " << failed_tasks.size() << ",\n";
         json << "      \"total_count\": " << (pending_tasks.size() + active_tasks.size() + completed_tasks.size() + failed_tasks.size()) << "\n";
-        json << "    },\n";
-        json << "    \"tasks\": {\n";
-
-        // Pending tasks
-        json << "      \"pending\": [\n";
-        for (size_t i = 0; i < pending_tasks.size(); ++i) {
-            const auto& task = pending_tasks[i];
-            json << "        {\n";
-            json << "          \"task_id\": " << task.task_id << ",\n";
-            json << "          \"chunk_id\": " << task.chunk_id << ",\n";
-            json << "          \"task_type\": \"" << std::string(taskStr(task.task_type)) << "\",\n";
-            json << "          \"status\": \"pending\",\n";
-            json << "          \"assigned_slave\": \"" << task.assigned_slave << "\"\n";
-            json << "        }";
-            if (i < pending_tasks.size() - 1) json << ",";
-            json << "\n";
-        }
-        json << "      ],\n";
-
-        // Active tasks
-        json << "      \"active\": [\n";
-        for (size_t i = 0; i < active_tasks.size(); ++i) {
-            const auto& task = active_tasks[i];
-            json << "        {\n";
-            json << "          \"task_id\": " << task.task_id << ",\n";
-            json << "          \"chunk_id\": " << task.chunk_id << ",\n";
-            json << "          \"task_type\": \"" << taskStr(task.task_type) << "\",\n";
-            json << "          \"status\": \"in_progress\",\n";
-            json << "          \"assigned_slave\": \"" << task.assigned_slave << "\"\n";
-            json << "        }";
-            if (i < active_tasks.size() - 1) json << ",";
-            json << "\n";
-        }
-        json << "      ],\n";
-
-        // Completed tasks (show only recent ones to avoid huge response)
-        json << "      \"completed\": [\n";
-        size_t completed_limit = (std::min)(completed_tasks.size(), size_t(10)); // Show only last 10
-        for (size_t i = 0; i < completed_limit; ++i) {
-            const auto& task = completed_tasks[i];
-            json << "        {\n";
-            json << "          \"task_id\": " << task.task_id << ",\n";
-            json << "          \"chunk_id\": " << task.chunk_id << ",\n";
-            json << "          \"task_type\": \"" << taskStr(task.task_type) << "\",\n";
-            json << "          \"status\": \"completed\",\n";
-            json << "          \"assigned_slave\": \"" << task.assigned_slave << "\"\n";
-            json << "        }";
-            if (i < completed_limit - 1) json << ",";
-            json << "\n";
-        }
-        json << "      ],\n";
-
-        // Failed tasks
-        json << "      \"failed\": [\n";
-        for (size_t i = 0; i < failed_tasks.size(); ++i) {
-            const auto& task = failed_tasks[i];
-            json << "        {\n";
-            json << "          \"task_id\": " << task.task_id << ",\n";
-            json << "          \"chunk_id\": " << task.chunk_id << ",\n";
-            json << "          \"task_type\": \"" << taskStr(task.task_type) << "\",\n";
-            json << "          \"status\": \"failed\",\n";
-            json << "          \"assigned_slave\": \"" << task.assigned_slave << "\"\n";
-            json << "        }";
-            if (i < failed_tasks.size() - 1) json << ",";
-            json << "\n";
-        }
-        json << "      ]\n";
         json << "    }\n";
         json << "  }\n";
         json << "}";
@@ -703,6 +905,10 @@ private:
     }
 
     HttpResponse handleGetTask(const HttpRequest& req) {
+        if (!task_manager_) {
+            return createErrorResponse(400, "No task session active");
+        }
+
         std::string task_id_str = req.path_params.at("id");
         uint32_t task_id;
 
@@ -713,7 +919,6 @@ private:
             return createErrorResponse(400, "Invalid task ID format");
         }
 
-        // Search through all task statuses to find the task
         std::vector<TaskStatus> all_statuses = {
             TaskStatus::PENDING,
             TaskStatus::IN_PROGRESS,
@@ -741,14 +946,8 @@ private:
                     json << "    \"chunk_id\": " << task.chunk_id << ",\n";
                     json << "    \"task_type\": \"" << taskStr(task.task_type) << "\",\n";
                     json << "    \"status\": \"" << status_str << "\",\n";
-                    json << "    \"assigned_slave\": \"" << task.assigned_slave << "\",\n";
-                    json << "    \"parameters_size\": " << task.parameters.size();
-
-                    if (task.chunk_data) {
-                        json << ",\n    \"chunk_points\": " << task.chunk_data->points.size();
-                    }
-
-                    json << "\n  }\n";
+                    json << "    \"assigned_slave\": \"" << task.assigned_slave << "\"\n";
+                    json << "  }\n";
                     json << "}";
 
                     HttpResponse response;
@@ -762,11 +961,13 @@ private:
     }
 
     HttpResponse handleClearTasks(const HttpRequest& req) {
-        // Get completed tasks count before clearing
+        if (!task_manager_) {
+            return createErrorResponse(400, "No task session active");
+        }
+
         auto completed_results = task_manager_->getCompletedResults();
         size_t completed_count = completed_results.size();
 
-        // Clear completed tasks
         task_manager_->clearCompletedResults();
 
         std::ostringstream json;
@@ -784,184 +985,35 @@ private:
         return response;
     }
 
-    void setupRestApiRoutes() {
-        api_server_ = std::make_unique<RestApiServer>();
-
-        // 시스템 상태
-        api_server_->GET("/api/status", [this](const HttpRequest& req) {
-            return handleGetStatus(req);
-            });
-
-        // 슬레이브 관리
-        api_server_->GET("/api/slaves", [this](const HttpRequest& req) {
-            return handleGetSlaves(req);
-            });
-
-        api_server_->GET("/api/slaves/{id}", [this](const HttpRequest& req) {
-            return handleGetSlave(req);
-            });
-
-        api_server_->POST("/api/slaves/{id}/shutdown", [this](const HttpRequest& req) {
-            return handleShutdownSlave(req);
-            });
-
-        api_server_->POST("/api/slaves/shutdown", [this](const HttpRequest& req) {
-            return handleShutdownAllSlaves(req);
-            });
-
-        // 작업 관리
-        api_server_->GET("/api/tasks", [this](const HttpRequest& req) {
-            return handleGetTasks(req);
-            });
-
-        api_server_->GET("/api/tasks/{id}", [this](const HttpRequest& req) {
-            return handleGetTask(req);
-            });
-
-        api_server_->DEL("/api/tasks", [this](const HttpRequest& req) {
-            return handleClearTasks(req);
-            });
-
-        // 파일 처리
-        api_server_->POST("/api/files/load", [this](const HttpRequest& req) {
-            return handleLoadFile(req);
-            });
-
-        // 진행상황 및 결과
-        api_server_->GET("/api/progress", [this](const HttpRequest& req) {
-            return handleGetProgress(req);
-            });
-
-        api_server_->GET("/api/results", [this](const HttpRequest& req) {
-            return handleGetResults(req);
-            });
-
-        api_server_->POST("/api/results/save", [this](const HttpRequest& req) {
-            return handleSaveResults(req);
-            });
-
-        // 서버 제어
-        api_server_->POST("/api/shutdown", [this](const HttpRequest& req) {
-            return handleShutdownServer(req);
-            });
-
-        // 헬스체크
-        api_server_->GET("/api/health", [this](const HttpRequest& req) {
-            HttpResponse response;
-            response.status_code = 200;
-            response.body = R"({"success": true, "status": "healthy", "timestamp": ")" + getCurrentTimestamp() + "\"}";
-            return response;
-            });
-    }
-
-private: /// REST API 핸들러들
-	HttpResponse handleGetStatus(const HttpRequest& req) {
-		std::ostringstream json;
-		json << "{\n";
-		json << "  \"success\": true,\n";
-		json << "  \"data\": {\n";
-		json << "    \"server_running\": " << (server_->isRunning() ? "true" : "false") << ",\n";
-		json << "    \"server_port\": " << server_port_ << ",\n";
-		json << "    \"api_port\": " << api_port_ << ",\n";
-		json << "    \"connected_slaves\": " << server_->getClientCount() << ",\n";
-		json << "    \"pending_tasks\": " << task_manager_->getPendingTaskCount() << ",\n";
-		json << "    \"active_tasks\": " << task_manager_->getActiveTaskCount() << ",\n";
-		json << "    \"completed_tasks\": " << task_manager_->getCompletedTaskCount() << ",\n";
-		json << "    \"failed_tasks\": " << task_manager_->getFailedTaskCount() << ",\n";
-		json << "    \"overall_progress\": " << std::fixed << std::setprecision(2) << (task_manager_->getOverallProgress() * 100) << ",\n";
-		json << "    \"timestamp\": \"" << getCurrentTimestamp() << "\"\n";
-		json << "  }\n";
-		json << "}";
-
-		HttpResponse response;
-		response.body = json.str();
-		return response;
-	}
-
-	HttpResponse handleGetSlaves(const HttpRequest& req) {
-		auto slaves = task_manager_->getAllSlaves();
-
-		std::ostringstream json;
-		json << "{\n";
-		json << "  \"success\": true,\n";
-		json << "  \"data\": {\n";
-		json << "    \"total_slaves\": " << slaves.size() << ",\n";
-		json << "    \"slaves\": [\n";
-
-		for (size_t i = 0; i < slaves.size(); ++i) {
-			const auto& slave = slaves[i];
-			json << "      {\n";
-			json << "        \"id\": \"" << slave.slave_id << "\",\n";
-			json << "        \"active\": " << (slave.is_active ? "true" : "false") << ",\n";
-			json << "        \"busy\": " << (slave.is_busy ? "true" : "false") << ",\n";
-			json << "        \"completed_tasks\": " << slave.completed_tasks << ",\n";
-			json << "        \"failed_tasks\": " << slave.failed_tasks << ",\n";
-			json << "        \"avg_processing_time\": " << std::fixed << std::setprecision(2) << slave.avg_processing_time << "\n";
-			json << "      }";
-			if (i < slaves.size() - 1) json << ",";
-			json << "\n";
-		}
-
-		json << "    ]\n";
-		json << "  }\n";
-		json << "}";
-
-		HttpResponse response;
-		response.body = json.str();
-		return response;
-	}
-
-	HttpResponse handleGetSlave(const HttpRequest& req) {
-		std::string slave_id = req.path_params.at("id");
-		auto slaves = task_manager_->getAllSlaves();
-
-		for (const auto& slave : slaves) {
-			if (slave.slave_id == slave_id) {
-				std::ostringstream json;
-				json << "{\n";
-				json << "  \"success\": true,\n";
-				json << "  \"data\": {\n";
-				json << "    \"id\": \"" << slave.slave_id << "\",\n";
-				json << "    \"active\": " << (slave.is_active ? "true" : "false") << ",\n";
-				json << "    \"busy\": " << (slave.is_busy ? "true" : "false") << ",\n";
-				json << "    \"completed_tasks\": " << slave.completed_tasks << ",\n";
-				json << "    \"failed_tasks\": " << slave.failed_tasks << ",\n";
-				json << "    \"avg_processing_time\": " << std::fixed << std::setprecision(2) << slave.avg_processing_time << "\n";
-				json << "  }\n";
-				json << "}";
-
-				HttpResponse response;
-				response.body = json.str();
-				return response;
-			}
-		}
-
-		return createErrorResponse(404, "Slave not found");
-	}
-
     HttpResponse handleLoadFile(const HttpRequest& req) {
-        // 1) Content-Type 확인
         auto it_ct = req.headers.find("Content-Type");
         std::string content_type = (it_ct != req.headers.end() ? it_ct->second : "");
         if (content_type.find("application/json") == std::string::npos) {
             return createErrorResponse(400, "Content-Type must be application/json");
         }
 
-        // 2) JSON 파싱
         auto parsed = DPApp::MiniJson::parse_object(req.body);
         if (!parsed) {
             return createErrorResponse(400, "Invalid JSON body");
         }
 
-        // 3) 필수/옵션 필드 추출
         auto filename = DPApp::MiniJson::get<std::string>(*parsed, "filename");
         std::optional<std::string> task_type_str = DPApp::MiniJson::get<std::string>(*parsed, "task_type");
-        
+
         if (!filename || !task_type_str) {
             return createErrorResponse(400, "Missing 'filename' or 'task_type'");
         }
 
         TaskType task_type = strTask(task_type_str.value());
+
+        if (task_manager_ && task_manager_->getCurrentTaskType() != task_type) {
+            std::ostringstream error_msg;
+            error_msg << "Cannot change task type during session. Current: "
+                << taskStr(task_manager_->getCurrentTaskType())
+                << ", Requested: " << taskStr(task_type)
+                << ". Please restart the application.";
+            return createErrorResponse(400, error_msg.str());
+        }
 
         if (loadAndProcessPointCloud(*filename, task_type)) {
             std::ostringstream json;
@@ -970,7 +1022,8 @@ private: /// REST API 핸들러들
             json << "  \"message\": \"Point cloud processing started\",\n";
             json << "  \"data\": {\n";
             json << "    \"filename\": \"" << *filename << "\",\n";
-            json << "    \"task_type\": \"" << taskStr(task_type) << "\"\n";
+            json << "    \"task_type\": \"" << taskStr(task_type) << "\",\n";
+            json << "    \"session_mode\": \"single_task_type\"\n";
             json << "  }\n";
             json << "}";
             HttpResponse response;
@@ -982,215 +1035,225 @@ private: /// REST API 핸들러들
         }
     }
 
+    HttpResponse handleGetProgress(const HttpRequest& req) {
+        if (!task_manager_) {
+            HttpResponse response;
+            response.body = R"({"success": true, "data": {"overall_progress": 0, "pending_tasks": 0, "active_tasks": 0, "completed_tasks": 0, "failed_tasks": 0, "message": "No task session active"}})";
+            return response;
+        }
 
-	HttpResponse handleGetProgress(const HttpRequest& req) {
-		double progress = task_manager_->getOverallProgress();
+        double progress = task_manager_->getOverallProgress();
 
-		std::ostringstream json;
-		json << "{\n";
-		json << "  \"success\": true,\n";
-		json << "  \"data\": {\n";
-		json << "    \"overall_progress\": " << std::fixed << std::setprecision(2) << (progress * 100) << ",\n";
-		json << "    \"pending_tasks\": " << task_manager_->getPendingTaskCount() << ",\n";
-		json << "    \"active_tasks\": " << task_manager_->getActiveTaskCount() << ",\n";
-		json << "    \"completed_tasks\": " << task_manager_->getCompletedTaskCount() << ",\n";
-		json << "    \"failed_tasks\": " << task_manager_->getFailedTaskCount() << "\n";
-		json << "  }\n";
-		json << "}";
+        std::ostringstream json;
+        json << "{\n";
+        json << "  \"success\": true,\n";
+        json << "  \"data\": {\n";
+        json << "    \"task_type\": \"" << taskStr(task_manager_->getCurrentTaskType()) << "\",\n";
+        json << "    \"overall_progress\": " << std::fixed << std::setprecision(2) << (progress * 100) << ",\n";
+        json << "    \"pending_tasks\": " << task_manager_->getPendingTaskCount() << ",\n";
+        json << "    \"active_tasks\": " << task_manager_->getActiveTaskCount() << ",\n";
+        json << "    \"completed_tasks\": " << task_manager_->getCompletedTaskCount() << ",\n";
+        json << "    \"failed_tasks\": " << task_manager_->getFailedTaskCount() << "\n";
+        json << "  }\n";
+        json << "}";
 
-		HttpResponse response;
-		response.body = json.str();
-		return response;
-	}
+        HttpResponse response;
+        response.body = json.str();
+        return response;
+    }
 
-	HttpResponse handleGetResults(const HttpRequest& req) {
-		auto results = task_manager_->getCompletedResults();
+    HttpResponse handleGetResults(const HttpRequest& req) {
+        if (!task_manager_) {
+            HttpResponse response;
+            response.body = R"({"success": true, "data": {"completed_results": 0, "total_processed_points": 0, "message": "No task session active"}})";
+            return response;
+        }
 
-		size_t total_processed_points = 0;
-		for (const auto& result : results) {
-			total_processed_points += result.processed_points.size();
-		}
+        auto results = task_manager_->getCompletedResults();
 
-		std::ostringstream json;
-		json << "{\n";
-		json << "  \"success\": true,\n";
-		json << "  \"data\": {\n";
-		json << "    \"completed_results\": " << results.size() << ",\n";
-		json << "    \"total_processed_points\": " << total_processed_points << "\n";
-		json << "  }\n";
-		json << "}";
+        size_t total_processed_points = 0;
+        for (const auto& result : results) {
+            total_processed_points += result.processed_points.size();
+        }
 
-		HttpResponse response;
-		response.body = json.str();
-		return response;
-	}
+        std::ostringstream json;
+        json << "{\n";
+        json << "  \"success\": true,\n";
+        json << "  \"data\": {\n";
+        json << "    \"task_type\": \"" << taskStr(task_manager_->getCurrentTaskType()) << "\",\n";
+        json << "    \"completed_results\": " << results.size() << ",\n";
+        json << "    \"total_processed_points\": " << total_processed_points << "\n";
+        json << "  }\n";
+        json << "}";
 
-	HttpResponse handleSaveResults(const HttpRequest& req) {
-        // 1) Content-Type 확인
+        HttpResponse response;
+        response.body = json.str();
+        return response;
+    }
+
+    HttpResponse handleSaveResults(const HttpRequest& req) {
+        if (!task_manager_) {
+            return createErrorResponse(400, "No task session active");
+        }
+
         auto it_ct = req.headers.find("Content-Type");
         std::string content_type = (it_ct != req.headers.end() ? it_ct->second : "");
         if (content_type.find("application/json") == std::string::npos) {
             return createErrorResponse(400, "Content-Type must be application/json");
         }
 
-        // 2) JSON 파싱
         auto parsed = DPApp::MiniJson::parse_object(req.body);
         if (!parsed) {
             return createErrorResponse(400, "Invalid JSON body");
         }
 
-        // 3) 필수 필드
         auto filename0 = DPApp::MiniJson::get<std::string>(*parsed, "filename");
         if (!filename0 || filename0->empty()) {
             return createErrorResponse(400, "Missing 'filename'");
         }
 
-        std::string filename = filename0.value();        
+        std::string filename = filename0.value();
+        auto results = task_manager_->getCompletedResults();
 
-		auto results = task_manager_->getCompletedResults();
+        if (results.empty()) {
+            return createErrorResponse(400, "No results to save");
+        }
 
-		if (results.empty()) {
-			return createErrorResponse(400, "No results to save");
-		}
+        std::ofstream outfile(filename);
+        if (!outfile.is_open()) {
+            return createErrorResponse(500, "Failed to open output file");
+        }
 
-		// 결과 병합
-		PointCloud merged_cloud;
-		for (const auto& result : results) {
-			merged_cloud.addPoints(result.processed_points);
-		}
+        size_t total_points = 0;
 
-		if (merged_cloud.saveToFile(filename)) {
-			std::ostringstream json;
-			json << "{\n";
-			json << "  \"success\": true,\n";
-			json << "  \"message\": \"Results saved successfully\",\n";
-			json << "  \"data\": {\n";
-			json << "    \"filename\": \"" << filename << "\",\n";
-			json << "    \"total_points\": " << merged_cloud.getPointCount() << "\n";
-			json << "  }\n";
-			json << "}";
+        for (const auto& result : results) {
+            for (const auto& point : result.processed_points) {
+                outfile << point.x << " " << point.y << " " << point.z;
 
-			HttpResponse response;
-			response.body = json.str();
-			return response;
-		}
-		else {
-			return createErrorResponse(500, "Failed to save results");
-		}
-	}
+                if (point.intensity > 0) {
+                    outfile << " " << point.intensity;
+                }
+                if (point.r != 128 || point.g != 128 || point.b != 128) {
+                    outfile << " " << static_cast<int>(point.r)
+                        << " " << static_cast<int>(point.g)
+                        << " " << static_cast<int>(point.b);
+                }
 
-	HttpResponse handleShutdownSlave(const HttpRequest& req) {
-		std::string slave_id = req.path_params.at("id");
+                outfile << "\n";
+                total_points++;
+            }
+        }
 
-		NetworkMessage shutdown_msg(MessageType::SHUTDOWN, std::vector<uint8_t>());
+        outfile.close();
 
-		if (server_->sendMessage(slave_id, shutdown_msg)) {
-			std::ostringstream json;
-			json << "{\n";
-			json << "  \"success\": true,\n";
-			json << "  \"message\": \"Shutdown command sent to slave\",\n";
-			json << "  \"data\": {\n";
-			json << "    \"slave_id\": \"" << slave_id << "\"\n";
-			json << "  }\n";
-			json << "}";
+        std::ostringstream json;
+        json << "{\n";
+        json << "  \"success\": true,\n";
+        json << "  \"message\": \"Results saved successfully\",\n";
+        json << "  \"data\": {\n";
+        json << "    \"filename\": \"" << filename << "\",\n";
+        json << "    \"total_points\": " << total_points << ",\n";
+        json << "    \"task_type\": \"" << taskStr(task_manager_->getCurrentTaskType()) << "\"\n";
+        json << "  }\n";
+        json << "}";
 
-			HttpResponse response;
-			response.body = json.str();
-			return response;
-		}
-		else {
-			return createErrorResponse(500, "Failed to send shutdown command");
-		}
-	}
+        HttpResponse response;
+        response.body = json.str();
+        return response;
+    }
 
-	HttpResponse handleShutdownAllSlaves(const HttpRequest& req) {
-		auto connected_clients = server_->getConnectedClients();
+    HttpResponse handleShutdownSlave(const HttpRequest& req) {
+        std::string slave_id = req.path_params.at("id");
 
-		if (connected_clients.empty()) {
-			return createErrorResponse(400, "No connected slaves to shutdown");
-		}
+        NetworkMessage shutdown_msg(MessageType::SHUTDOWN, std::vector<uint8_t>());
 
-		NetworkMessage shutdown_msg(MessageType::SHUTDOWN, std::vector<uint8_t>());
-		int success_count = 0;
+        if (server_->sendMessage(slave_id, shutdown_msg)) {
+            std::ostringstream json;
+            json << "{\n";
+            json << "  \"success\": true,\n";
+            json << "  \"message\": \"Shutdown command sent to slave\",\n";
+            json << "  \"data\": {\n";
+            json << "    \"slave_id\": \"" << slave_id << "\"\n";
+            json << "  }\n";
+            json << "}";
 
-		for (const auto& client_id : connected_clients) {
-			if (server_->sendMessage(client_id, shutdown_msg)) {
-				success_count++;
-			}
-		}
+            HttpResponse response;
+            response.body = json.str();
+            return response;
+        }
+        else {
+            return createErrorResponse(500, "Failed to send shutdown command");
+        }
+    }
 
-		std::ostringstream json;
-		json << "{\n";
-		json << "  \"success\": true,\n";
-		json << "  \"message\": \"Shutdown commands sent\",\n";
-		json << "  \"data\": {\n";
-		json << "    \"total_slaves\": " << connected_clients.size() << ",\n";
-		json << "    \"shutdown_sent\": " << success_count << "\n";
-		json << "  }\n";
-		json << "}";
+    HttpResponse handleShutdownAllSlaves(const HttpRequest& req) {
+        auto connected_clients = server_->getConnectedClients();
 
-		HttpResponse response;
-		response.body = json.str();
-		return response;
-	}
+        if (connected_clients.empty()) {
+            return createErrorResponse(400, "No connected slaves to shutdown");
+        }
 
-	HttpResponse handleShutdownServer(const HttpRequest& req) {
-		// 비동기적으로 서버 종료 (응답을 보낸 후)
-		std::thread([this]() {
-			std::this_thread::sleep_for(std::chrono::milliseconds(100));
-			stop();
-			}).detach();
+        NetworkMessage shutdown_msg(MessageType::SHUTDOWN, std::vector<uint8_t>());
+        int success_count = 0;
 
-		std::ostringstream json;
-		json << "{\n";
-		json << "  \"success\": true,\n";
-		json << "  \"message\": \"Server shutdown initiated\"\n";
-		json << "}";
+        for (const auto& client_id : connected_clients) {
+            if (server_->sendMessage(client_id, shutdown_msg)) {
+                success_count++;
+            }
+        }
 
-		HttpResponse response;
-		response.body = json.str();
-		return response;
-	}
+        std::ostringstream json;
+        json << "{\n";
+        json << "  \"success\": true,\n";
+        json << "  \"message\": \"Shutdown commands sent\",\n";
+        json << "  \"data\": {\n";
+        json << "    \"total_slaves\": " << connected_clients.size() << ",\n";
+        json << "    \"shutdown_sent\": " << success_count << "\n";
+        json << "  }\n";
+        json << "}";
 
-private: /// utils
-	HttpResponse createErrorResponse(int status_code, const std::string& error) {
-		HttpResponse response;
-		response.status_code = status_code;
+        HttpResponse response;
+        response.body = json.str();
+        return response;
+    }
 
-		switch (status_code) {
-		case 400: response.status_text = "Bad Request"; break;
-		case 404: response.status_text = "Not Found"; break;
-		case 500: response.status_text = "Internal Server Error"; break;
-		default: response.status_text = "Error"; break;
-		}
+    HttpResponse handleShutdownServer(const HttpRequest& req) {
+        std::thread([this]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            stop();
+            }).detach();
 
-		std::ostringstream json;
-		json << "{\n";
-		json << "  \"success\": false,\n";
-		json << "  \"error\": \"" << error << "\"\n";
-		json << "}";
+        std::ostringstream json;
+        json << "{\n";
+        json << "  \"success\": true,\n";
+        json << "  \"message\": \"Server shutdown initiated\"\n";
+        json << "}";
 
-		response.body = json.str();
-		return response;
-	}
+        HttpResponse response;
+        response.body = json.str();
+        return response;
+    }
 
-	std::string extractJsonValue(const std::string& json, const std::string& key) {
-		// 간단한 JSON 값 추출 (실제로는 JSON 라이브러리 사용 권장)
-		std::string search = "\"" + key + "\"";
-		size_t pos = json.find(search);
-		if (pos == std::string::npos) return "";
+    HttpResponse createErrorResponse(int status_code, const std::string& error) {
+        HttpResponse response;
+        response.status_code = status_code;
 
-		pos = json.find(":", pos);
-		if (pos == std::string::npos) return "";
+        switch (status_code) {
+        case 400: response.status_text = "Bad Request"; break;
+        case 404: response.status_text = "Not Found"; break;
+        case 500: response.status_text = "Internal Server Error"; break;
+        default: response.status_text = "Error"; break;
+        }
 
-		pos = json.find("\"", pos);
-		if (pos == std::string::npos) return "";
+        std::ostringstream json;
+        json << "{\n";
+        json << "  \"success\": false,\n";
+        json << "  \"error\": \"" << error << "\"\n";
+        json << "}";
 
-		size_t end_pos = json.find("\"", pos + 1);
-		if (end_pos == std::string::npos) return "";
-
-		return json.substr(pos + 1, end_pos - pos - 1);
-	}
+        response.body = json.str();
+        return response;
+    }
 
     std::string getCurrentTimestamp() {
         auto now = std::chrono::system_clock::now();
@@ -1198,14 +1261,12 @@ private: /// utils
 
         std::tm tm_utc{};
 #ifdef _WIN32
-        // gmtime_s( out_tm, in_time_t ) : 0 이면 성공
         if (gmtime_s(&tm_utc, &tt) != 0) {
-            return ""; // 필요 시 로깅/예외 처리로 교체
+            return "";
         }
 #else
-        // gmtime_r( in_time_t, out_tm ) : nullptr 아니면 성공
         if (gmtime_r(&tt, &tm_utc) == nullptr) {
-            return ""; // 필요 시 로깅/예외 처리로 교체
+            return "";
         }
 #endif
 
@@ -1213,24 +1274,9 @@ private: /// utils
         oss << std::put_time(&tm_utc, "%Y-%m-%dT%H:%M:%SZ");
         return oss.str();
     }
-
-private:
-	std::unique_ptr<NetworkServer> server_;
-	std::unique_ptr<TaskManager> task_manager_;
-	std::unique_ptr<RestApiServer> api_server_;
-
-	std::atomic<bool> running_;
-	uint16_t server_port_;
-	uint16_t api_port_;
-	size_t max_points_per_chunk_ = 10000;
-	bool daemon_mode_ = false;
-
-	std::thread task_assignment_thread_;
-	std::thread status_thread_;
-	std::thread timeout_thread_;
 };
 
-// 전역 변수 (시그널 핸들러용)
+// Global variable (for signal handler)
 static MasterApplication* g_app = nullptr;
 
 void signalHandler(int signal) {
@@ -1243,19 +1289,18 @@ void signalHandler(int signal) {
 }
 
 int main(int argc, char* argv[]) {
-    // 시그널 핸들러 설정
     signal(SIGINT, signalHandler);
     signal(SIGTERM, signalHandler);
-    
+
     MasterApplication app;
     g_app = &app;
-    
+
     if (!app.initialize(argc, argv)) {
-        ELOG << "Failed to initialize master application" ;
+        ELOG << "Failed to initialize master application";
         return 1;
     }
-    
+
     app.run();
-    
+
     return 0;
 }

@@ -1,6 +1,6 @@
 #ifdef _WIN32
-#define NOMINMAX   // Windows 헤더 포함하기 전에 정의
-#include <io.h>    // For _close, _fileno
+#define NOMINMAX
+#include <io.h>
 #endif
 
 #include <iostream>
@@ -9,12 +9,10 @@
 #include <chrono>
 #include <signal.h>
 #include <queue>
-#include <set>
-#include <tuple>
 #include <iomanip>
 
 #ifndef _WIN32
-#include <unistd.h>  // For close, STDIN_FILENO
+#include <unistd.h>
 #endif
 
 #include "../include/PointCloudTypes.h"
@@ -25,7 +23,7 @@
 
 using namespace DPApp;
 
-/// 즉시 종료(작업 중단) 신호로 쓸 전역 플래그
+// Global cancellation flag for immediate stop
 namespace DPApp {
     std::atomic<bool> g_cancel_requested{ false };
 }
@@ -39,7 +37,7 @@ public:
     }
 
     bool initialize(int argc, char* argv[]) {
-        /// Initialize logger
+        // Initialize logger
         std::time_t t = std::time(nullptr);
         std::tm tm{};
 #ifdef _WIN32
@@ -55,10 +53,10 @@ public:
         // Load configuration from environment
         cfg_ = DPApp::RuntimeConfig::loadFromEnv();
 
-        // 명령행 인수 파싱
+        // Parse command line arguments
         parseCommandLine(argc, argv);
 
-        // 네트워크 클라이언트 설정
+        // Setup network client
         client_ = std::make_unique<NetworkClient>();
         client_->setMessageCallback([this](const NetworkMessage& msg, const std::string& sender_id) {
             handleMessage(msg, sender_id);
@@ -68,7 +66,7 @@ public:
             handleConnection(client_id, connected);
             });
 
-        // 작업 처리기 설정
+        // Setup task processor
         task_processor_ = std::make_unique<TaskProcessor>();
 
         return true;
@@ -84,7 +82,7 @@ public:
         ILOG << "Processing threads: " << processing_threads_;
         ILOG << "Slave ID: " << client_->getSlaveId();
 
-        // 서버에 연결
+        // Connect to server
         if (!client_->connect(server_address_, server_port_)) {
             ELOG << "Failed to connect to master server";
             return false;
@@ -92,12 +90,12 @@ public:
 
         running_ = true;
 
-        // 작업 처리 스레드들 시작
+        // Start processing threads
         for (size_t i = 0; i < processing_threads_; ++i) {
             processing_thread_pool_.emplace_back(&SlaveApplication::processingLoop, this, i);
         }
 
-        // 상태 보고 스레드 시작
+        // Start status reporting thread
         status_thread_ = std::thread(&SlaveApplication::statusLoop, this);
 
         ILOG << "Slave worker started successfully";
@@ -110,22 +108,22 @@ public:
 
         ILOG << "Stopping slave worker...";
 
-        /// 1. Set running flag to false first
+        // Set running flag to false first
         running_ = false;
         shutdown_requested_ = true;
 
-        /// 2. Notify all waiting threads about shutdown
+        // Notify all waiting threads about shutdown
         task_queue_cv_.notify_all();
 
-        /// 3. Processing threads 종료 (타임아웃 적용)
+        // Processing threads shutdown (with timeout)
         auto thread_shutdown_start = std::chrono::steady_clock::now();
-        const auto max_wait_time = std::chrono::seconds(5);  // 최대 5초 대기
+        const auto max_wait_time = std::chrono::seconds(5);  // Max 5 seconds wait
 
         for (auto& thread : processing_thread_pool_) {
             if (thread.joinable()) {
                 auto elapsed = std::chrono::steady_clock::now() - thread_shutdown_start;
                 if (elapsed < max_wait_time) {
-                    // 남은 시간만큼 대기
+                    // Wait for remaining time
                     auto remaining = max_wait_time - elapsed;
                     if (std::chrono::milliseconds(100) < remaining) {
                         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -147,7 +145,7 @@ public:
         }
         processing_thread_pool_.clear();
 
-        /// 4. Status thread 종료
+        // Status thread shutdown
         if (status_thread_.joinable()) {
             try {
                 status_thread_.join();
@@ -158,6 +156,7 @@ public:
             }
         }
 
+        // Close stdin for input thread
 #ifdef _WIN32
         try {
             if (_fileno(stdin) != -1) {
@@ -165,7 +164,7 @@ public:
             }
         }
         catch (...) {
-            // 이미 닫혔거나 오류 발생 시 무시
+            // Already closed or error, ignore
         }
 #else
         try {
@@ -174,7 +173,7 @@ public:
             }
         }
         catch (...) {
-            // 이미 닫혔거나 오류 발생 시 무시
+            // Already closed or error, ignore
         }
 #endif
 
@@ -188,7 +187,7 @@ public:
             }
         }
 
-        /// 5. 네트워크 클라이언트 해제
+        // Disconnect network client
         if (client_) {
             try {
                 client_->disconnect();
@@ -201,7 +200,6 @@ public:
         ILOG << "Slave worker stopped completely";
     }
 
-    /// Graceful shutdown from network disconnect :
     void handleNetworkDisconnect() {
         if (running_) {
             ILOG << "Network disconnected, initiating graceful shutdown...";
@@ -217,36 +215,36 @@ public:
 
         printHelp();
 
-        // 입력 처리를 별도 스레드로 분리
+        // Separate thread for input processing
         input_thread_ = std::thread([this]() {
             std::string command;
             while (running_ && !shutdown_requested_ && !force_exit_) {
                 if (std::getline(std::cin, command)) {
                     if (!processCommand(command)) {
-                        running_ = false;  // quit 명령 처리
+                        running_ = false;  // quit command processing
                         break;
                     }
                 }
 
-                // 입력이 없어도 주기적으로 종료 조건 확인
+                // Check exit conditions even without input
                 if (shutdown_requested_ || force_exit_) {
                     break;
                 }
             }
             });
 
-        // 메인 루프는 주기적으로 상태를 체크
+        // Main loop periodically checks status
         while (running_ && !shutdown_requested_ && !force_exit_) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-            // 연결 상태 체크
+            // Check connection status
             if (!client_->isConnected()) {
                 WLOG << "Lost connection to master server";
                 break;
             }
         }
 
-        /// 종료 이유 로깅
+        // Log shutdown reason
         if (shutdown_requested_) {
             ILOG << "Shutdown requested by master, stopping...";
         }
@@ -255,10 +253,6 @@ public:
         }
         else if (!running_) {
             ILOG << "Normal shutdown requested, stopping...";
-        }
-
-        if (shutdown_requested_) {
-            ILOG << "Shutdown requested by master, stopping...";
         }
 
         stop();
@@ -270,6 +264,7 @@ public:
 
 private:
     std::atomic<bool> shutdown_requested_{ false };
+    std::atomic<bool> force_exit_{ false };
 
     struct TaskQueueItem {
         ProcessingTask task;
@@ -333,7 +328,6 @@ private:
         ILOG << "";
     }
 
-    // processCommand 함수를 bool 반환형으로 변경
     bool processCommand(const std::string& command) {
         if (command.empty()) return true;
 
@@ -356,15 +350,15 @@ private:
         else if (cmd == "help") {
             printHelp();
         }
-        /// quit: 그레이스풀 종료 ---
+        // Graceful quit
         else if (cmd == "quit" || cmd == "exit") {
             ILOG << "[GRACEFUL] finish current task then stop.";
-            /// 대기 중 스레드 깨우기
+            // Wake up waiting threads
             task_queue_cv_.notify_all();
-            /// run() 루프를 빠져나가서 stop() 호출로 이동
+            // Exit run() loop to call stop()
             return false;
         }
-        /// 즉시 종료: 진행 중 작업도 중단 시도 ---
+        // Immediate quit: attempt to cancel in-flight tasks too
         else if (cmd == "quit-now" || cmd == "exit-now" || cmd == "quit!") {
             ILOG << "[IMMEDIATE] cancel in-flight task and stop NOW.";
             DPApp::g_cancel_requested.store(true, std::memory_order_relaxed);
@@ -395,19 +389,19 @@ private:
         case MessageType::SHUTDOWN:
             ILOG << "Received SHUTDOWN command from master - initiating immediate shutdown";
 
-            /// 즉시 종료 플래그 설정
+            // Set immediate shutdown flags
             shutdown_requested_ = true;
             force_exit_ = true;
             running_ = false;
 
-            // 모든 대기 중인 스레드 깨우기
+            // Wake up all waiting threads
             task_queue_cv_.notify_all();
 #ifdef _WIN32
             _close(_fileno(stdin));
 #else
             close(STDIN_FILENO);
 #endif
-            /// 네트워크 연결 즉시 해제하여 블로킹 해제
+            // Immediately disconnect network to unblock
             std::thread([this]() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
                 if (client_) {
@@ -429,14 +423,14 @@ private:
         }
         else {
             ILOG << "Disconnected from master server";
-            /// Only attempt reconnection if we're still supposed to be running
-            /// and the disconnection wasn't initiated by us
+            // Only attempt reconnection if we're still supposed to be running
+            // and the disconnection wasn't initiated by us
             if (running_ && !shutdown_requested_) {
                 WLOG << "Connection lost, attempting to reconnect...";
-                /// Reconnection logic would go here
+                // Reconnection logic would go here
             }
             else {
-                /// If we initiated the shutdown, don't try to reconnect
+                // If we initiated the shutdown, don't try to reconnect
                 ILOG << "Shutdown in progress, not attempting reconnection";
             }
         }
@@ -446,12 +440,12 @@ private:
         try {
             const std::vector<uint8_t>& combined_data = message.data;
 
-            /// Check the size of combined_data
+            // Check the size of combined_data
             if (combined_data.size() < sizeof(uint32_t)) {
                 throw std::runtime_error("Message too small to contain task data size");
             }
 
-            /// Read the first 4 bytes
+            // Read the first 4 bytes
             uint32_t task_data_size = 0;
             std::memcpy(&task_data_size, combined_data.data(), sizeof(uint32_t));
 
@@ -460,21 +454,21 @@ private:
                 throw std::runtime_error("Message is smaller than expected task data size");
             }
 
-            /// Extract task data and deserialization
+            // Extract task data and deserialize
             std::vector<uint8_t> task_data(combined_data.begin() + offset, combined_data.begin() + offset + task_data_size);
             ProcessingTask task = NetworkUtils::deserializeTask(task_data);
 
-            /// Update offset
+            // Update offset
             offset += task_data_size;
             if (combined_data.size() <= offset) {
                 throw std::runtime_error("No chunk data found after task data");
             }
 
-            /// Deserialize the rest data (chunk_data)
+            // Deserialize the rest data (chunk_data)
             std::vector<uint8_t> chunk_data(combined_data.begin() + offset, combined_data.end());
             PointCloudChunk chunk = NetworkUtils::deserializeChunk(chunk_data);
 
-            /// 작업을 큐에 추가
+            // Add task to queue
             {
                 std::lock_guard<std::mutex> lock(task_queue_mutex_);
                 task_queue_.emplace(task, chunk);
@@ -491,9 +485,9 @@ private:
         catch (const std::exception& e) {
             ELOG << "Error processing task assignment: " << e.what();
 
-            // 에러 응답 전송
+            // Send error response
             ProcessingResult error_result;
-            error_result.task_id = 0; // 파싱에 실패했으므로 알 수 없음
+            error_result.task_id = 0; // Unknown due to parsing failure
             error_result.chunk_id = 0;
             error_result.success = false;
             error_result.error_message = "Task assignment parsing failed: " + std::string(e.what());
@@ -516,7 +510,7 @@ private:
         while (running_) {
             TaskQueueItem item(ProcessingTask{}, PointCloudChunk{});
 
-            /// 작업 큐에서 작업 가져오기
+            // Get task from queue
             {
                 std::unique_lock<std::mutex> lock(task_queue_mutex_);
                 task_queue_cv_.wait(lock, [this] { return !task_queue_.empty() || !running_; });
@@ -534,24 +528,12 @@ private:
 
             ILOG << "Thread " << thread_id << " processing task " << item.task.task_id;
 
-            /// 작업 처리
+            // Process task
             auto start_time = std::chrono::steady_clock::now();
 
             ProcessingResult result;
             try {
-                // 취소 가능한 작업 처리
-                {
-                    std::lock_guard<std::mutex> cancel_lock(cancellation_mutex_);
-                    active_task_cancellations_[item.task.task_id] = std::make_shared<std::atomic<bool>>(false);
-                }
-
                 result = task_processor_->processTask(item.task, item.chunk);
-
-                // 취소 플래그 제거
-                {
-                    std::lock_guard<std::mutex> cancel_lock(cancellation_mutex_);
-                    active_task_cancellations_.erase(item.task.task_id);
-                }
 
             }
             catch (const std::exception& e) {
@@ -559,12 +541,6 @@ private:
                 result.chunk_id = item.task.chunk_id;
                 result.success = false;
                 result.error_message = "Processing exception: " + std::string(e.what());
-
-                // 취소 플래그 제거
-                {
-                    std::lock_guard<std::mutex> cancel_lock(cancellation_mutex_);
-                    active_task_cancellations_.erase(item.task.task_id);
-                }
             }
 
             auto end_time = std::chrono::steady_clock::now();
@@ -580,10 +556,10 @@ private:
                 WLOG << "Task " << item.task.task_id << " failed: " << result.error_message;
             }
 
-            /// 결과를 마스터에게 전송
+            // Send result to master
             sendTaskResult(result);
 
-            /// 통계 업데이트
+            // Update statistics
             updateStats(result.success, processing_time / 1000.0);
         }
 
@@ -610,7 +586,7 @@ private:
 
     void statusLoop() {
         while (running_) {
-            /// 더 자주 확인하여 빠른 종료 지원
+            // Check more frequently for quick shutdown support
             for (int i = 0; i < 60 && running_; ++i) {
                 std::this_thread::sleep_for(std::chrono::seconds(1));
             }
@@ -695,43 +671,38 @@ private:
         ILOG << "=========================";
     }
 
-    private:
-        DPApp::RuntimeConfig cfg_;
-        std::atomic<bool> force_exit_{ false };  /// 강제 종료 플래그
+private:
+    DPApp::RuntimeConfig cfg_;
 
-        // 작업별 중단 플래그들을 관리
-        std::map<uint32_t, std::shared_ptr<std::atomic<bool>>> active_task_cancellations_;
-        std::mutex cancellation_mutex_;
+    std::unique_ptr<NetworkClient> client_;
+    std::unique_ptr<TaskProcessor> task_processor_;
 
-        std::unique_ptr<NetworkClient> client_;
-        std::unique_ptr<TaskProcessor> task_processor_;
+    std::atomic<bool> running_;
+    std::string server_address_ = "localhost";
+    uint16_t server_port_;
+    size_t processing_threads_;
 
-        std::atomic<bool> running_;
-        std::string server_address_ = "localhost";
-        uint16_t server_port_;
-        size_t processing_threads_;
+    // Task queue
+    std::queue<TaskQueueItem> task_queue_;
+    std::mutex task_queue_mutex_;
+    std::condition_variable task_queue_cv_;
 
-        /// 작업 큐
-        std::queue<TaskQueueItem> task_queue_;
-        std::mutex task_queue_mutex_;
-        std::condition_variable task_queue_cv_;
+    // Processing threads
+    std::vector<std::thread> processing_thread_pool_;
+    std::thread status_thread_;
 
-        /// 처리 스레드들
-        std::vector<std::thread> processing_thread_pool_;
-        std::thread status_thread_;
+    // Input thread
+    std::thread input_thread_;
 
-        /// Input thread
-        std::thread input_thread_;
-
-        /// 통계
-        std::mutex stats_mutex_;
-        std::atomic<uint32_t> completed_tasks_{ 0 };
-        std::atomic<uint32_t> failed_tasks_{ 0 };
-        std::atomic<double> total_processing_time_{ 0.0 };
-        std::atomic<double> avg_processing_time_{ 0.0 };
+    // Statistics
+    std::mutex stats_mutex_;
+    std::atomic<uint32_t> completed_tasks_{ 0 };
+    std::atomic<uint32_t> failed_tasks_{ 0 };
+    std::atomic<double> total_processing_time_{ 0.0 };
+    std::atomic<double> avg_processing_time_{ 0.0 };
 };
 
-/// 전역 변수 (시그널 핸들러용)
+// Global variable (for signal handler)
 static SlaveApplication* g_app = nullptr;
 
 void signalHandler(int signal) {
@@ -744,7 +715,7 @@ void signalHandler(int signal) {
 }
 
 int main(int argc, char* argv[]) {
-    /// 시그널 핸들러 설정
+    // Setup signal handler
     signal(SIGINT, signalHandler);
     signal(SIGTERM, signalHandler);
 
