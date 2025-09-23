@@ -5,6 +5,8 @@
 #define NOMINMAX
 #endif
 
+#define MAX_NUM_PTS_CHUNK 100000
+
 #include <vector>
 #include <queue>
 #include <map>
@@ -310,13 +312,27 @@ namespace DPApp {
      * @brief Point cloud loading utilities
      */
     namespace PointCloudLoader {
-        std::vector<std::shared_ptr<PointCloudChunk>> loadPointCloudFileInChunks(const std::string& file_path, uint32_t max_points_per_chunk = 100000);
+        std::vector<std::shared_ptr<PointCloudChunk>> loadPointCloudFileInChunks(const std::string& file_path, uint32_t max_points_per_chunk = MAX_NUM_PTS_CHUNK);
 
         std::shared_ptr<PointCloudChunk> loadLASFile(const std::string& file_path);
-        
+
         std::shared_ptr<PointCloudChunk> loadXYZFile(const std::string& file_path);
-        
+
         PointCloudFileInfo getPointCloudFileInfo(const std::string& file_path);
+
+        // Chunk streaming function
+        std::vector<std::shared_ptr<PointCloudChunk>> loadPointCloudFileInChunksStreaming(
+            const std::string& file_path,
+            uint32_t max_points_per_chunk = 100000);
+
+        // File streaming function
+        std::vector<std::shared_ptr<PointCloudChunk>> loadXYZFileStreaming(
+            const std::string& file_path,
+            uint32_t max_points_per_chunk);
+
+        std::vector<std::shared_ptr<PointCloudChunk>> loadLASFileStreaming(
+            const std::string& file_path,
+            uint32_t max_points_per_chunk);
     }
 
     /**
@@ -1568,71 +1584,36 @@ namespace DPApp {
     // PointCloudLoader Implementation
     namespace PointCloudLoader {
 
-        std::vector<std::shared_ptr<PointCloudChunk>> loadPointCloudFileInChunks(
-            const std::string& file_path, uint32_t max_points_per_chunk) {
+        std::vector<std::shared_ptr<PointCloudChunk>> loadPointCloudFileInChunks(const std::string& file_path, uint32_t max_points_per_chunk) {
 
-            std::vector<std::shared_ptr<PointCloudChunk>> chunks;
+            // Use streaming version
+            return loadPointCloudFileInChunksStreaming(file_path, max_points_per_chunk);
+        }
 
-            try {
-                std::cout << "Loading point cloud file: " << file_path << std::endl;
-
-                // Determine file type by extension
-                std::string extension = std::filesystem::path(file_path).extension().string();
-                (std::transform)(extension.begin(), extension.end(), extension.begin(), ::tolower);
-
-                std::shared_ptr<PointCloudChunk> full_chunk;
-
-                if (extension == ".las" || extension == ".laz") {
-                    full_chunk = loadLASFile(file_path);
+        /// Simple memory usage estimation function
+        inline size_t estimateMemoryUsageMB(const std::vector<std::shared_ptr<PointCloudChunk>>& chunks) {
+            size_t total_points = 0;
+            for (const auto& chunk : chunks) {
+                if (chunk) {
+                    total_points += chunk->points.size();
                 }
-                else if (extension == ".xyz" || extension == ".pts") {
-                    full_chunk = loadXYZFile(file_path);
-                }
-                else {
-                    std::cerr << "Unsupported file format: " << extension << std::endl;
-                    return chunks;
-                }
-
-                if (!full_chunk || full_chunk->points.empty()) {
-                    std::cerr << "Failed to load point cloud file: " << file_path << std::endl;
-                    return chunks;
-                }
-
-                std::cout << "Loaded " << full_chunk->points.size() << " points" << std::endl;
-
-                // Chunk management
-                if (full_chunk->points.size() <= max_points_per_chunk) {
-                    // Single chunk if under limit
-                    chunks.push_back(full_chunk);
-                }
-                else {
-                    // Split into multiple chunks
-                    size_t total_points = full_chunk->points.size();
-                    size_t chunk_count = (total_points + max_points_per_chunk - 1) / max_points_per_chunk;
-
-                    for (size_t i = 0; i < chunk_count; ++i) {
-                        size_t start_idx = i * max_points_per_chunk;
-                        size_t end_idx = (std::min)(start_idx + max_points_per_chunk, total_points);
-
-                        auto chunk = std::make_shared<PointCloudChunk>();
-                        chunk->chunk_id = static_cast<uint32_t>(i);
-                        chunk->points.assign(
-                            full_chunk->points.begin() + start_idx,
-                            full_chunk->points.begin() + end_idx
-                        );
-
-                        chunks.push_back(chunk);
-                    }
-
-                    std::cout << "Split into " << chunks.size() << " chunks" << std::endl;
-                }
-
-            }
-            catch (const std::exception& e) {
-                std::cerr << "Error loading point cloud file " << file_path << ": " << e.what() << std::endl;
             }
 
-            return chunks;
+            // Point3D size + overhead estimation
+            size_t bytes_per_point = sizeof(Point3D) + 8; /// Including some overhead
+            size_t total_bytes = total_points * bytes_per_point;
+
+            return total_bytes / (1024 * 1024); /// Convert to MB
+        }
+
+        /// Function to display progress and memory usage together
+        void printProgressWithMemory(size_t current_chunks, size_t current_points,
+            const std::string& operation) {
+            size_t estimated_mb = (current_points * sizeof(Point3D)) / (1024 * 1024);
+
+            std::cout << operation << " - Chunks: " << current_chunks
+                << ", Points: " << current_points
+                << ", Est. Memory: ~" << estimated_mb << "MB" << std::endl;
         }
 
         PointCloudFileInfo getPointCloudFileInfo(const std::string& file_path) {
@@ -1741,6 +1722,179 @@ namespace DPApp {
             }
 
             return chunk;
+        }
+
+        std::vector<std::shared_ptr<PointCloudChunk>> loadPointCloudFileInChunksStreaming(
+            const std::string& file_path, uint32_t max_points_per_chunk) {
+
+            std::vector<std::shared_ptr<PointCloudChunk>> chunks;
+
+            try {
+                std::cout << "Loading point cloud file (streaming): " << file_path << std::endl;
+
+                // Check file extension
+                std::string extension = std::filesystem::path(file_path).extension().string();
+                std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+
+                if (extension == ".las" || extension == ".laz") {
+                    chunks = loadLASFileStreaming(file_path, max_points_per_chunk);
+                }
+                else if (extension == ".xyz" || extension == ".pts") {
+                    chunks = loadXYZFileStreaming(file_path, max_points_per_chunk);
+                }
+                else {
+                    std::cerr << "Unsupported file format: " << extension << std::endl;
+                    return chunks;
+                }
+
+                std::cout << "Created " << chunks.size() << " chunks via streaming" << std::endl;
+
+            }
+            catch (const std::exception& e) {
+                std::cerr << "Error in streaming load: " << e.what() << std::endl;
+            }
+
+            return chunks;
+        }
+
+        std::vector<std::shared_ptr<PointCloudChunk>> loadXYZFileStreaming(
+            const std::string& file_path, uint32_t max_points_per_chunk) {
+
+            std::vector<std::shared_ptr<PointCloudChunk>> chunks;
+
+            try {
+                std::ifstream file(file_path);
+                if (!file.is_open()) {
+                    std::cerr << "Cannot open XYZ file: " << file_path << std::endl;
+                    return chunks;
+                }
+
+                /// Initialize a cuttent chunk
+                auto current_chunk = std::make_shared<PointCloudChunk>();
+                current_chunk->chunk_id = 0;
+                current_chunk->points.reserve(max_points_per_chunk);
+
+                std::string line;
+                size_t line_count = 0;
+                size_t points_in_current_chunk = 0;
+                size_t total_points_processed = 0;
+                uint32_t chunk_counter = 0;
+
+                while (std::getline(file, line)) {
+                    line_count++;
+
+                    /// Skip empty line or comment line
+                    if (line.empty() || line[0] == '#') continue;
+
+                    std::istringstream iss(line);
+                    Point3D point;
+
+                    if (iss >> point.x >> point.y >> point.z) {
+                        /// Attempt to read additional fields
+                        float temp_intensity = 0;
+                        int temp_r = 128, temp_g = 128, temp_b = 128;
+
+                        iss >> temp_intensity >> temp_r >> temp_g >> temp_b;
+
+                        point.intensity = static_cast<uint16_t>(temp_intensity);
+                        point.r = static_cast<uint8_t>(temp_r);
+                        point.g = static_cast<uint8_t>(temp_g);
+                        point.b = static_cast<uint8_t>(temp_b);
+                        point.classification = 0;
+
+                        current_chunk->points.push_back(point);
+                        points_in_current_chunk++;
+                        total_points_processed++;
+
+                        /// Check chunk size limit
+                        if (points_in_current_chunk >= max_points_per_chunk) {
+                            /// Compute bounding box
+                            current_chunk->calculateBounds();
+
+                            /// Complete chunk
+                            chunks.push_back(current_chunk);
+
+                            /// Progress and memory usage
+                            printProgressWithMemory(chunks.size(), total_points_processed, "Streaming");
+
+                            /// Start new chunk
+                            chunk_counter++;
+                            current_chunk = std::make_shared<PointCloudChunk>();
+                            current_chunk->chunk_id = chunk_counter;
+                            current_chunk->points.reserve(max_points_per_chunk);
+                            points_in_current_chunk = 0;
+                        }
+                    }
+
+                    /// Progress (every 100k lines)
+                    if (line_count % 100000 == 0) {
+                        printProgressWithMemory(chunks.size(), total_points_processed, "Processing");
+                    }
+                }
+
+                /// Last chunk
+                if (points_in_current_chunk > 0) {
+                    current_chunk->calculateBounds();
+                    chunks.push_back(current_chunk);
+
+                    std::cout << "Final chunk " << chunk_counter
+                        << " completed (" << points_in_current_chunk << " points)" << std::endl;
+                }
+
+                file.close();
+
+                /// Final result
+                size_t total_estimated_mb = estimateMemoryUsageMB(chunks);
+                std::cout << "Streaming load completed: " << chunks.size() << " chunks, "
+                    << total_points_processed << " total points, "
+                    << "~" << total_estimated_mb << "MB estimated usage" << std::endl;
+
+            }
+            catch (const std::exception& e) {
+                std::cerr << "Error in XYZ streaming: " << e.what() << std::endl;
+            }
+
+            return chunks;
+        }
+
+        std::vector<std::shared_ptr<PointCloudChunk>> loadLASFileStreaming(
+            const std::string& file_path, uint32_t max_points_per_chunk) {
+
+            std::vector<std::shared_ptr<PointCloudChunk>> chunks;
+
+            // TODO: LAS streaming implementation (currently dummy)
+            std::cout << "LAS streaming not implemented yet, using fallback" << std::endl;
+
+            // Temporary: use existing method
+            auto full_chunk = loadLASFile(file_path);
+            if (full_chunk && !full_chunk->points.empty()) {
+
+                if (full_chunk->points.size() <= max_points_per_chunk) {
+                    chunks.push_back(full_chunk);
+                }
+                else {
+                    // Split in memory (until LAS implementation is complete)
+                    size_t total_points = full_chunk->points.size();
+                    size_t chunk_count = (total_points + max_points_per_chunk - 1) / max_points_per_chunk;
+
+                    for (size_t i = 0; i < chunk_count; ++i) {
+                        size_t start_idx = i * max_points_per_chunk;
+                        size_t end_idx = (std::min)(start_idx + max_points_per_chunk, total_points);
+
+                        auto chunk = std::make_shared<PointCloudChunk>();
+                        chunk->chunk_id = static_cast<uint32_t>(i);
+                        chunk->points.assign(
+                            full_chunk->points.begin() + start_idx,
+                            full_chunk->points.begin() + end_idx
+                        );
+                        chunk->calculateBounds();
+
+                        chunks.push_back(chunk);
+                    }
+                }
+            }
+
+            return chunks;
         }
 
     } // namespace PointCloudLoader
