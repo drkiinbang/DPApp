@@ -24,10 +24,16 @@
 #include <limits>
 #include <sstream>
 #include <thread>
+#include <exception>
 
 #include "PointCloudTypes.h"
 #include "NetworkManager.h"
 #include "ReadPointFile.h"
+#include "bim/gltf.h"
+#include "bim/mbr.h"
+#include "bim/BimInfo.h"
+
+namespace fs = std::filesystem;
 
 namespace DPApp {
 
@@ -1029,5 +1035,177 @@ namespace DPApp {
         }
 
     } // namespace PointCloudProcessors
+
+    namespace MeshProcessors {
+        std::string wstring_to_utf8(const std::wstring& wstr) {
+            int size_needed = WideCharToMultiByte(CP_UTF8, 0, wstr.data(), (int)wstr.size(), NULL, 0, NULL, NULL);
+            std::string utf8str(size_needed, 0);
+            WideCharToMultiByte(CP_UTF8, 0, wstr.data(), (int)wstr.size(), &utf8str[0], size_needed, NULL, NULL);
+            return utf8str;
+        }
+
+        bool convert_gltf_to_nodes2(const std::string& dataset_name,
+            const std::string& bim_folder,
+            const std::string& nodes2_folder,
+            const bool is_offset_applied,
+            const float* offset,
+            const std::string& compressed_bim_file_path) {
+            std::filesystem::path input_path(bim_folder); // glb 파일이 저장된 폴더 경로
+            std::filesystem::path output_path(nodes2_folder); // .nodes2 파일을 저장할 폴더 경로
+
+            if (std::filesystem::exists(input_path) == false)
+            {
+                std::cout << "input_folder '" << bim_folder << "' is not exist" << std::endl;
+                return false;
+            }
+
+            size_t total_gltf_files = std::distance(fs::directory_iterator(input_path), fs::directory_iterator());
+            int processed_gltf_files = 0;
+
+            std::string output_file_name = dataset_name + ".nodes2"; // binary file name
+            auto full_path = output_path / output_file_name;
+            output_file_name = full_path.string();
+            
+            //float global_bbox_min[3] = { NUM_MAX, NUM_MAX, NUM_MAX }; // 최대값으로 초기화
+            //float global_bbox_max[3] = { NUM_MIN, NUM_MIN, NUM_MIN }; // 최소값으로 초기화
+            float global_bbox_min[3] = { (std::numeric_limits<float>::max)(), (std::numeric_limits<float>::max)(), (std::numeric_limits<float>::max)() }; // 최대값으로 초기화
+            float global_bbox_max[3] = { std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest() }; // 최소값으로 초기화
+
+            // .nodes2 파일로 geometry 정보 출력하기 위한 outputfilestream 생성
+            std::ofstream* filestream = nullptr;
+            filestream = new std::ofstream(output_file_name, std::ios::out | std::ios::binary);
+
+            if (!filestream->good())
+            {
+                std::cerr << "file open failure : " << output_file_name << std::endl;
+                return false;
+            }
+            // Iterate through GLTF files in the directory
+            int idx = 1000; // bim_id의 초기값 - 파일명에 Revit Element ID가 없는 경우 사용됨    
+            for (const auto& entry : std::filesystem::directory_iterator(input_path))
+            {
+                std::wcout << entry.path().wstring() << std::endl; // unicode string 
+                std::cout << entry.path().string() << std::endl; // utf8 string // 영문 windows에서는 주석처리 해야 함
+                if (!entry.is_regular_file())
+                {
+                    std::wcout << entry.path().wstring() << " not regular file" << std::endl;
+                    std::cout << entry.path().string() << " not regular file" << std::endl; // utf8 string // 영문 windows에서는 주석처리 해야 함
+                    continue;
+                }
+
+                auto& data_file = entry.path();
+                if (data_file.extension().compare(".gltf") != 0 && data_file.extension().compare(".glb") != 0)
+                {
+                    if (data_file.extension().compare(".bin") != 0)
+                        std::cout << data_file << " not gltf(glb) file" << std::endl;
+                    continue;
+                }
+
+                // UTF-16을 UTF-8로 변환
+                const std::string utf8FileName = wstring_to_utf8(data_file);
+                std::string gltf_file_name = utf8FileName;
+
+                // create new gltf_file object
+                gltf gltf_file;
+                BimInfo bim_info = gltf_file.read(gltf_file_name);  // read gltf file and get BimInfo object
+
+                // bim_id, node_name 설정
+                int bim_id = idx;
+                std::string node_name;
+                try
+                {
+                    // 파일 이름에서 확장자를 제외하고 '_'로 분할하여 마지막 문자열을 bim_id로 설정합니다.
+                    std::wstring filenameW = data_file.stem().wstring(); // 파일 이름 - convert to unicode   
+                    std::string filename = wstring_to_utf8(filenameW);
+
+                    std::vector<std::string> parts;
+                    std::stringstream ss(filename);
+                    std::string item;
+                    while (std::getline(ss, item, '_')) {// '_'로 분할
+                        parts.push_back(item);
+                    }
+
+                    // 문자열의 마지막 부분(Revit Element ID)를 bim_id로 변환합니다.
+                    if (!parts.empty()) {
+                        //bim_id = boost::lexical_cast<unsigned long>(parts.back());
+                        std::string lastPart = parts.back();
+                        // 숫자만 남기기 위해 문자 제거
+                        lastPart.erase(std::remove_if(lastPart.begin(), lastPart.end(), [](char c) { return !std::isdigit(c); }), lastPart.end());
+                        if (!lastPart.empty()) {
+                            try {
+                                bim_id = std::stoul(lastPart); // boost::lexical_cast 대체
+                            }
+                            catch (const std::exception& e) {
+                                std::cerr << "Error: Failed to convert to number: " << e.what() << std::endl;
+                                bim_id = ++idx;
+                            }
+                        }
+                        else {
+                            std::cerr << "Error: No numeric part found in the last part of filename" << std::endl;
+                            bim_id = ++idx; // 기본값으로 idx를 증가시킴
+                        }
+                    }
+                    else {
+                        std::cerr << "Error: Filename does not contain valid parts" << std::endl;
+                        bim_id = ++idx; // 기본값으로 idx를 증가시킴
+                    }
+
+                    // 마지막 '_'의 위치를 찾고 앞부분(node name)을 가져옵니다.
+                    size_t lastUnderscorePos = filename.find_last_of("_");
+                    node_name = filename.substr(0, lastUnderscorePos); // node name 
+                }
+                catch (const std::exception& e)
+                {
+                    std::cerr << data_file.stem() << std::endl;
+                    std::cerr << e.what() << std::endl;
+                    bim_id = ++idx;
+                }
+
+                // utf8FileName의 파일명만 남기고 나머지는 지우기.
+                std::string node_name_utf8 = utf8FileName;
+                std::size_t lastSlashPos = node_name_utf8.find_last_of("\\");
+                node_name_utf8 = node_name_utf8.substr(lastSlashPos + 1);
+                // 확장자도 지우기
+                std::size_t lastDotPos = node_name_utf8.find_last_of(".");
+                node_name_utf8 = node_name_utf8.substr(0, lastDotPos);
+                // 마지막 '_'의 위치를 찾고 앞부분(node name)을 가져옵니다.
+                size_t lastUnderscorePos = node_name_utf8.find_last_of("_");
+                node_name_utf8 = node_name_utf8.substr(0, lastUnderscorePos);
+                // node_name 맨 마지막 문자가 '_'이면 ''로 변경
+                if (node_name_utf8.back() == '_') { node_name_utf8.pop_back(); }
+
+                //std::cout << bim_id << ": " << node_name << " " << node_name_utf8 << std::endl;
+
+                // vertex buffer(geometry)를 가져옴 (offset 적용 (translation))
+                std::size_t buffer_size = 0;
+                char* vertex_buffer = bim_info.get_vertex_buffer(is_offset_applied, offset, buffer_size);
+
+                // bounding box, MBR 정보를 가져옴
+                MBR bbox = bim_info.get_mbr(is_offset_applied, offset);
+                auto bbox_min = bbox.get_min(); // bbox의 최소값을 복사합니다.
+                auto bbox_max = bbox.get_max(); // bbox의 최대값을 복사합니다.
+                // 전역 bounding box 정보 업데이트
+                for (int i = 0; i < 3; ++i) {
+                    global_bbox_min[i] = (std::min)(global_bbox_min[i], bbox_min[i]);
+                    global_bbox_max[i] = (std::max)(global_bbox_max[i], bbox_max[i]);
+                }
+
+                delete[] vertex_buffer;
+
+                // .nodes2 파일에 bim_info 저장
+                bim_info.save(bim_id, node_name, is_offset_applied, offset, *filestream);
+
+                // Progress 출력
+                processed_gltf_files++;
+                int progress = (int)((float)processed_gltf_files / total_gltf_files * 100);
+                if (processed_gltf_files % 100 == 0 || progress == 100)
+                    std::cout << "Processed " << processed_gltf_files << " / " << total_gltf_files << " (" << progress << "%)" << std::endl;
+            }
+
+            filestream->close();
+
+            return true;
+        }
+    }
 
 } // namespace DPApp
