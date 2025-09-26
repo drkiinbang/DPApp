@@ -121,6 +121,38 @@ public:
       return bimInfo;
   }
 
+protected:
+    // 부모까지 포함한 최종 transform
+    Matrix4f ComputeWorldTransform(const tinygltf::Model& model, int nodeIndex) {
+        Matrix4f m = Matrix4f::Identity();
+        const tinygltf::Node* node = &model.nodes[nodeIndex];
+
+        std::vector<int> hierarchy;
+        while (true) {
+            hierarchy.push_back(nodeIndex);
+
+            // 부모 탐색 (gltf는 parent 저장 안 해서 직접 찾아야 함)
+            int parent = -1;
+            for (size_t i = 0; i < model.nodes.size(); i++) {
+                for (int child : model.nodes[i].children) {
+                    if (child == nodeIndex) {
+                        parent = static_cast<int>(i);
+                        break;
+                    }
+                }
+            }
+            if (parent == -1) break;
+            nodeIndex = parent;
+            node = &model.nodes[nodeIndex];
+        }
+
+        // 루트 → 자식 순서로 곱하기
+        for (auto it = hierarchy.rbegin(); it != hierarchy.rend(); ++it) {
+            m = m * GetNodeTransform(model.nodes[*it]);
+        }
+        return m;
+    }
+
 private:
   Point computeNormal(const Point& v1, const Point& v2, const Point& v3)
   {
@@ -163,37 +195,6 @@ private:
         m(1, 1) *= node.scale[1];
         m(2, 2) *= node.scale[2];
       }
-    }
-    return m;
-  }
-
-  // 부모까지 포함한 최종 transform
-  Matrix4f ComputeWorldTransform(const tinygltf::Model& model, int nodeIndex) {
-    Matrix4f m = Matrix4f::Identity();
-    const tinygltf::Node* node = &model.nodes[nodeIndex];
-
-    std::vector<int> hierarchy;
-    while (true) {
-      hierarchy.push_back(nodeIndex);
-
-      // 부모 탐색 (gltf는 parent 저장 안 해서 직접 찾아야 함)
-      int parent = -1;
-      for (size_t i = 0; i < model.nodes.size(); i++) {
-        for (int child : model.nodes[i].children) {
-          if (child == nodeIndex) {
-            parent = static_cast<int>(i);
-            break;
-          }
-        }
-      }
-      if (parent == -1) break;
-      nodeIndex = parent;
-      node = &model.nodes[nodeIndex];
-    }
-
-    // 루트 → 자식 순서로 곱하기
-    for (auto it = hierarchy.rbegin(); it != hierarchy.rend(); ++it) {
-      m = m * GetNodeTransform(model.nodes[*it]);
     }
     return m;
   }
