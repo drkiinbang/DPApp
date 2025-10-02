@@ -2,6 +2,10 @@
 #include "Point.h"
 #include "mbr.h"
 
+#include <array>
+#include <algorithm>
+#include <iterator>
+
 void BimInfo::addFace(Point normal, Point v1, Point v2, Point v3) {
   Face face(normal, v1, v2, v3);
   faces.push_back(face);
@@ -85,6 +89,11 @@ bool BimInfo::save(int id, std::string description, const bool is_offset_applied
         return false;
     }
 
+    /// BUFFER_SIZE_RECORD_LEN
+    /// ID_RECORD_LEN
+    /// TRANSLATION_RECORD_LEN
+    /// DESCRIPTION_RECORD_LEN
+    /// faces.size() * VERTEX_POINT_RECORD_LEN * POINT_RECORD_LEN * COORD_LEN
     std::size_t buf_size = calculate_buffer_size();
 
     char* buffer = new char[buf_size];

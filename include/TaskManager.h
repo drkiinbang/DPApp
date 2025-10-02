@@ -29,11 +29,15 @@
 #include "PointCloudTypes.h"
 #include "NetworkManager.h"
 #include "ReadPointFile.h"
-#include "bim/gltf.h"
+#include "bim/gltf_mesh.h"
 #include "bim/mbr.h"
 #include "bim/BimInfo.h"
+#include "DefinePointType.hpp"
+#include "LaslibReader.hpp"
 
 namespace fs = std::filesystem;
+
+const std::size_t CHUNK_POINTS = 1000000;
 
 namespace DPApp {
 
@@ -1036,7 +1040,7 @@ namespace DPApp {
 
     } // namespace PointCloudProcessors
 
-    namespace MeshProcessors {
+    namespace Pt2MeshProcessors {
         std::string wstring_to_utf8(const std::wstring& wstr) {
             int size_needed = WideCharToMultiByte(CP_UTF8, 0, wstr.data(), (int)wstr.size(), NULL, 0, NULL, NULL);
             std::string utf8str(size_needed, 0);
@@ -1044,17 +1048,16 @@ namespace DPApp {
             return utf8str;
         }
 
-        bool convert_gltf_to_nodes2(const std::string& dataset_name,
+        bool convert_gltf2nodes2(const std::string& dataset_name,
             const std::string& bim_folder,
             const std::string& nodes2_folder,
+            std::vector<BimMeshInfo>& bimData,
             const bool is_offset_applied,
-            const float* offset,
-            const std::string& compressed_bim_file_path) {
-            std::filesystem::path input_path(bim_folder); // glb ÆÄÀÏÀÌ ÀúÀåµÈ Æú´õ °æ·Î
-            std::filesystem::path output_path(nodes2_folder); // .nodes2 ÆÄÀÏÀ» ÀúÀåÇÒ Æú´õ °æ·Î
+            const float* offset) {
+            std::filesystem::path input_path(bim_folder); // glb íŒŒì¼ì´ ì €ì¥ëœ í´ë” ê²½ë¡œ
+            std::filesystem::path output_path(nodes2_folder); // .nodes2 íŒŒì¼ì„ ì €ì¥í•  í´ë” ê²½ë¡œ
 
-            if (std::filesystem::exists(input_path) == false)
-            {
+            if (std::filesystem::exists(input_path) == false) {
                 std::cout << "input_folder '" << bim_folder << "' is not exist" << std::endl;
                 return false;
             }
@@ -1066,12 +1069,10 @@ namespace DPApp {
             auto full_path = output_path / output_file_name;
             output_file_name = full_path.string();
             
-            //float global_bbox_min[3] = { NUM_MAX, NUM_MAX, NUM_MAX }; // ÃÖ´ë°ªÀ¸·Î ÃÊ±âÈ­
-            //float global_bbox_max[3] = { NUM_MIN, NUM_MIN, NUM_MIN }; // ÃÖ¼Ò°ªÀ¸·Î ÃÊ±âÈ­
-            float global_bbox_min[3] = { (std::numeric_limits<float>::max)(), (std::numeric_limits<float>::max)(), (std::numeric_limits<float>::max)() }; // ÃÖ´ë°ªÀ¸·Î ÃÊ±âÈ­
-            float global_bbox_max[3] = { std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest() }; // ÃÖ¼Ò°ªÀ¸·Î ÃÊ±âÈ­
+            float global_bbox_min[3] = { (std::numeric_limits<float>::max)(), (std::numeric_limits<float>::max)(), (std::numeric_limits<float>::max)() }; // ìµœëŒ€ê°’ìœ¼ë¡œ ì´ˆê¸°í™”
+            float global_bbox_max[3] = { std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest() }; // ìµœì†Œê°’ìœ¼ë¡œ ì´ˆê¸°í™”
 
-            // .nodes2 ÆÄÀÏ·Î geometry Á¤º¸ Ãâ·ÂÇÏ±â À§ÇÑ outputfilestream »ı¼º
+            // .nodes2 íŒŒì¼ë¡œ geometry ì •ë³´ ì¶œë ¥í•˜ê¸° ìœ„í•œ outputfilestream ìƒì„±
             std::ofstream* filestream = nullptr;
             filestream = new std::ofstream(output_file_name, std::ios::out | std::ios::binary);
 
@@ -1080,16 +1081,21 @@ namespace DPApp {
                 std::cerr << "file open failure : " << output_file_name << std::endl;
                 return false;
             }
+
+            auto numEntries = std::distance(fs::directory_iterator(input_path), fs::directory_iterator{});
+            bimData.clear();
+            bimData.reserve(numEntries);
+
             // Iterate through GLTF files in the directory
-            int idx = 1000; // bim_idÀÇ ÃÊ±â°ª - ÆÄÀÏ¸í¿¡ Revit Element ID°¡ ¾ø´Â °æ¿ì »ç¿ëµÊ    
+            int idx = 1000; // bim_idì˜ ì´ˆê¸°ê°’ - íŒŒì¼ëª…ì— Revit Element IDê°€ ì—†ëŠ” ê²½ìš° ì‚¬ìš©ë¨
             for (const auto& entry : std::filesystem::directory_iterator(input_path))
             {
                 std::wcout << entry.path().wstring() << std::endl; // unicode string 
-                std::cout << entry.path().string() << std::endl; // utf8 string // ¿µ¹® windows¿¡¼­´Â ÁÖ¼®Ã³¸® ÇØ¾ß ÇÔ
+                std::cout << entry.path().string() << std::endl; // utf8 string // ì˜ë¬¸ windowsì—ì„œëŠ” ì£¼ì„ì²˜ë¦¬ í•´ì•¼ í•¨
                 if (!entry.is_regular_file())
                 {
                     std::wcout << entry.path().wstring() << " not regular file" << std::endl;
-                    std::cout << entry.path().string() << " not regular file" << std::endl; // utf8 string // ¿µ¹® windows¿¡¼­´Â ÁÖ¼®Ã³¸® ÇØ¾ß ÇÔ
+                    std::cout << entry.path().string() << " not regular file" << std::endl; // utf8 string // ì˜ë¬¸ windowsì—ì„œëŠ” ì£¼ì„ì²˜ë¦¬ í•´ì•¼ í•¨
                     continue;
                 }
 
@@ -1101,39 +1107,47 @@ namespace DPApp {
                     continue;
                 }
 
-                // UTF-16À» UTF-8·Î º¯È¯
+                // UTF-16ì„ UTF-8ë¡œ ë³€í™˜
                 const std::string utf8FileName = wstring_to_utf8(data_file);
                 std::string gltf_file_name = utf8FileName;
 
                 // create new gltf_file object
-                gltf gltf_file;
-                BimInfo bim_info = gltf_file.read(gltf_file_name);  // read gltf file and get BimInfo object
+                GltfMesh gltf_file;
+                bimData.push_back(BimMeshInfo());
+                BimMeshInfo& singleFile = bimData.back();
+                // read gltf file and get BimInfo object1
+                if (!gltf_file.read(gltf_file_name, singleFile, is_offset_applied, offset)) {
+                    bimData.pop_back();
+                    continue;
+                }
 
-                // bim_id, node_name ¼³Á¤
+                auto& bim_info = singleFile;
+                
+                // bim_id, node_name ì„¤ì •
                 int bim_id = idx;
                 std::string node_name;
                 try
                 {
-                    // ÆÄÀÏ ÀÌ¸§¿¡¼­ È®ÀåÀÚ¸¦ Á¦¿ÜÇÏ°í '_'·Î ºĞÇÒÇÏ¿© ¸¶Áö¸· ¹®ÀÚ¿­À» bim_id·Î ¼³Á¤ÇÕ´Ï´Ù.
-                    std::wstring filenameW = data_file.stem().wstring(); // ÆÄÀÏ ÀÌ¸§ - convert to unicode   
+                    // íŒŒì¼ ì´ë¦„ì—ì„œ í™•ì¥ìë¥¼ ì œì™¸í•˜ê³  '_'ë¡œ ë¶„í• í•˜ì—¬ ë§ˆì§€ë§‰ ë¬¸ìì—´ì„ bim_idë¡œ ì„¤ì •í•©ë‹ˆë‹¤.
+                    std::wstring filenameW = data_file.stem().wstring(); // íŒŒì¼ ì´ë¦„ - convert to unicode   
                     std::string filename = wstring_to_utf8(filenameW);
 
                     std::vector<std::string> parts;
                     std::stringstream ss(filename);
                     std::string item;
-                    while (std::getline(ss, item, '_')) {// '_'·Î ºĞÇÒ
+                    while (std::getline(ss, item, '_')) {// '_'ë¡œ ë¶„í• 
                         parts.push_back(item);
                     }
 
-                    // ¹®ÀÚ¿­ÀÇ ¸¶Áö¸· ºÎºĞ(Revit Element ID)¸¦ bim_id·Î º¯È¯ÇÕ´Ï´Ù.
+                    // ë¬¸ìì—´ì˜ ë§ˆì§€ë§‰ ë¶€ë¶„(Revit Element ID)ë¥¼ bim_idë¡œ ë³€í™˜í•©ë‹ˆë‹¤.
                     if (!parts.empty()) {
                         //bim_id = boost::lexical_cast<unsigned long>(parts.back());
                         std::string lastPart = parts.back();
-                        // ¼ıÀÚ¸¸ ³²±â±â À§ÇØ ¹®ÀÚ Á¦°Å
+                        // ìˆ«ìë§Œ ë‚¨ê¸°ê¸° ìœ„í•´ ë¬¸ì ì œê±°
                         lastPart.erase(std::remove_if(lastPart.begin(), lastPart.end(), [](char c) { return !std::isdigit(c); }), lastPart.end());
                         if (!lastPart.empty()) {
                             try {
-                                bim_id = std::stoul(lastPart); // boost::lexical_cast ´ëÃ¼
+                                bim_id = std::stoul(lastPart); // boost::lexical_cast ëŒ€ì²´
                             }
                             catch (const std::exception& e) {
                                 std::cerr << "Error: Failed to convert to number: " << e.what() << std::endl;
@@ -1142,15 +1156,15 @@ namespace DPApp {
                         }
                         else {
                             std::cerr << "Error: No numeric part found in the last part of filename" << std::endl;
-                            bim_id = ++idx; // ±âº»°ªÀ¸·Î idx¸¦ Áõ°¡½ÃÅ´
+                            bim_id = ++idx; // ê¸°ë³¸ê°’ìœ¼ë¡œ idxë¥¼ ì¦ê°€ì‹œí‚´
                         }
                     }
                     else {
                         std::cerr << "Error: Filename does not contain valid parts" << std::endl;
-                        bim_id = ++idx; // ±âº»°ªÀ¸·Î idx¸¦ Áõ°¡½ÃÅ´
+                        bim_id = ++idx; // ê¸°ë³¸ê°’ìœ¼ë¡œ idxë¥¼ ì¦ê°€ì‹œí‚´
                     }
 
-                    // ¸¶Áö¸· '_'ÀÇ À§Ä¡¸¦ Ã£°í ¾ÕºÎºĞ(node name)À» °¡Á®¿É´Ï´Ù.
+                    // ë§ˆì§€ë§‰ '_'ì˜ ìœ„ì¹˜ë¥¼ ì°¾ê³  ì•ë¶€ë¶„(node name)ì„ ê°€ì ¸ì˜µë‹ˆë‹¤.
                     size_t lastUnderscorePos = filename.find_last_of("_");
                     node_name = filename.substr(0, lastUnderscorePos); // node name 
                 }
@@ -1161,30 +1175,30 @@ namespace DPApp {
                     bim_id = ++idx;
                 }
 
-                // utf8FileNameÀÇ ÆÄÀÏ¸í¸¸ ³²±â°í ³ª¸ÓÁö´Â Áö¿ì±â.
+                // utf8FileNameì˜ íŒŒì¼ëª…ë§Œ ë‚¨ê¸°ê³  ë‚˜ë¨¸ì§€ëŠ” ì§€ìš°ê¸°.
                 std::string node_name_utf8 = utf8FileName;
                 std::size_t lastSlashPos = node_name_utf8.find_last_of("\\");
                 node_name_utf8 = node_name_utf8.substr(lastSlashPos + 1);
-                // È®ÀåÀÚµµ Áö¿ì±â
+                // í™•ì¥ìë„ ì§€ìš°ê¸°
                 std::size_t lastDotPos = node_name_utf8.find_last_of(".");
                 node_name_utf8 = node_name_utf8.substr(0, lastDotPos);
-                // ¸¶Áö¸· '_'ÀÇ À§Ä¡¸¦ Ã£°í ¾ÕºÎºĞ(node name)À» °¡Á®¿É´Ï´Ù.
+                // ë§ˆì§€ë§‰ '_'ì˜ ìœ„ì¹˜ë¥¼ ì°¾ê³  ì•ë¶€ë¶„(node name)ì„ ê°€ì ¸ì˜µë‹ˆë‹¤.
                 size_t lastUnderscorePos = node_name_utf8.find_last_of("_");
                 node_name_utf8 = node_name_utf8.substr(0, lastUnderscorePos);
-                // node_name ¸Ç ¸¶Áö¸· ¹®ÀÚ°¡ '_'ÀÌ¸é ''·Î º¯°æ
+                // node_name ë§¨ ë§ˆì§€ë§‰ ë¬¸ìê°€ '_'ì´ë©´ ''ë¡œ ë³€ê²½
                 if (node_name_utf8.back() == '_') { node_name_utf8.pop_back(); }
 
                 //std::cout << bim_id << ": " << node_name << " " << node_name_utf8 << std::endl;
 
-                // vertex buffer(geometry)¸¦ °¡Á®¿È (offset Àû¿ë (translation))
+                // vertex buffer(geometry)ë¥¼ ê°€ì ¸ì˜´ (offset ì ìš© (translation))
                 std::size_t buffer_size = 0;
                 char* vertex_buffer = bim_info.get_vertex_buffer(is_offset_applied, offset, buffer_size);
 
-                // bounding box, MBR Á¤º¸¸¦ °¡Á®¿È
+                // bounding box, MBR ì •ë³´ë¥¼ ê°€ì ¸ì˜´
                 MBR bbox = bim_info.get_mbr(is_offset_applied, offset);
-                auto bbox_min = bbox.get_min(); // bboxÀÇ ÃÖ¼Ò°ªÀ» º¹»çÇÕ´Ï´Ù.
-                auto bbox_max = bbox.get_max(); // bboxÀÇ ÃÖ´ë°ªÀ» º¹»çÇÕ´Ï´Ù.
-                // Àü¿ª bounding box Á¤º¸ ¾÷µ¥ÀÌÆ®
+                auto bbox_min = bbox.get_min(); // bboxì˜ ìµœì†Œê°’ì„ ë³µì‚¬í•©ë‹ˆë‹¤.
+                auto bbox_max = bbox.get_max(); // bboxì˜ ìµœëŒ€ê°’ì„ ë³µì‚¬í•©ë‹ˆë‹¤.
+                // ì „ì—­ bounding box ì •ë³´ ì—…ë°ì´íŠ¸
                 for (int i = 0; i < 3; ++i) {
                     global_bbox_min[i] = (std::min)(global_bbox_min[i], bbox_min[i]);
                     global_bbox_max[i] = (std::max)(global_bbox_max[i], bbox_max[i]);
@@ -1192,10 +1206,10 @@ namespace DPApp {
 
                 delete[] vertex_buffer;
 
-                // .nodes2 ÆÄÀÏ¿¡ bim_info ÀúÀå
+                // .nodes2 íŒŒì¼ì— bim_info ì €ì¥
                 bim_info.save(bim_id, node_name, is_offset_applied, offset, *filestream);
 
-                // Progress Ãâ·Â
+                // Progress ì¶œë ¥
                 processed_gltf_files++;
                 int progress = (int)((float)processed_gltf_files / total_gltf_files * 100);
                 if (processed_gltf_files % 100 == 0 || progress == 100)
@@ -1206,6 +1220,486 @@ namespace DPApp {
 
             return true;
         }
+
+        bool convert_gltf_to_nodes2(const std::string& dataset_name,
+            const std::string& bim_folder,
+            const std::string& nodes2_folder,
+            const bool is_offset_applied,
+            const float* offset,
+            const std::string& compressed_bim_file_path) {
+            std::filesystem::path input_path(bim_folder); // glb íŒŒì¼ì´ ì €ì¥ëœ í´ë” ê²½ë¡œ
+            std::filesystem::path output_path(nodes2_folder); // .nodes2 íŒŒì¼ì„ ì €ì¥í•  í´ë” ê²½ë¡œ
+
+            if (std::filesystem::exists(input_path) == false) {
+                std::cout << "input_folder '" << bim_folder << "' is not exist" << std::endl;
+                return false;
+            }
+
+            size_t total_gltf_files = std::distance(fs::directory_iterator(input_path), fs::directory_iterator());
+            int processed_gltf_files = 0;
+
+            std::string output_file_name = dataset_name + ".nodes2"; // binary file name
+            auto full_path = output_path / output_file_name;
+            output_file_name = full_path.string();
+
+            //float global_bbox_min[3] = { NUM_MAX, NUM_MAX, NUM_MAX }; // ìµœëŒ€ê°’ìœ¼ë¡œ ì´ˆê¸°í™”
+            //float global_bbox_max[3] = { NUM_MIN, NUM_MIN, NUM_MIN }; // ìµœì†Œê°’ìœ¼ë¡œ ì´ˆê¸°í™”
+            float global_bbox_min[3] = { (std::numeric_limits<float>::max)(), (std::numeric_limits<float>::max)(), (std::numeric_limits<float>::max)() }; // ìµœëŒ€ê°’ìœ¼ë¡œ ì´ˆê¸°í™”
+            float global_bbox_max[3] = { std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest() }; // ìµœì†Œê°’ìœ¼ë¡œ ì´ˆê¸°í™”
+
+            // .nodes2 íŒŒì¼ë¡œ geometry ì •ë³´ ì¶œë ¥í•˜ê¸° ìœ„í•œ outputfilestream ìƒì„±
+            std::ofstream* filestream = nullptr;
+            filestream = new std::ofstream(output_file_name, std::ios::out | std::ios::binary);
+
+            if (!filestream->good())
+            {
+                std::cerr << "file open failure : " << output_file_name << std::endl;
+                return false;
+            }
+            // Iterate through GLTF files in the directory
+            int idx = 1000; // bim_idì˜ ì´ˆê¸°ê°’ - íŒŒì¼ëª…ì— Revit Element IDê°€ ì—†ëŠ” ê²½ìš° ì‚¬ìš©ë¨    
+            for (const auto& entry : std::filesystem::directory_iterator(input_path))
+            {
+                std::wcout << entry.path().wstring() << std::endl; // unicode string 
+                std::cout << entry.path().string() << std::endl; // utf8 string // ì˜ë¬¸ windowsì—ì„œëŠ” ì£¼ì„ì²˜ë¦¬ í•´ì•¼ í•¨
+                if (!entry.is_regular_file())
+                {
+                    std::wcout << entry.path().wstring() << " not regular file" << std::endl;
+                    std::cout << entry.path().string() << " not regular file" << std::endl; // utf8 string // ì˜ë¬¸ windowsì—ì„œëŠ” ì£¼ì„ì²˜ë¦¬ í•´ì•¼ í•¨
+                    continue;
+                }
+
+                auto& data_file = entry.path();
+                if (data_file.extension().compare(".gltf") != 0 && data_file.extension().compare(".glb") != 0)
+                {
+                    if (data_file.extension().compare(".bin") != 0)
+                        std::cout << data_file << " not gltf(glb) file" << std::endl;
+                    continue;
+                }
+
+                // UTF-16ì„ UTF-8ë¡œ ë³€í™˜
+                const std::string utf8FileName = wstring_to_utf8(data_file);
+                std::string gltf_file_name = utf8FileName;
+
+                // create new gltf_file object
+                gltf gltf_file;
+                BimInfo bim_info = gltf_file.read(gltf_file_name);  // read gltf file and get BimInfo object
+
+                // bim_id, node_name ì„¤ì •
+                int bim_id = idx;
+                std::string node_name;
+                try
+                {
+                    // íŒŒì¼ ì´ë¦„ì—ì„œ í™•ì¥ìë¥¼ ì œì™¸í•˜ê³  '_'ë¡œ ë¶„í• í•˜ì—¬ ë§ˆì§€ë§‰ ë¬¸ìì—´ì„ bim_idë¡œ ì„¤ì •í•©ë‹ˆë‹¤.
+                    std::wstring filenameW = data_file.stem().wstring(); // íŒŒì¼ ì´ë¦„ - convert to unicode   
+                    std::string filename = wstring_to_utf8(filenameW);
+
+                    std::vector<std::string> parts;
+                    std::stringstream ss(filename);
+                    std::string item;
+                    while (std::getline(ss, item, '_')) {// '_'ë¡œ ë¶„í• 
+                        parts.push_back(item);
+                    }
+
+                    // ë¬¸ìì—´ì˜ ë§ˆì§€ë§‰ ë¶€ë¶„(Revit Element ID)ë¥¼ bim_idë¡œ ë³€í™˜í•©ë‹ˆë‹¤.
+                    if (!parts.empty()) {
+                        //bim_id = boost::lexical_cast<unsigned long>(parts.back());
+                        std::string lastPart = parts.back();
+                        // ìˆ«ìë§Œ ë‚¨ê¸°ê¸° ìœ„í•´ ë¬¸ì ì œê±°
+                        lastPart.erase(std::remove_if(lastPart.begin(), lastPart.end(), [](char c) { return !std::isdigit(c); }), lastPart.end());
+                        if (!lastPart.empty()) {
+                            try {
+                                bim_id = std::stoul(lastPart); // boost::lexical_cast ëŒ€ì²´
+                            }
+                            catch (const std::exception& e) {
+                                std::cerr << "Error: Failed to convert to number: " << e.what() << std::endl;
+                                bim_id = ++idx;
+                            }
+                        }
+                        else {
+                            std::cerr << "Error: No numeric part found in the last part of filename" << std::endl;
+                            bim_id = ++idx; // ê¸°ë³¸ê°’ìœ¼ë¡œ idxë¥¼ ì¦ê°€ì‹œí‚´
+                        }
+                    }
+                    else {
+                        std::cerr << "Error: Filename does not contain valid parts" << std::endl;
+                        bim_id = ++idx; // ê¸°ë³¸ê°’ìœ¼ë¡œ idxë¥¼ ì¦ê°€ì‹œí‚´
+                    }
+
+                    // ë§ˆì§€ë§‰ '_'ì˜ ìœ„ì¹˜ë¥¼ ì°¾ê³  ì•ë¶€ë¶„(node name)ì„ ê°€ì ¸ì˜µë‹ˆë‹¤.
+                    size_t lastUnderscorePos = filename.find_last_of("_");
+                    node_name = filename.substr(0, lastUnderscorePos); // node name 
+                }
+                catch (const std::exception& e)
+                {
+                    std::cerr << data_file.stem() << std::endl;
+                    std::cerr << e.what() << std::endl;
+                    bim_id = ++idx;
+                }
+
+                // utf8FileNameì˜ íŒŒì¼ëª…ë§Œ ë‚¨ê¸°ê³  ë‚˜ë¨¸ì§€ëŠ” ì§€ìš°ê¸°.
+                std::string node_name_utf8 = utf8FileName;
+                std::size_t lastSlashPos = node_name_utf8.find_last_of("\\");
+                node_name_utf8 = node_name_utf8.substr(lastSlashPos + 1);
+                // í™•ì¥ìë„ ì§€ìš°ê¸°
+                std::size_t lastDotPos = node_name_utf8.find_last_of(".");
+                node_name_utf8 = node_name_utf8.substr(0, lastDotPos);
+                // ë§ˆì§€ë§‰ '_'ì˜ ìœ„ì¹˜ë¥¼ ì°¾ê³  ì•ë¶€ë¶„(node name)ì„ ê°€ì ¸ì˜µë‹ˆë‹¤.
+                size_t lastUnderscorePos = node_name_utf8.find_last_of("_");
+                node_name_utf8 = node_name_utf8.substr(0, lastUnderscorePos);
+                // node_name ë§¨ ë§ˆì§€ë§‰ ë¬¸ìê°€ '_'ì´ë©´ ''ë¡œ ë³€ê²½
+                if (node_name_utf8.back() == '_') { node_name_utf8.pop_back(); }
+
+                //std::cout << bim_id << ": " << node_name << " " << node_name_utf8 << std::endl;
+
+                // vertex buffer(geometry)ë¥¼ ê°€ì ¸ì˜´ (offset ì ìš© (translation))
+                std::size_t buffer_size = 0;
+                char* vertex_buffer = bim_info.get_vertex_buffer(is_offset_applied, offset, buffer_size);
+
+                // bounding box, MBR ì •ë³´ë¥¼ ê°€ì ¸ì˜´
+                MBR bbox = bim_info.get_mbr(is_offset_applied, offset);
+                auto bbox_min = bbox.get_min(); // bboxì˜ ìµœì†Œê°’ì„ ë³µì‚¬í•©ë‹ˆë‹¤.
+                auto bbox_max = bbox.get_max(); // bboxì˜ ìµœëŒ€ê°’ì„ ë³µì‚¬í•©ë‹ˆë‹¤.
+                // ì „ì—­ bounding box ì •ë³´ ì—…ë°ì´íŠ¸
+                for (int i = 0; i < 3; ++i) {
+                    global_bbox_min[i] = (std::min)(global_bbox_min[i], bbox_min[i]);
+                    global_bbox_max[i] = (std::max)(global_bbox_max[i], bbox_max[i]);
+                }
+
+                delete[] vertex_buffer;
+
+                // .nodes2 íŒŒì¼ì— bim_info ì €ì¥
+                bim_info.save(bim_id, node_name, is_offset_applied, offset, *filestream);
+
+                // Progress ì¶œë ¥
+                processed_gltf_files++;
+                int progress = (int)((float)processed_gltf_files / total_gltf_files * 100);
+                if (processed_gltf_files % 100 == 0 || progress == 100)
+                    std::cout << "Processed " << processed_gltf_files << " / " << total_gltf_files << " (" << progress << "%)" << std::endl;
+            }
+
+            filestream->close();
+
+            return true;
+        }
+
+        std::vector<std::string> split(const std::string& str, const std::string& delims = "\t, ") {
+            std::vector<std::string> tokens;
+            size_t start = str.find_first_not_of(delims), end = 0;
+
+            while (start != std::string::npos) {
+                end = str.find_first_of(delims, start);
+                if (end == std::string::npos) {
+                    tokens.push_back(str.substr(start));
+                    break;
+                }
+                else {
+                    tokens.push_back(str.substr(start, end - start));
+                    start = str.find_first_not_of(delims, end);
+                }
+            }
+            return tokens;
+        }
+
+        bool convert_pts2pc2(const std::string& input_file_path,
+            const std::string& output_file_path,
+            const bool is_offset_applied,
+            const float* offset)
+        {
+            auto start_t = std::chrono::system_clock::now();
+
+            std::ifstream pts_file(input_file_path);
+            if (!pts_file.is_open()) {
+                std::cerr << "Failed to open input file: " << input_file_path << std::endl;
+                return false;
+            }
+
+            /// Check the output folder path
+            std::error_code ec;
+            std::string* err = nullptr;
+            std::filesystem::path output_path(output_file_path);
+            fs::path dir = output_path.parent_path();
+            if (!dir.empty() && !fs::exists(dir)) {
+                if (!fs::create_directories(dir, ec)) {
+                    std::cerr << "Failed in creating directories: " + dir.string();
+                    return false;
+                }
+                else
+                    std::cerr << "Create a directory: " + dir.string();
+            }
+
+            auto file_open_mode = std::ios::out | std::ios::binary;
+            std::ofstream result_point_cloud_file(output_file_path, file_open_mode);
+            if (!result_point_cloud_file.is_open()) {
+                std::cerr << "Failed to open output binary file: " << output_file_path << std::endl;
+                pts_file.close();
+                return false;
+            }
+
+            /// Write offset
+            if (is_offset_applied)
+                result_point_cloud_file.write(reinterpret_cast<const char*>(offset), sizeof(float) * 3);
+            else {
+                float zeroOffset[3] = { 0.f, 0.f, 0.f };
+                result_point_cloud_file.write(reinterpret_cast<const char*>(zeroOffset), sizeof(float) * 3);
+            }
+
+            std::vector<float> buffer(3 * CHUNK_POINTS);
+            std::size_t idx = 0;
+            unsigned long long numPts = 0;
+            cnvrt::BOUNDING_BOX bb;
+            auto prev_t = start_t;
+
+            std::string line_contents;
+
+            /// Read first line
+            if (!std::getline(pts_file, line_contents)) {
+                std::cerr << "Failed to read the first line from the PTS file." << std::endl;
+                pts_file.close();
+                result_point_cloud_file.close();
+                return false;
+            }
+
+            /// Check if first line is point count or data
+            std::vector<std::string> token = split(line_contents, "\t, ");
+            unsigned long long total_num_points = 0;
+
+            if (token.size() == 1) {
+                /// First line is point count
+                total_num_points = std::stoull(token[0]);
+                std::cout << "Total number of points recored in the first line in the file: " << total_num_points << "\n";
+            }
+            else if (token.size() >= 3) {
+                /// First line is data - process it
+                for (int i = 0; i < 3; i++) {
+                    double value = std::stod(token[i]);
+                    buffer[i] = static_cast<float>(value);
+                }
+                idx = 1;
+            }
+
+            /// Process remaining lines
+            while (std::getline(pts_file, line_contents))
+            {
+                std::vector<std::string> result = split(line_contents, "\t, ");
+                if (result.size() < 3) {
+                    continue;
+                }
+
+                /// Just store raw values
+                for (unsigned int i = 0; i < 3; i++) {
+                    double value = std::stod(result[i]);
+                    buffer[idx * 3 + i] = static_cast<float>(value);
+                }
+
+                /// Increase the index of loaded points
+                idx++;
+
+                if (idx == CHUNK_POINTS) {
+                    /// Apply offset in batch
+                    if (is_offset_applied) {
+                        for (size_t i = 0; i < idx; ++i) {
+                            for (size_t j = 0; j < 3; ++j) {
+                                buffer[i * 3 + j] -= offset[j];
+                            }
+                        }
+                    }
+
+                    /// Update bounding box in batch
+                    cnvrt::POINT_DOUBLE point_d;
+                    for (size_t i = 0; i < idx; ++i) {
+                        point_d.x = buffer[i * 3 + 0];
+                        point_d.y = buffer[i * 3 + 1];
+                        point_d.z = buffer[i * 3 + 2];
+                        bb.merge_point(point_d);
+                    }
+
+                    numPts += static_cast<unsigned long long>(idx);
+                    result_point_cloud_file.write(reinterpret_cast<const char*>(buffer.data()), 12 * CHUNK_POINTS);
+                    
+					auto curr_t = std::chrono::system_clock::now();
+					if ((curr_t - prev_t) > std::chrono::seconds(2)) {
+						std::cout << "Processing " << numPts << " points.\n";
+						prev_t = curr_t;
+					}
+
+					idx = 0;
+				}
+
+                
+            }
+
+            /// Process remaining data
+            if (idx > 0)
+            {
+                /// Apply offset in batch
+                if (is_offset_applied) {
+                    for (size_t i = 0; i < idx; ++i) {
+                        for (size_t j = 0; j < 3; ++j) {
+                            buffer[i * 3 + j] -= offset[j];
+                        }
+                    }
+                }
+
+                /// Update bounding box in batch
+                cnvrt::POINT_DOUBLE point_d;
+                for (size_t i = 0; i < idx; ++i) {
+                    point_d.x = buffer[i * 3 + 0];
+                    point_d.y = buffer[i * 3 + 1];
+                    point_d.z = buffer[i * 3 + 2];
+                    bb.merge_point(point_d);
+                }
+
+                numPts += static_cast<unsigned long long>(idx);
+                result_point_cloud_file.write(reinterpret_cast<const char*>(buffer.data()), 12 * idx);
+            }
+
+            std::cout << "Processing " << numPts << " points. All points are processed.\n";
+
+            pts_file.close();
+            result_point_cloud_file.close();
+
+            auto end_t = std::chrono::system_clock::now();
+            auto exec_t = end_t - start_t;
+            auto seconds = std::chrono::duration_cast<std::chrono::seconds>(exec_t).count();
+            std::cout << "Writing " << output_file_path << " is finished.\n";
+            std::cout << "Converting time: " << seconds << " seconds\nTotal number of points: " << numPts << ".\n";
+
+            return true;
+        }
+
+        bool convert_las2pc2(const std::string& input_file_path,
+            const std::string& output_file_path,
+            const bool is_offset_applied,
+            const float* offset)
+        {
+            auto start_t = std::chrono::system_clock::now();
+
+            las::LASToolsReader lasReader;
+            
+            if (!lasReader.open(input_file_path)) {
+                std::cerr << "Failed to open input file: " << input_file_path << std::endl;
+                return false;
+            }
+
+            /// Check the output folder path
+            std::error_code ec;
+            std::string* err = nullptr;
+            std::filesystem::path output_path(output_file_path);
+            fs::path dir = output_path.parent_path();
+            if (!dir.empty() && !fs::exists(dir)) {
+                if (!fs::create_directories(dir, ec)) {
+                    std::cerr << "Failed in creating directories: " + dir.string();
+                    return false;
+                }
+                else
+                    std::cerr << "Create a directory: " + dir.string();
+            }
+
+            auto file_open_mode = std::ios::out | std::ios::binary;
+            std::ofstream result_point_cloud_file(output_file_path, file_open_mode);
+            if (result_point_cloud_file.is_open()) {
+                lasReader.printHeader();
+            }
+            else {
+                std::cerr << "Failed to open output binary file: " << output_file_path << std::endl;
+                lasReader.close();
+                return false;
+            }
+
+            /// Write offset
+            if(is_offset_applied)
+                result_point_cloud_file.write(reinterpret_cast<const char*>(offset), sizeof(float) * 3);
+            else {
+                float zeroOffset[3] = { 0.f, 0.f, 0.f };
+                result_point_cloud_file.write(reinterpret_cast<const char*>(zeroOffset), sizeof(float) * 3);
+            }
+
+            std::vector<float> buffer(3 * CHUNK_POINTS);
+            unsigned long long numPts = 0;
+            cnvrt::BOUNDING_BOX bb;
+            auto prev_t = start_t;
+
+            size_t total_num_points = lasReader.getPointCount();
+            const std::size_t N = (std::min)(CHUNK_POINTS, total_num_points);
+
+            for (size_t start = 0; start < total_num_points; start += N) {
+                std::size_t end = (std::min)(start + N, total_num_points);
+                if (!lasReader.loadPointRange(start, end)) {
+                    std::cerr << "Failed in loadPointRandge(" << start << ", " << end << ")\n";
+                    break;
+                }
+
+                if (is_offset_applied) {
+                    size_t idx = 0;
+                    for (const auto& p : lasReader.getLoadedPoints()) {
+                        buffer[idx * 3 + 0] = static_cast<float>(p.x) - offset[0];
+                        buffer[idx * 3 + 1] = static_cast<float>(p.y) - offset[1];
+                        buffer[idx * 3 + 2] = static_cast<float>(p.z) - offset[2];
+
+                        /// Update bounding box in batch
+                        cnvrt::POINT_DOUBLE point_d;
+                        for (size_t i = 0; i < idx; ++i) {
+                            point_d.x = buffer[i * 3 + 0];
+                            point_d.y = buffer[i * 3 + 1];
+                            point_d.z = buffer[i * 3 + 2];
+                            bb.merge_point(point_d);
+                        }
+
+                        ++idx;
+                    }
+                }
+                else {
+                    size_t idx = 0;
+                    for (const auto& p : lasReader.getLoadedPoints()) {
+                        buffer[idx * 3 + 0] = static_cast<float>(p.x);
+                        buffer[idx * 3 + 1] = static_cast<float>(p.y);
+                        buffer[idx * 3 + 2] = static_cast<float>(p.z);
+
+                        /// Update bounding box in batch
+                        cnvrt::POINT_DOUBLE point_d;
+                        for (size_t i = 0; i < idx; ++i) {
+                            point_d.x = buffer[i * 3 + 0];
+                            point_d.y = buffer[i * 3 + 1];
+                            point_d.z = buffer[i * 3 + 2];
+                            bb.merge_point(point_d);
+                        }
+
+                        ++idx;
+                    }
+
+                }
+                
+                numPts += static_cast<unsigned long long>(end - start);
+                result_point_cloud_file.write(reinterpret_cast<const char*>(buffer.data()), 12 * (end - start));
+
+                auto curr_t = std::chrono::system_clock::now();
+                if ((curr_t - prev_t) > std::chrono::seconds(2)) {
+                    std::cout << "Processing " << numPts << " points / " << total_num_points << "\n";
+                    prev_t = curr_t;
+                }
+            }
+
+            lasReader.close();
+            result_point_cloud_file.close();
+
+            std::cout << "Processing " << numPts << " points. All points are processed.\n";
+
+            auto end_t = std::chrono::system_clock::now();
+            auto exec_t = end_t - start_t;
+            auto seconds = std::chrono::duration_cast<std::chrono::seconds>(exec_t).count();
+            std::cout << "Writing " << output_file_path << " is finished.\n";
+            std::cout << "Converting time: " << seconds << " seconds\nTotal number of points: " << numPts << ".\n";
+
+            return true;
+        }
+
+//#include "Pc2Reader.hpp"
+
+        //bool readPointclouds2() {
+        //    return true;
+            
+        //}
     }
 
 } // namespace DPApp

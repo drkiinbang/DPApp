@@ -19,7 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{73f98e00-a234-47d9-ab53-341124f5961e}</ProjectGuid>
+    <ProjectGuid>{98d44d7c-41f4-4f4c-9731-605f80a73f99}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
     <ConfigurationType>Application</ConfigurationType>
@@ -57,15 +57,16 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>X64;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <WarningLevel>Level3</WarningLevel>
-      <AdditionalIncludeDirectories>../../vendors/LAStools/include/;../../include/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>../../vendors/;../../vendors/Eigen3/;../../vendors/LAStools/include/;../../include/</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -92,14 +93,15 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <PreprocessorDefinitions>X64;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <WarningLevel>Level3</WarningLevel>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <AdditionalIncludeDirectories>../../vendors/LAStools/include/;../../include/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>../../vendors/;../../vendors/Eigen3/;../../vendors/LAStools/include/;../../include/</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -111,10 +113,46 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\include\bimtree\barycentric.hpp" />
+    <ClInclude Include="..\..\include\bimtree\dataStructs.hpp" />
+    <ClInclude Include="..\..\include\bimtree\lineintersection.hpp" />
+    <ClInclude Include="..\..\include\bimtree\Mesh.hpp" />
+    <ClInclude Include="..\..\include\bimtree\nanoflann.hpp" />
+    <ClInclude Include="..\..\include\bimtree\pc3d.h" />
+    <ClInclude Include="..\..\include\bimtree\PseudoPtsInMesh.hpp" />
+    <ClInclude Include="..\..\include\bimtree\rotation.hpp" />
+    <ClInclude Include="..\..\include\bimtree\SSMMatDatad.h" />
+    <ClInclude Include="..\..\include\bimtree\SSMMatrixd.h" />
+    <ClInclude Include="..\..\include\bimtree\xyzpoint.hpp" />
+    <ClInclude Include="..\..\include\bim\BimInfo.h" />
+    <ClInclude Include="..\..\include\bim\BimMeshInfo.h" />
+    <ClInclude Include="..\..\include\bim\face.h" />
+    <ClInclude Include="..\..\include\bim\gltf.h" />
+    <ClInclude Include="..\..\include\bim\gltf_mesh.h" />
+    <ClInclude Include="..\..\include\bim\Point.h" />
+    <ClInclude Include="..\..\include\bim\XYZ.h" />
+    <ClInclude Include="..\..\include\DefinePointType.hpp" />
+    <ClInclude Include="..\..\include\LaslibReader.hpp" />
+    <ClInclude Include="..\..\include\LaslibWriter.hpp" />
+    <ClInclude Include="..\..\include\Logger.h" />
+    <ClInclude Include="..\..\include\NetworkManager.h" />
+    <ClInclude Include="..\..\include\PointCloudTypes.h" />
+    <ClInclude Include="..\..\include\ReadPointFile.h" />
+    <ClInclude Include="..\..\include\RuntimeConfig.h" />
+    <ClInclude Include="..\..\include\TaskManager.h" />
+    <ClInclude Include="..\..\include\ThreadPool.h" />
     <ClInclude Include="pch.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="test.cpp" />
+    <ClCompile Include="..\..\include\bimtree\pc3d.cpp" />
+    <ClCompile Include="..\..\include\bimtree\SSMMatDatad.cpp" />
+    <ClCompile Include="..\..\include\bimtree\SsmMatrixd.cpp" />
+    <ClCompile Include="..\..\include\bim\BimInfo.cpp" />
+    <ClCompile Include="..\..\src\NetworkManager.cpp" />
+    <ClCompile Include="test.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>

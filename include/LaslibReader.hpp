@@ -454,9 +454,11 @@ namespace las {
                 loaded_points_.emplace_back(extractPointData(reader_->point));
                 ++count;
 
+#ifdef _DEBUG
                 if ((start_idx + count) % PROGRESS_INTERVAL == 0 || count == points_to_read) {
                     displayProgress(start_idx + count, end_idx, "Loading range (random access)");
                 }
+#endif
             }
 
             std::cout << "\nLoaded " << loaded_points_.size()

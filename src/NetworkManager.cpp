@@ -82,14 +82,14 @@ namespace DPApp {
             while (total_bytes_received < bytes_to_receive) {
                 int bytes_received = recv(socket_fd, reinterpret_cast<char*>(buffer.data()) + total_bytes_received, static_cast<int>(bytes_to_receive - total_bytes_received), 0);
                 if (bytes_received == 0) {
-                    ILOG << "연결 정상 종료: bytes_received == 0";
+                    ILOG << "Disconnected: bytes_received == 0";
                     return false;
                 }
                 else if (bytes_received < 0) {
 #ifdef _WIN32
                     int error = WSAGetLastError();
                     if (error == WSAEWOULDBLOCK || error == WSAEINTR) {
-                        ILOG << "논블로킹 소켓이나 인터럽트의 경우 재시도";
+                        ILOG << "Retry (in case nonblocking socket or interrupt)";
                         continue;
                     }
 #else
@@ -98,7 +98,7 @@ namespace DPApp {
                         continue;
                     }
 #endif
-                    ILOG << "연결 종료: bytes_received < 0";
+                    ILOG << "Disconnected: bytes_received < 0";
                     return false;
                 }
                 total_bytes_received += bytes_received;

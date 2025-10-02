@@ -71,11 +71,11 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <OutDir>../bin/</OutDir>
+    <OutDir>$(SolutionDir)bin\</OutDir>
     <TargetName>$(ProjectName)d</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <OutDir>../bin/</OutDir>
+    <OutDir>$(SolutionDir)bin\</OutDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -111,11 +111,13 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>../vendors/;../vendors/Eigen3/</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../vendors/;../vendors/Eigen3/;../include/;../vendors/LAStools/include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>LASzipd.lib;LASlibd.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>../../vendors/LAStools/lib/;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -128,11 +130,13 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>../vendors/;../vendors/Eigen3/</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../vendors/;../vendors/Eigen3/;../include/;../vendors/LAStools/include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>LASzip.lib;LASlib.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>../../vendors/LAStools/lib/;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -142,8 +146,12 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\include\bim\BimInfo.h" />
+    <ClInclude Include="..\include\bim\BimMeshInfo.h" />
+    <ClInclude Include="..\include\bim\gltf_mesh.h" />
+    <ClInclude Include="..\include\DefinePointType.hpp" />
     <ClInclude Include="..\include\Logger.h" />
     <ClInclude Include="..\include\NetworkManager.h" />
+    <ClInclude Include="..\include\Pc2Reader.hpp" />
     <ClInclude Include="..\include\PointCloudTypes.h" />
     <ClInclude Include="..\include\ReadPointFile.h" />
     <ClInclude Include="..\include\RuntimeConfig.h" />

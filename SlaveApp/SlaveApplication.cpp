@@ -610,7 +610,7 @@ private:
             failed_tasks_++;
         }
 
-        total_processing_time_ += processing_time;
+        total_processing_time_ = total_processing_time_ + processing_time;
 
         if (completed_tasks_ + failed_tasks_ > 0) {
             avg_processing_time_ = total_processing_time_ / (completed_tasks_ + failed_tasks_);
