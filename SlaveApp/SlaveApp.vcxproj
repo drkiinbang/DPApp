@@ -111,6 +111,7 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>../vendors/;../vendors/Eigen3/</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -127,6 +128,7 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>../vendors/;../vendors/Eigen3/</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -134,10 +136,12 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\include\bim\BimInfo.cpp" />
     <ClCompile Include="..\src\NetworkManager.cpp" />
     <ClCompile Include="SlaveApplication.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\include\bim\BimInfo.h" />
     <ClInclude Include="..\include\Logger.h" />
     <ClInclude Include="..\include\NetworkManager.h" />
     <ClInclude Include="..\include\PointCloudTypes.h" />
