@@ -6,12 +6,11 @@
 #include <BaseTsd.h>   /// for ssize_t
 typedef SSIZE_T ssize_t;
 
-constexpr size_t CHUNK_NUM_PTS = 1024 * 1024; // 1M points
-constexpr size_t CHUNK_SIZE_IN_FLOAT = CHUNK_NUM_PTS * 3; /// single pt: 3 float coordinates
-constexpr size_t CHUNK_SIZE_IN_BYTE = CHUNK_SIZE_IN_FLOAT * sizeof(float);
-
-
 namespace pc2 {
+    constexpr size_t CHUNK_NUM_PTS = 1000000; // 100K points
+    constexpr size_t CHUNK_SIZE_IN_FLOAT = CHUNK_NUM_PTS * 3; /// single pt: 3 float coordinates
+    constexpr size_t CHUNK_SIZE_IN_BYTE = CHUNK_SIZE_IN_FLOAT * sizeof(float);
+
     ssize_t read_at(HANDLE hFile, void* buffer, size_t size, ssize_t offset, std::error_code& ec) {
         OVERLAPPED ov = {};
         ov.Offset = static_cast<DWORD>(offset & 0xFFFFFFFF);
@@ -94,7 +93,7 @@ namespace pc2 {
 
         while (remainingBytes > 0) {
             /// Calculate bytes to read in this iteration
-            size_t bytesToRead = static_cast<size_t>( (std::min)(static_cast<size_t>(buffer.size() * sizeof(float)), remainingBytes));
+            size_t bytesToRead = static_cast<size_t>( (std::min)(static_cast<size_t>(CHUNK_SIZE_IN_FLOAT * sizeof(float)), remainingBytes));
 
             /// Read batch
             ret = read_at(hFile, buffer.data(), bytesToRead, currentOffset, ec);
@@ -129,7 +128,7 @@ namespace pc2 {
             remainingBytes -= ret;
 
             // Progress report every ~10M points
-            if (pointsLoaded % CHUNK_POINTS == 0) {
+            if (pointsLoaded % CHUNK_NUM_PTS == 0) {
                 std::cout << "Loaded " << pointsLoaded << " points..." << std::endl;
             }
         }
