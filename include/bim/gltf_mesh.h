@@ -52,7 +52,7 @@ public:
             for (size_t nodeIdx : scene.nodes) {
                 const tinygltf::Node& node = model.nodes[nodeIdx];
                 if (node.mesh >= 0) {
-                    world = ComputeWorldTransform(model, nodeIdx);
+                    world = ComputeWorldTransform(model, static_cast<int>(nodeIdx));
                 }
             }
         }
@@ -96,12 +96,12 @@ public:
                 const uint16_t* indices = reinterpret_cast<const uint16_t*>(
                     &model.buffers[idxView.buffer].data[idxView.byteOffset + idxAcc.byteOffset]);
 
-                int numIndices = idxAcc.count;
+                size_t numIndices = idxAcc.count;
 
-                for (int i = 0; i < numIndices; i += 3) {
-                    int idx1 = indices[i];
-                    int idx2 = indices[i + 1];
-                    int idx3 = indices[i + 2];
+                for (size_t i = 0; i < numIndices; i += 3) {
+                    size_t idx1 = indices[i];
+                    size_t idx2 = indices[i + 1];
+                    size_t idx3 = indices[i + 2];
 
                     Vector4f vtx[3];
                     vtx[0] = world * Vector4f(positions[idx1 * 3], positions[idx1 * 3 + 1], positions[idx1 * 3 + 2], 1.0f);
