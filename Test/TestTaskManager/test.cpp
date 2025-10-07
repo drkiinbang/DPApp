@@ -80,9 +80,7 @@ TEST(TaskManagerTest, ImportLAS)
     }
 }
 
-/*
 #include "Pc2Reader.hpp"
-
 TEST(TaskManagerTest, ImportPointclouds2)
 {
     const std::string dataFolder = "F:\\repository\\DPApp\\data";
@@ -97,9 +95,33 @@ TEST(TaskManagerTest, ImportPointclouds2)
         std::string pc2_path = dataFolder + std::string("\\pointclouds2\\samsung_test.pointclouds2");
 
         std::vector<float> pointbuffer;
-        //auto retval = pc2::loadPointclouds2(pc2_path, pointbuffer);
+        auto retval = pc2::loadPointclouds2(pc2_path, pointbuffer);
+
+        std::vector<float> pointbuffer2;
+        size_t beginPtsIdx = 100000;
+        size_t numPtsToRead = 100;
+        auto retval2 = pc2::loadPointclouds2(pc2_path, pointbuffer2, numPtsToRead, beginPtsIdx);
+        bool equalCheck = true;
+        for (size_t i = 0; i < numPtsToRead; ++i){
+            if (pointbuffer2[i * 3 + 0] != pointbuffer[(i + beginPtsIdx) * 3 + 0]) {
+                std::cout << i << " th point X coordinate is not equal\n";
+                equalCheck = false;
+                break;
+            };
+
+            if (pointbuffer2[i * 3 + 1] != pointbuffer[(i + beginPtsIdx) * 3 + 1]) {
+                std::cout << i << " th point Y coordinate is not equal\n";
+                equalCheck = false;
+                break;
+            };
+
+            if (pointbuffer2[i * 3 + 2] != pointbuffer[(i + beginPtsIdx) * 3 + 2]) {
+                std::cout << i << " th point Z coordinate is not equal\n";
+                equalCheck = false;
+                break;
+            };
+        }
 
         EXPECT_TRUE(retval);
     }
 }
-*/
