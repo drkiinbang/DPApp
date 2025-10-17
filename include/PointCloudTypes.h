@@ -11,10 +11,10 @@
 
 namespace DPApp {
 
-enum class TaskType : uint8_t {
-    UNKNOWN = 0,
-    CONVERT_PTS,
-    BIM_DISTANCE_CALCULATION
+enum class TaskType : uint8_t { UNKNOWN = 0
+    , CONVERT_PTS = 1
+    , BIM_DISTANCE_CALCULATION = 2
+    , BIM_PC2_DIST = 3
     };
 
 /// TaskType to string
