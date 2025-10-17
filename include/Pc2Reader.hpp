@@ -6,7 +6,7 @@
 #include <BaseTsd.h>   /// for ssize_t
 typedef SSIZE_T ssize_t;
 
-namespace pc2 {
+namespace pointclouds2 {
     constexpr size_t CHUNK_NUM_PTS = 1000000; // 100K points
     constexpr size_t CHUNK_SIZE_IN_FLOAT = CHUNK_NUM_PTS * 3; /// single pt: 3 float coordinates
     constexpr size_t CHUNK_SIZE_IN_BYTE = CHUNK_SIZE_IN_FLOAT * sizeof(float);
