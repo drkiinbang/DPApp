@@ -1,15 +1,3 @@
-/// User's command: "load file.xyz convert_pts"
-/// ↓
-/// processCommand()
-///     ↓
-///     loadAndProcessPointCloud()           ← including work-flow
-///     ↓
-///     PointCloudLoader::loadPointCloudFileInChunks()  ← load a file
-///         ↓
-///         createTasksFromChunks()              ← create a task
-///         ↓
-///         TaskManager::addTask()               ← add a task
-
 #include <iostream>
 #include <string>
 #include <thread>
@@ -318,6 +306,7 @@ private:
         ILOG << "";
         ILOG << "=== DPApp Master Console Commands ===";
         ILOG << "load <file> <task_type>  - Load point cloud and create processing tasks.";
+        //ILOG << "pts2bim_dist <filename> <task_type>  - Load bim/point cloud and create processing tasks for computing distances.";
         ILOG << "status                   - Show system status";
         ILOG << "slaves                   - List connected slaves";
         ILOG << "tasks                    - List all tasks";
@@ -369,6 +358,26 @@ private:
                 }
 
                 loadAndProcessPointCloud(filename, task_type);
+            }
+        }
+        else if (cmd == "pts2bim_dist") {
+            std::string gltfPath, pc2Path;
+            iss >> gltfPath >> pc2Path;
+            if (gltfPath.empty() || pc2Path.empty()) {
+                WLOG << "Usage: pts2bim_dist <glt/glbf_Path> <pointclluds2_path>";
+            }
+            else {
+                TaskType task_type = TaskType::BIM_PC2_DIST;
+
+                if (task_manager_ && task_manager_->getCurrentTaskType() != task_type) {
+                    WLOG << "Cannot change task type during session.";
+                    WLOG << "Current task type: " << taskStr(task_manager_->getCurrentTaskType());
+                    WLOG << "Requested task type: " << taskStr(task_type);
+                    WLOG << "Please restart the application to change task type.";
+                    return;
+                }
+
+                loadAndProcessPointCloud(pc2Path, task_type);
             }
         }
         else if (cmd == "status") {
@@ -673,15 +682,6 @@ private:
         for (const auto& result : results) {
             for (const auto& point : result.processed_points) {
                 outfile << point.x << " " << point.y << " " << point.z;
-
-                if (point.intensity > 0) {
-                    outfile << " " << point.intensity;
-                }
-                if (point.r != 128 || point.g != 128 || point.b != 128) {
-                    outfile << " " << static_cast<int>(point.r)
-                        << " " << static_cast<int>(point.g)
-                        << " " << static_cast<int>(point.b);
-                }
 
                 outfile << "\n";
                 total_points++;
@@ -1129,15 +1129,6 @@ private:
         for (const auto& result : results) {
             for (const auto& point : result.processed_points) {
                 outfile << point.x << " " << point.y << " " << point.z;
-
-                if (point.intensity > 0) {
-                    outfile << " " << point.intensity;
-                }
-                if (point.r != 128 || point.g != 128 || point.b != 128) {
-                    outfile << " " << static_cast<int>(point.r)
-                        << " " << static_cast<int>(point.g)
-                        << " " << static_cast<int>(point.b);
-                }
 
                 outfile << "\n";
                 total_points++;

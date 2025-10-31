@@ -34,6 +34,7 @@
 #include "bim/BimInfo.h"
 #include "DefinePointType.hpp"
 #include "LaslibReader.hpp"
+#include "Pc2Reader.hpp"
 
 namespace fs = std::filesystem;
 
@@ -132,11 +133,9 @@ namespace DPApp {
             const std::string& file_path,
             uint32_t max_points_per_chunk = MAX_NUM_PTS_CHUNK);
 
-        std::shared_ptr<PointCloudChunk> loadXYZFile(const std::string& file_path);
+        std::vector<std::shared_ptr<PointCloudChunk>> loadXYZFileStreaming(const std::string& file_path, uint32_t max_points_per_chunk);
 
-        std::vector<std::shared_ptr<PointCloudChunk>> loadXYZFileStreaming(
-            const std::string& file_path,
-            uint32_t max_points_per_chunk);
+        std::vector<std::shared_ptr<PointCloudChunk>> loadLasFileStreaming(const std::string& file_path, uint32_t max_points_per_chunk);
     }
 
     /**
@@ -727,6 +726,9 @@ namespace DPApp {
                 if (extension == ".xyz" || extension == ".pts") {
                     chunks = loadXYZFileStreaming(file_path, max_points_per_chunk);
                 }
+                else if (extension == ".las" || extension == ".laz") {
+                    chunks = loadLasFileStreaming(file_path, max_points_per_chunk);
+                }
                 else {
                     std::cerr << "Unsupported file format: " << extension << std::endl;
                     return chunks;
@@ -742,64 +744,8 @@ namespace DPApp {
             return chunks;
         }
 
-        std::shared_ptr<PointCloudChunk> loadXYZFile(const std::string& file_path) {
-            auto chunk = std::make_shared<PointCloudChunk>();
-            chunk->chunk_id = 0;
-
-            try {
-                std::ifstream file(file_path);
-                if (!file.is_open()) {
-                    std::cerr << "Cannot open XYZ file: " << file_path << std::endl;
-                    return chunk;
-                }
-
-                std::string line;
-                size_t line_count = 0;
-
-                while (std::getline(file, line)) {
-                    line_count++;
-
-                    // Skip empty lines and comments
-                    if (line.empty() || line[0] == '#') continue;
-
-                    std::istringstream iss(line);
-                    Point3D point;
-
-                    if (iss >> point.x >> point.y >> point.z) {
-                        // Try to read additional fields (intensity, colors)
-                        float temp_intensity = 0;
-                        int temp_r = 128, temp_g = 128, temp_b = 128;
-
-                        iss >> temp_intensity >> temp_r >> temp_g >> temp_b;
-
-                        point.intensity = static_cast<uint16_t>(temp_intensity);
-                        point.r = static_cast<uint8_t>(temp_r);
-                        point.g = static_cast<uint8_t>(temp_g);
-                        point.b = static_cast<uint8_t>(temp_b);
-                        point.classification = 0;
-
-                        chunk->points.push_back(point);
-                    }
-
-                    // Progress indicator for large files
-                    if (line_count % 100000 == 0) {
-                        std::cout << "Loaded " << chunk->points.size() << " points..." << std::endl;
-                    }
-                }
-
-                file.close();
-                std::cout << "Loaded " << chunk->points.size() << " points from XYZ file" << std::endl;
-
-            }
-            catch (const std::exception& e) {
-                std::cerr << "Error reading XYZ file " << file_path << ": " << e.what() << std::endl;
-            }
-
-            return chunk;
-        }
-
         std::vector<std::shared_ptr<PointCloudChunk>> loadXYZFileStreaming(
-            const std::string& file_path, uint32_t max_points_per_chunk) {
+            const std::string& file_path, const uint32_t max_points_per_chunk) {
 
             std::vector<std::shared_ptr<PointCloudChunk>> chunks;
 
@@ -833,14 +779,7 @@ namespace DPApp {
                         // Attempt to read additional fields
                         float temp_intensity = 0;
                         int temp_r = 128, temp_g = 128, temp_b = 128;
-
                         iss >> temp_intensity >> temp_r >> temp_g >> temp_b;
-
-                        point.intensity = static_cast<uint16_t>(temp_intensity);
-                        point.r = static_cast<uint8_t>(temp_r);
-                        point.g = static_cast<uint8_t>(temp_g);
-                        point.b = static_cast<uint8_t>(temp_b);
-                        point.classification = 0;
 
                         current_chunk->points.push_back(point);
                         points_in_current_chunk++;
@@ -879,6 +818,59 @@ namespace DPApp {
             }
             catch (const std::exception& e) {
                 std::cerr << "Error in XYZ streaming: " << e.what() << std::endl;
+            }
+
+            return chunks;
+        }
+
+        std::vector<std::shared_ptr<PointCloudChunk>> loadLasFileStreaming(const std::string& file_path, const uint32_t max_points_per_chunk)
+        {
+            std::vector<std::shared_ptr<PointCloudChunk>> chunks;
+
+            try {
+                las::LASToolsReader lasReader;
+
+                if (!lasReader.open(file_path)) {
+                    std::cerr << "Failed to open input file: " << file_path << std::endl;
+                    return chunks;
+                }
+
+                size_t total_num_points = lasReader.getPointCount();
+                chunks.reserve(size_t(total_num_points / max_points_per_chunk) + 1);
+                size_t total_points_loaded = 0;
+                size_t chunk_counter = 0;
+
+                for (size_t start = 0; start < total_num_points; start += max_points_per_chunk) {
+                    std::size_t end = (std::min)(start + max_points_per_chunk, total_num_points);
+                    if (!lasReader.loadPointRange(start, end)) {
+                        std::cerr << "Failed in loadPointRandge(" << start << ", " << end << ")\n";
+                        break;
+                    }
+
+                    auto current_chunk = std::make_shared<PointCloudChunk>();
+                    current_chunk->chunk_id = chunk_counter;
+                    current_chunk->points.reserve(lasReader.getLoadedPointCount());
+
+                    Point3D point;
+                    
+                    for (const auto& p : lasReader.getLoadedPoints()) {
+                        point = Point3D(p.x, p.y, p.z);
+                        current_chunk->points.push_back(point);
+                    }
+
+                    total_points_loaded += current_chunk->points.size();
+                    chunk_counter++;
+
+                    std::cout << "Loaded points: " << total_points_loaded << std::endl;
+                }
+
+                lasReader.close();
+
+                std::cout << "Streaming load completed: " << chunks.size() << " chunks, "
+                    << total_points_loaded << " total points" << std::endl;
+            }
+            catch (const std::exception& e) {
+                std::cerr << "Error in Las streaming: " << e.what() << std::endl;
             }
 
             return chunks;
@@ -1014,17 +1006,7 @@ namespace DPApp {
 
                 // Calculate distance from origin and store in intensity field
                 for (auto& point : result.processed_points) {
-                    float distance = static_cast<float>(std::sqrt(point.x * point.x + point.y * point.y + point.z * point.z));
-
-                    // Store distance in intensity field (convert to millimeters, clamped to uint16_t range)
-                    point.intensity = static_cast<uint16_t>((std::min)(distance * 1000, 65535.0f));
-
-                    // Color code by distance (blue = close, red = far)
-                    float normalized_distance = (std::min)(distance / 100.0f, 1.0f); // Normalize to 100m max
-
-                    point.r = static_cast<uint8_t>(normalized_distance * 255);
-                    point.g = static_cast<uint8_t>((1.0f - normalized_distance) * 128);
-                    point.b = static_cast<uint8_t>((1.0f - normalized_distance) * 255);
+                    float distance = static_cast<float>(std::sqrt(point.x * point.x + point.y * point.y + point.z * point.z));                    
                 }
 
                 std::cout << "Distance calculation completed for " << result.processed_points.size() << " points" << std::endl;
@@ -1694,12 +1676,12 @@ namespace DPApp {
             return true;
         }
 
-//#include "Pc2Reader.hpp"
 
-        //bool readPointclouds2() {
-        //    return true;
+
+        bool readPointclouds2() {
+            return true;
             
-        //}
+        }
     }
 
 } // namespace DPApp

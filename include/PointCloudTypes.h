@@ -22,6 +22,7 @@ inline const char* taskStr(TaskType type) {
     switch (type) {
     case TaskType::CONVERT_PTS: return "convert_pts";
     case TaskType::BIM_DISTANCE_CALCULATION: return "bim_distance_calculation";
+    case TaskType::BIM_PC2_DIST: return "bim_pc2_distance";
     default: return "unknown";
     }
 }
@@ -30,20 +31,16 @@ inline const char* taskStr(TaskType type) {
 inline TaskType strTask(const std::string& str) {
     if (str == "convert_pts") return TaskType::CONVERT_PTS;
     if (str == "bim_distance_calculation") return TaskType::BIM_DISTANCE_CALCULATION;
+    if (str == "bim_pc2_distance") return TaskType::BIM_PC2_DIST;
     return TaskType::UNKNOWN;
 }
 
 /// 3D point struct
 struct Point3D {
     double x, y, z;
-    float intensity; /// intensity (for las)
-    uint8_t r, g, b; /// RGB
-    uint16_t classification; /// classification info
     
-    Point3D() : x(0), y(0), z(0), intensity(0), r(0), g(0), b(0), classification(0) {}
-    Point3D(double x_, double y_, double z_) : x(x_), y(y_), z(z_), intensity(0), r(0), g(0), b(0), classification(0) {}
-    Point3D(double x_, double y_, double z_, float intensity_, uint8_t r_, uint8_t g_, uint8_t b_) 
-        : x(x_), y(y_), z(z_), intensity(intensity_), r(r_), g(g_), b(b_), classification(0) {}
+    Point3D() : x(0), y(0), z(0) {}
+    Point3D(double x_, double y_, double z_) : x(x_), y(y_), z(z_) {}
 };
 
 /// Pointcloud heade info
@@ -149,7 +146,7 @@ public:
                 /// It additional info available
                 iss >> intensity >> r >> g >> b;
 
-                Point3D point(x, y, z, intensity, r, g, b);
+                Point3D point(x, y, z);
                 points_.push_back(point);
             }
         }
@@ -176,11 +173,7 @@ public:
 
         /// Store point data
         for (const auto& point : points_) {
-            file << point.x << " " << point.y << " " << point.z << " "
-                << point.intensity << " "
-                << static_cast<int>(point.r) << " "
-                << static_cast<int>(point.g) << " "
-                << static_cast<int>(point.b) << "\n";
+            file << point.x << " " << point.y << " " << point.z << "\n";
         }
 
         file.close();
