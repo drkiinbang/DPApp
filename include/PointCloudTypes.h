@@ -6,6 +6,8 @@
 #include <fstream>
 #include <sstream>
 
+#include "bim/BimMeshInfo.h"
+
 #undef min
 #undef max
 
@@ -91,6 +93,80 @@ struct PointCloudChunk {
     /// Get chunk size in byte
     size_t getSize() const {
         return sizeof(PointCloudChunk) + points.size() * sizeof(Point3D);
+    }
+};
+
+/// BimPc chunk
+struct BimPcChunk {
+    uint32_t chunk_id;
+    BimMeshInfo bim;
+    std::vector<Point3D> points;
+
+    /// Bounding box (pc)
+    double min_x, min_y, min_z;
+    double max_x, max_y, max_z;
+
+    /// Bounding box (mesh)
+    double msh_min_x, msh_min_y, msh_min_z;
+    double msh_max_x, msh_max_y, msh_max_z;
+
+    BimPcChunk() : chunk_id(0), min_x(0), min_y(0), min_z(0), max_x(0), max_y(0), max_z(0) {}
+
+    /// 메모리 사용량 추정
+    size_t estimateMemoryUsage() const {
+        return sizeof(BimMeshInfo) + points.size() * sizeof(Point3D);
+    }
+
+    void calculateBounds() {
+        calculatePcBounds();
+        calculateMeshBounds();
+    }
+
+    /// Get chunk size in byte
+    size_t getSize() const {
+        return sizeof(PointCloudChunk) + points.size() * sizeof(Point3D);
+    }
+
+private:
+    /// Compute bounding box (pc)
+    void calculatePcBounds() {
+        if (points.empty()) {
+            min_x = min_y = min_z = 0;
+            max_x = max_y = max_z = 0;
+            return;
+        }
+
+        min_x = max_x = points[0].x;
+        min_y = max_y = points[0].y;
+        min_z = max_z = points[0].z;
+
+        for (const auto& point : points) {
+            min_x = std::min(min_x, point.x);
+            min_y = std::min(min_y, point.y);
+            min_z = std::min(min_z, point.z);
+            max_x = std::max(max_x, point.x);
+            max_y = std::max(max_y, point.y);
+            max_z = std::max(max_z, point.z);
+        }
+    }
+
+    /// Compute bounding box (mesh)
+    void calculateMeshBounds()
+    {
+        bool is_offset_applied = false;
+        float offset[3] = { 0.f, 0.f, 0.f };
+
+        auto bbox = bim.get_mbr(is_offset_applied, offset);
+        auto bbox_min = bbox.get_min();
+        auto bbox_max = bbox.get_max();
+
+        msh_min_x = bbox_min[0];
+        msh_min_y = bbox_min[1];
+        msh_min_z = bbox_min[2];
+
+        msh_max_x = bbox_max[0];
+        msh_max_y = bbox_max[1];
+        msh_max_z = bbox_max[2];
     }
 };
 
