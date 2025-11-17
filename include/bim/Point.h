@@ -8,20 +8,20 @@
 class Point {
 
 public:
-    enum { X, Y, Z };
+    enum { x, y, z };
     /*Point();
     Point(float x, float y, float z);
     Point(float* coords);
     Point(const Point& other);*/
     Point() {
-      coords[X] = 0.0;
-      coords[Y] = 0.0;
-      coords[Z] = 0.0;
+      coords[0] = 0.0;
+      coords[1] = 0.0;
+      coords[2] = 0.0;
     }
     Point(float x, float y, float z) {
-      coords[X] = x;
-      coords[Y] = y;
-      coords[Z] = z;
+      coords[0] = x;
+      coords[1] = y;
+      coords[2] = z;
     }
 
     Point(float* coords) {
@@ -36,28 +36,28 @@ public:
 
     float* getCoords() { return coords; }
 
-    inline auto getX() const { return coords[X]; }
-    inline auto getY() const { return coords[Y]; }
-    inline auto getZ() const { return coords[Z]; }
+    inline auto getX() const { return coords[0]; }
+    inline auto getY() const { return coords[1]; }
+    inline auto getZ() const { return coords[2]; }
 
-    inline void setX(float x) { coords[X] = x;  }
-    inline void setY(float y) { coords[Y] = y;  }
-    inline void setZ(float z) { coords[Z] = z;  }
+    inline void setX(float x) { coords[0] = x;  }
+    inline void setY(float y) { coords[1] = y;  }
+    inline void setZ(float z) { coords[2] = z;  }
 
     inline void move(float offset) {
-      coords[X] += offset;
-      coords[Y] += offset;
-      coords[Z] += offset;
+      coords[0] += offset;
+      coords[1] += offset;
+      coords[2] += offset;
     }
 
     inline void move(float* offsets) {
-        coords[X] -= offsets[0];
-        coords[Y] -= offsets[1];
-        coords[Z] -= offsets[2];
+        coords[0] -= offsets[0];
+        coords[1] -= offsets[1];
+        coords[2] -= offsets[2];
     }
 
     inline bool isEmpty() {
-      if (coords[X] == 0.0 && coords[Y] == 0.0 && coords[Z] == 0.0) {
+      if (coords[0] == 0.0 && coords[1] == 0.0 && coords[2] == 0.0) {
         return true;
       } else {
         return false;
@@ -65,7 +65,7 @@ public:
     }
 
     inline float at(size_t idx) const {
-      if (idx > Z) {
+      if (idx > 2) {
         std::cerr << "index over Z" << std::endl;
         return 0.0;
       }
@@ -83,32 +83,32 @@ public:
 
     // Vector addition
     Point operator+(const Point& other) const {
-      return Point(coords[X] + other.coords[X], coords[Y] + other.coords[Y], coords[Z] + other.coords[Z]);
+      return Point(coords[0] + other.coords[0], coords[1] + other.coords[1], coords[2] + other.coords[2]);
     }
 
     // Vector subtraction
     Point operator-(const Point& other) const {
-      return Point(coords[X] - other.coords[X], coords[Y] - other.coords[Y], coords[Z] - other.coords[Z]);
+      return Point(coords[0] - other.coords[0], coords[1] - other.coords[1], coords[2] - other.coords[2]);
     }
 
     // Vector cross product
     Point crossProduct(const Point& other) const {
       return Point(
-        coords[Y] * other.coords[Z] - coords[Z] * other.coords[Y],
-        coords[Z] * other.coords[X] - coords[X] * other.coords[Z],
-        coords[X] * other.coords[Y] - coords[Y] * other.coords[X]
+        coords[1] * other.coords[2] - coords[2] * other.coords[1],
+        coords[2] * other.coords[0] - coords[0] * other.coords[2],
+        coords[0] * other.coords[1] - coords[1] * other.coords[0]
       );
     }
 
     // Vector dot product
     float dotProduct(const Point& other) const {
-      return coords[X] * other.coords[X] + coords[Y] * other.coords[Y] + coords[Z] * other.coords[Z];
+      return coords[0] * other.coords[0] + coords[1] * other.coords[1] + coords[2] * other.coords[2];
     }
 
     // Vector normalization
     Point normalize() const {
-      float length = std::sqrt(coords[X] * coords[X] + coords[Y] * coords[Y] + coords[Z] * coords[Z]);
-      return Point(coords[X] / length, coords[Y] / length, coords[Z] / length);
+      float length = std::sqrt(coords[0] * coords[0] + coords[1] * coords[1] + coords[2] * coords[2]);
+      return Point(coords[0] / length, coords[1] / length, coords[2] / length);
     }
 
    protected:
