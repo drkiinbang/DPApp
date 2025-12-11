@@ -45,6 +45,168 @@ struct Point3D {
     Point3D(double x_, double y_, double z_) : x(x_), y(y_), z(z_) {}
 };
 
+/*
+class Point3D
+{
+public:
+
+    Point3D()
+    {
+        xyz[0] = xyz[1] = xyz[2] = 0.0;
+    }
+
+    Point3D(const double x, const double y, const double z)
+    {
+        xyz[0] = x;
+        xyz[1] = y;
+        xyz[2] = z;
+    }
+
+    Point3D(const Point3D& val)
+    {
+        copy(val);
+        faceId = val.faceId;
+    }
+
+    inline Point3D operator=(const Point3D& val)
+    {
+        copy(val);
+        return *this;
+    }
+
+    inline Point3D operator+=(const Point3D& val)
+    {
+        this->xyz[0] += val.xyz[0];
+        this->xyz[1] += val.xyz[1];
+        this->xyz[2] += val.xyz[2];
+        return *this;
+    }
+
+    inline Point3D operator/=(const double& val)
+    {
+        try
+        {
+            this->xyz[0] /= val;
+            this->xyz[1] /= val;
+            this->xyz[2] /= val;
+        }
+        catch (...)
+        {
+            throw std::runtime_error("Error from Vertex3D operator /=");
+        }
+        return *this;
+    }
+
+    inline Point3D operator-(const Point3D& val) const
+    {
+        Point3D retVal;
+        retVal.xyz[0] = this->xyz[0] - val.xyz[0];
+        retVal.xyz[1] = this->xyz[1] - val.xyz[1];
+        retVal.xyz[2] = this->xyz[2] - val.xyz[2];
+        return retVal;
+    }
+
+    inline Point3D operator+(const Point3D& val) const
+    {
+        Point3D retVal;
+        retVal.xyz[0] = this->xyz[0] + val.xyz[0];
+        retVal.xyz[1] = this->xyz[1] + val.xyz[1];
+        retVal.xyz[2] = this->xyz[2] + val.xyz[2];
+        return retVal;
+    }
+
+    inline Point3D operator/(const double val) const
+    {
+        Point3D retVal;
+
+        try {
+            retVal.xyz[0] = this->xyz[0] / val;
+            retVal.xyz[1] = this->xyz[1] / val;
+            retVal.xyz[2] = this->xyz[2] / val;
+        }
+        catch (...)
+        {
+            throw std::runtime_error("Fatal error from Vertex3D operator ""/""");
+        }
+
+        return retVal;
+    }
+
+    inline Point3D operator*(const double val) const
+    {
+        Point3D retVal;
+
+        retVal.xyz[0] = this->xyz[0] * val;
+        retVal.xyz[1] = this->xyz[1] * val;
+        retVal.xyz[2] = this->xyz[2] * val;
+
+        return retVal;
+    }
+
+    inline void copy(const Point3D& val)
+    {
+        ::memcpy(xyz, val.xyz, 3 * sizeof(double));
+        faceId = val.faceId;
+    }
+
+    inline bool operator==(const Point3D& pt) const
+    {
+        return pt.x() == xyz[0] && pt.y() == xyz[1] && pt.z() == xyz[2];
+    }
+
+    inline const double& x() const { return xyz[0]; }
+    inline const double& y() const { return xyz[1]; }
+    inline const double& z() const { return xyz[2]; }
+
+    inline double& x() { return xyz[0]; }
+    inline double& y() { return xyz[1]; }
+    inline double& z() { return xyz[2]; }
+
+    inline double& operator[] (const std::size_t idx)
+    {
+        try
+        {
+            return xyz[idx];
+        }
+        catch (...)
+        {
+            throw std::runtime_error("Error in Vertex3D::operator[]");
+        }
+    }
+
+    inline const double& operator[] (const std::size_t idx) const
+    {
+        try
+        {
+            return xyz[idx];
+        }
+        catch (...)
+        {
+            throw std::runtime_error("Error in Vertex3D::operator[]");
+        }
+    }
+
+    inline void set(const double newX, const double newY, const double newZ)
+    {
+        xyz[0] = newX;
+        xyz[1] = newY;
+        xyz[2] = newZ;
+    }
+
+    inline const std::vector<int>& getFaceId() const { return faceId; }
+    inline std::vector<int>& getFaceId() { return faceId; }
+    void setFaceId(const std::vector<int>& newFaceId) { faceId = newFaceId; }
+    inline void addFaceId(const int idx)
+    {
+        faceId.push_back(idx);
+    }
+
+private:
+    double xyz[3];
+    std::vector<int> faceId;
+};
+*/
+
 /// Pointcloud heade info
 struct PointCloudHeader {
     std::string filename;
@@ -112,7 +274,7 @@ struct BimPcChunk {
 
     BimPcChunk() : chunk_id(0), min_x(0), min_y(0), min_z(0), max_x(0), max_y(0), max_z(0) {}
 
-    /// 메모리 사용량 추정
+    /// Estimate memory usage
     size_t estimateMemoryUsage() const {
         return sizeof(BimMeshInfo) + points.size() * sizeof(Point3D);
     }
