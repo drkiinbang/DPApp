@@ -95,7 +95,7 @@ bool API loadGltf(const std::string& bim_folder, std::vector<mesh::MeshChunk>& b
     return true;
 }
 
-bool API checkGltfExt(const std::string& gltfPath)
+bool API testGltfExtraId(const std::string& gltfPath)
 {
     fs::path input_path(gltfPath);
 
