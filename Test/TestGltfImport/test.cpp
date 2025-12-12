@@ -7,8 +7,8 @@ namespace fs = std::filesystem;
 #include "../../BimImport/BimImport.h"
 
 TEST(TestCaseName, VerifyExtId) {
-	std::string bimFolder = "../data/test/extension_test/ext_sample2/test_extension1.glb";
-	fs::path relativePath = bimFolder;
+	std::string glbPath = "../data/test/extension_test/ext_sample2/test_extension1.glb";
+	fs::path relativePath = glbPath;
 
 	/// 실행 파일의 전체 경로
 	char path_buffer[1024];
@@ -34,7 +34,7 @@ TEST(TestCaseName, VerifyExtId) {
 
 	std::cout << "입력한 패스: " << absolutePath << std::endl;
 
-	auto retval = checkGltfExt(absolutePath.string());
+	auto retval = testGltfExtraId(absolutePath.string());
 	EXPECT_TRUE(retval);
 }
 

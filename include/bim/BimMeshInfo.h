@@ -8,14 +8,15 @@ private:
     std::vector<size_t> numPriInMesh;
     /// model.mesh[].name
     std::vector<std::string> meshNames;
-    
-    std::string node_name;
-    int bim_id;
+        
     int data_source_id = 1;
     std::string node_name_utf8;
     std::string utf8FileName;
+public:
     std::array<float, 3> bbox_min;
     std::array<float, 3> bbox_max;
+    std::string node_name;
+    int bim_id;
 
 public:
 	BimMeshInfo() = default;

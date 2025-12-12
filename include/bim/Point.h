@@ -8,15 +8,10 @@
 class Point {
 
 public:
-    enum { x, y, z };
-    /*Point();
-    Point(float x, float y, float z);
-    Point(float* coords);
-    Point(const Point& other);*/
     Point() {
-      coords[0] = 0.0;
-      coords[1] = 0.0;
-      coords[2] = 0.0;
+      coords[0] = 0.0f;
+      coords[1] = 0.0f;
+      coords[2] = 0.0f;
     }
     Point(float x, float y, float z) {
       coords[0] = x;
@@ -31,9 +26,7 @@ public:
     Point(const Point& other) {
       assign(other);
     }
-
     
-
     float* getCoords() { return coords; }
 
     inline auto getX() const { return coords[0]; }
@@ -43,18 +36,6 @@ public:
     inline void setX(float x) { coords[0] = x;  }
     inline void setY(float y) { coords[1] = y;  }
     inline void setZ(float z) { coords[2] = z;  }
-
-    inline void move(float offset) {
-      coords[0] += offset;
-      coords[1] += offset;
-      coords[2] += offset;
-    }
-
-    inline void move(float* offsets) {
-        coords[0] -= offsets[0];
-        coords[1] -= offsets[1];
-        coords[2] -= offsets[2];
-    }
 
     inline bool isEmpty() {
       if (coords[0] == 0.0 && coords[1] == 0.0 && coords[2] == 0.0) {
@@ -89,6 +70,11 @@ public:
     // Vector subtraction
     Point operator-(const Point& other) const {
       return Point(coords[0] - other.coords[0], coords[1] - other.coords[1], coords[2] - other.coords[2]);
+    }
+
+    // scale
+    Point operator*(const float scale) const {
+        return Point(this->coords[0] * scale, this->coords[1] * scale, this->coords[2] * scale);
     }
 
     // Vector cross product

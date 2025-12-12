@@ -306,7 +306,7 @@ private:
         ILOG << "";
         ILOG << "=== DPApp Master Console Commands ===";
         ILOG << "load <file> <task_type>  - Load point cloud and create processing tasks.";
-        //ILOG << "pts2bim_dist <filename> <task_type>  - Load bim/point cloud and create processing tasks for computing distances.";
+        ILOG << "pts2bim_dist <bimfile> <lasfile> <task_type>  - Load bim and las for co-registration.";
         ILOG << "status                   - Show system status";
         ILOG << "slaves                   - List connected slaves";
         ILOG << "tasks                    - List all tasks";
