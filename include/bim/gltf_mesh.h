@@ -4,7 +4,7 @@
 #include "BimMeshInfo.h"
 
 #include "../bimtree/dataStructs.hpp"
-//#include "./MeshChunk.h"
+#include "./MeshChunk.h"
 
 class GltfMesh : public gltf {
 public:

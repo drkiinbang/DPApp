@@ -776,7 +776,7 @@ namespace DPApp {
                     std::istringstream iss(line);
                     Point3D point;
 
-                    if (iss >> point.x >> point.y >> point.z) {
+                    if (iss >> point[0] >> point[1] >> point[2]) {
                         // 추가 필드가 있으면 읽지만 사용하지 않음 (파싱 오류 방지)
                         // float temp_intensity = 0;
                         // int temp_r = 128, temp_g = 128, temp_b = 128;
@@ -987,9 +987,9 @@ namespace DPApp {
                     std::memcpy(&offset_z, task.parameters.data() + sizeof(double) * 2, sizeof(double));
 
                     for (auto& point : result.processed_points) {
-                        point.x += static_cast<float>(offset_x);
-                        point.y += static_cast<float>(offset_y);
-                        point.z += static_cast<float>(offset_z);
+                        point[0] += static_cast<float>(offset_x);
+                        point[1] += static_cast<float>(offset_y);
+                        point[2] += static_cast<float>(offset_z);
                     }
 
                     std::cout << "Applied offset: (" << offset_x << ", " << offset_y << ", " << offset_z << ")" << std::endl;
@@ -1021,7 +1021,7 @@ namespace DPApp {
 
                 // Calculate distance from origin and store in intensity field
                 for (auto& point : result.processed_points) {
-                    float distance = static_cast<float>(std::sqrt(point.x * point.x + point.y * point.y + point.z * point.z));                    
+                    float distance = static_cast<float>(std::sqrt(point[0] * point[0] + point[1] * point[1] + point[2] * point[2]));
                 }
 
                 std::cout << "Distance calculation completed for " << result.processed_points.size() << " points" << std::endl;
@@ -1735,9 +1735,9 @@ namespace DPApp {
                 /// 특정 포인트의 특정 차원 값 반환
                 inline double kdtree_get_pt(const size_t idx, const size_t dim) const
                 {
-                    if (dim == 0) return points[idx].x;
-                    else if (dim == 1) return points[idx].y;
-                    else return points[idx].z;
+                    if (dim == 0) return points[idx][0];
+                    else if (dim == 1) return points[idx][1];
+                    else return points[idx][2];
                 }
 
                 /// 바운딩 박스 계산 (빠른 빌드를 위해)

@@ -7,6 +7,7 @@
 #include <sstream>
 
 #include "bim/BimMeshInfo.h"
+#include "bimtree/xyzpoint.hpp"
 
 #undef min
 #undef max
@@ -17,6 +18,7 @@ enum class TaskType : uint8_t { UNKNOWN = 0
     , CONVERT_PTS = 1
     , BIM_DISTANCE_CALCULATION = 2
     , BIM_PC2_DIST = 3
+    , TEST_INTEGER_SUM
     };
 
 /// TaskType to string
@@ -25,6 +27,7 @@ inline const char* taskStr(TaskType type) {
     case TaskType::CONVERT_PTS: return "convert_pts";
     case TaskType::BIM_DISTANCE_CALCULATION: return "bim_distance_calculation";
     case TaskType::BIM_PC2_DIST: return "bim_pc2_distance";
+    case TaskType::TEST_INTEGER_SUM: return "TEST_INTEGER_SUM";
     default: return "unknown";
     }
 }
@@ -38,12 +41,15 @@ inline TaskType strTask(const std::string& str) {
 }
 
 /// 3D point struct
+using Point3D = pctree::XYZPoint;
+/*
 struct Point3D {
     double x, y, z;
     
     Point3D() : x(0), y(0), z(0) {}
     Point3D(double x_, double y_, double z_) : x(x_), y(y_), z(z_) {}
 };
+*/
 
 /*
 class Point3D
@@ -211,8 +217,8 @@ private:
 struct PointCloudHeader {
     std::string filename;
     uint64_t point_count;
-    double min_x, min_y, min_z;
-    double max_x, max_y, max_z;
+    float min_x, min_y, min_z;
+    float max_x, max_y, max_z;
     std::string coordinate_system;
     
     PointCloudHeader() : point_count(0), min_x(0), min_y(0), min_z(0), max_x(0), max_y(0), max_z(0) {}
@@ -225,8 +231,8 @@ struct PointCloudChunk {
     PointCloudHeader header;
     
     /// Bounding box
-    double min_x, min_y, min_z;
-    double max_x, max_y, max_z;
+    float min_x, min_y, min_z;
+    float max_x, max_y, max_z;
     
     PointCloudChunk() : chunk_id(0), min_x(0), min_y(0), min_z(0), max_x(0), max_y(0), max_z(0) {}
     
@@ -238,17 +244,17 @@ struct PointCloudChunk {
             return;
         }
 
-        min_x = max_x = points[0].x;
-        min_y = max_y = points[0].y;
-        min_z = max_z = points[0].z;
+        min_x = max_x = points[0][0];
+        min_y = max_y = points[0][1];
+        min_z = max_z = points[0][2];
 
         for (const auto& point : points) {
-            min_x = std::min(min_x, point.x);
-            min_y = std::min(min_y, point.y);
-            min_z = std::min(min_z, point.z);
-            max_x = std::max(max_x, point.x);
-            max_y = std::max(max_y, point.y);
-            max_z = std::max(max_z, point.z);
+            min_x = (std::min)(min_x, point[0]);
+            min_y = (std::min)(min_y, point[1]);
+            min_z = (std::min)(min_z, point[2]);
+            max_x = (std::max)(max_x, point[0]);
+            max_y = (std::max)(max_y, point[1]);
+            max_z = (std::max)(max_z, point[2]);
         }
     }
     
@@ -265,12 +271,12 @@ struct BimPcChunk {
     std::vector<Point3D> points;
 
     /// Bounding box (pc)
-    double min_x, min_y, min_z;
-    double max_x, max_y, max_z;
+    float min_x, min_y, min_z;
+    float max_x, max_y, max_z;
 
     /// Bounding box (mesh)
-    double msh_min_x, msh_min_y, msh_min_z;
-    double msh_max_x, msh_max_y, msh_max_z;
+    float msh_min_x, msh_min_y, msh_min_z;
+    float msh_max_x, msh_max_y, msh_max_z;
 
     BimPcChunk() : chunk_id(0), min_x(0), min_y(0), min_z(0), max_x(0), max_y(0), max_z(0) {}
 
@@ -298,17 +304,17 @@ private:
             return;
         }
 
-        min_x = max_x = points[0].x;
-        min_y = max_y = points[0].y;
-        min_z = max_z = points[0].z;
+        min_x = max_x = points[0][0];
+        min_y = max_y = points[0][1];
+        min_z = max_z = points[0][2];
 
         for (const auto& point : points) {
-            min_x = std::min(min_x, point.x);
-            min_y = std::min(min_y, point.y);
-            min_z = std::min(min_z, point.z);
-            max_x = std::max(max_x, point.x);
-            max_y = std::max(max_y, point.y);
-            max_z = std::max(max_z, point.z);
+            min_x = (std::min)(min_x, point[0]);
+            min_y = (std::min)(min_y, point[1]);
+            min_z = (std::min)(min_z, point[2]);
+            max_x = (std::max)(max_x, point[0]);
+            max_y = (std::max)(max_y, point[1]);
+            max_z = (std::max)(max_z, point[2]);
         }
     }
 
@@ -411,7 +417,7 @@ public:
 
         /// Store point data
         for (const auto& point : points_) {
-            file << point.x << " " << point.y << " " << point.z << "\n";
+            file << point[0] << " " << point[1] << " " << point[2] << "\n";
         }
 
         file.close();
@@ -484,17 +490,17 @@ public:
             return;
         }
 
-        header_.min_x = header_.max_x = points_[0].x;
-        header_.min_y = header_.max_y = points_[0].y;
-        header_.min_z = header_.max_z = points_[0].z;
+        header_.min_x = header_.max_x = points_[0][0];
+        header_.min_y = header_.max_y = points_[0][1];
+        header_.min_z = header_.max_z = points_[0][2];
 
         for (const auto& point : points_) {
-            header_.min_x = std::min(header_.min_x, point.x);
-            header_.min_y = std::min(header_.min_y, point.y);
-            header_.min_z = std::min(header_.min_z, point.z);
-            header_.max_x = std::max(header_.max_x, point.x);
-            header_.max_y = std::max(header_.max_y, point.y);
-            header_.max_z = std::max(header_.max_z, point.z);
+            header_.min_x = (std::min)(header_.min_x, point[0]);
+            header_.min_y = (std::min)(header_.min_y, point[1]);
+            header_.min_z = (std::min)(header_.min_z, point[2]);
+            header_.max_x = (std::max)(header_.max_x, point[0]);
+            header_.max_y = (std::max)(header_.max_y, point[1]);
+            header_.max_z = (std::max)(header_.max_z, point[2]);
         }
 
         header_.point_count = points_.size();
