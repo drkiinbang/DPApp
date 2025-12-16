@@ -96,6 +96,15 @@ public:
             handleTaskFailed(task, error);
             });
 
+        if (server_) {
+            auto connected_clients = server_->getConnectedClients();
+            for (const auto& client_id : connected_clients) {
+                task_manager_->registerSlave(client_id);
+                ILOG << "Auto-registered existing slave: " << client_id;
+            }
+            ILOG << "Registered " << connected_clients.size() << " existing slaves to TaskManager";
+        }
+
         ILOG << "TaskManager initialized for task type: " << taskStr(task_type);
         return true;
     }
