@@ -200,6 +200,30 @@ namespace DPApp {
             return task_id;
         }
 
+        /// add for TEST_INTEGER_SUM
+        uint32_t addTask(uint32_t chunk_id, const std::vector<uint8_t>& parameters) {
+            std::lock_guard<std::mutex> lock(tasks_mutex_);
+            
+            uint32_t task_id = next_task_id_++;
+
+            TaskInfo task_info;
+            task_info.task_id = task_id;
+            task_info.chunk_id = chunk_id;
+            task_info.task_type = current_task_type_;    /// 세션의 task_type 사용
+            task_info.priority = TaskPriority::NORMAL;
+            task_info.parameters = parameters;           /// 전달받은 parameters 사용
+            task_info.chunk_data = nullptr;              /// PointCloud 없음!
+
+            tasks_[task_id] = std::move(task_info);
+
+            std::cout << "Task added (parameter-based): " << task_id
+                << " (" << taskStr(current_task_type_) << ")"
+                << " - chunk_id: " << chunk_id
+                << ", param_size: " << parameters.size() << " bytes" << std::endl;
+
+            return task_id;
+        }
+
         /**
          * @brief Clear all tasks from the manager
          */
@@ -700,11 +724,139 @@ namespace DPApp {
      * @brief Simple point cloud processing functions
      */
     namespace PointCloudProcessors {
+        
         /// Convert pts format
-        ProcessingResult convertPts(const ProcessingTask& task, const PointCloudChunk& chunk);
+        ProcessingResult convertPts(const ProcessingTask& task, const PointCloudChunk& chunk) {
+            ProcessingResult result;
+            result.task_id = task.task_id;
+            result.chunk_id = task.chunk_id;
+            result.success = true;
+
+            try {
+                std::cout << "Converting PTS chunk " << chunk.chunk_id
+                    << " with " << chunk.points.size() << " points" << std::endl;
+
+                // Simple PTS conversion - just copy points with potential format adjustments
+                result.processed_points = chunk.points;
+
+                // Example: Apply coordinate offset if specified in parameters
+                if (!task.parameters.empty() && task.parameters.size() >= sizeof(double) * 3) {
+                    double offset_x, offset_y, offset_z;
+                    std::memcpy(&offset_x, task.parameters.data(), sizeof(double));
+                    std::memcpy(&offset_y, task.parameters.data() + sizeof(double), sizeof(double));
+                    std::memcpy(&offset_z, task.parameters.data() + sizeof(double) * 2, sizeof(double));
+
+                    for (auto& point : result.processed_points) {
+                        point[0] += static_cast<float>(offset_x);
+                        point[1] += static_cast<float>(offset_y);
+                        point[2] += static_cast<float>(offset_z);
+                    }
+
+                    std::cout << "Applied offset: (" << offset_x << ", " << offset_y << ", " << offset_z << ")" << std::endl;
+                }
+
+                std::cout << "PTS conversion completed for " << result.processed_points.size() << " points" << std::endl;
+
+            }
+            catch (const std::exception& e) {
+                result.success = false;
+                result.error_message = "PTS conversion error: " + std::string(e.what());
+            }
+
+            return result;
+        }
 
         /// Simple distance calculation (simplified BIM functionality)
-        ProcessingResult calculateDistance(const ProcessingTask& task, const PointCloudChunk& chunk);
+        ProcessingResult calculateDistance(const ProcessingTask& task, const PointCloudChunk& chunk) {
+            ProcessingResult result;
+            result.task_id = task.task_id;
+            result.chunk_id = task.chunk_id;
+            result.success = true;
+
+            try {
+                std::cout << "Calculating distances for chunk " << chunk.chunk_id
+                    << " with " << chunk.points.size() << " points" << std::endl;
+
+                // Simple distance calculation - calculate distance from origin for each point
+                result.processed_points = chunk.points;
+
+                // Calculate distance from origin and store in intensity field
+                for (auto& point : result.processed_points) {
+                    float distance = static_cast<float>(std::sqrt(point[0] * point[0] + point[1] * point[1] + point[2] * point[2]));
+                }
+
+                std::cout << "Distance calculation completed for " << result.processed_points.size() << " points" << std::endl;
+
+            }
+            catch (const std::exception& e) {
+                result.success = false;
+                result.error_message = "Distance calculation error: " + std::string(e.what());
+            }
+
+            return result;
+        }
+
+        /// PointCloudProcessors 네임스페이스에 함수 추가
+        ProcessingResult testIntegerSum(const ProcessingTask& task, const PointCloudChunk& chunk) {
+            ProcessingResult result;
+            result.task_id = task.task_id;
+            result.chunk_id = task.chunk_id;
+            result.success = true;
+
+            try {
+                // ========== 파라미터 검증 ==========
+                const size_t expected_size = sizeof(int32_t) * 10;  // 40 bytes
+
+                if (task.parameters.size() != expected_size) {
+                    result.success = false;
+                    result.error_message =
+                        "Invalid parameters for TEST_INTEGER_SUM: expected " +
+                        std::to_string(expected_size) + " bytes, got " +
+                        std::to_string(task.parameters.size());
+                    return result;
+                }
+
+                // ========== 파라미터 추출 ==========
+                std::vector<int32_t> integers(10);
+
+                for (int i = 0; i < 10; ++i) {
+                    std::memcpy(&integers[i],
+                        task.parameters.data() + (i * sizeof(int32_t)),
+                        sizeof(int32_t));
+                }
+
+                std::cout << "TEST_INTEGER_SUM Task " << task.task_id
+                    << ": Processing integers [";
+                for (int i = 0; i < 10; ++i) {
+                    std::cout << integers[i];
+                    if (i < 9) std::cout << ", ";
+                }
+                std::cout << "]" << std::endl;
+
+                // ========== 합계 계산 ==========
+                int64_t sum = 0;
+                for (int i = 0; i < 10; ++i) {
+                    sum += integers[i];
+                }
+
+                std::cout << "TEST_INTEGER_SUM Task " << task.task_id
+                    << ": Sum = " << sum << std::endl;
+
+                // ========== 결과 저장 ==========
+                // result_data에 합계를 int64_t로 저장
+                result.result_data.resize(sizeof(int64_t));
+                std::memcpy(result.result_data.data(), &sum, sizeof(int64_t));
+
+                result.success = true;
+
+            }
+            catch (const std::exception& e) {
+                result.success = false;
+                result.error_message = "TEST_INTEGER_SUM error: " + std::string(e.what());
+            }
+
+            return result;
+        }
     }
 
     ///
@@ -909,6 +1061,10 @@ namespace DPApp {
                 result = PointCloudProcessors::calculateDistance(task, chunk);
                 break;
 
+            case TaskType::TEST_INTEGER_SUM:
+                result = PointCloudProcessors::testIntegerSum(task, chunk);
+                break;
+
             default:
                 result.success = false;
                 result.error_message = "Unsupported task type: " + std::string(taskStr(task.task_type));
@@ -946,13 +1102,15 @@ namespace DPApp {
     std::vector<TaskType> TaskProcessor::getSupportedTaskTypes() const {
         return { 
             TaskType::CONVERT_PTS, 
-            TaskType::BIM_DISTANCE_CALCULATION
+            TaskType::BIM_DISTANCE_CALCULATION,
+            TaskType::TEST_INTEGER_SUM
         };
     }
 
     bool TaskProcessor::supportsTaskType(const TaskType task_type) const {
         return task_type == TaskType::CONVERT_PTS || 
-               task_type == TaskType::BIM_DISTANCE_CALCULATION;
+               task_type == TaskType::BIM_DISTANCE_CALCULATION ||
+               task_type == TaskType::TEST_INTEGER_SUM;
     }
 
     namespace util {
@@ -963,80 +1121,7 @@ namespace DPApp {
             return utf8str;
         }
     }
-    /// PointCloudProcessors Implementation
-    namespace PointCloudProcessors {
-
-        ProcessingResult convertPts(const ProcessingTask& task, const PointCloudChunk& chunk) {
-            ProcessingResult result;
-            result.task_id = task.task_id;
-            result.chunk_id = task.chunk_id;
-            result.success = true;
-
-            try {
-                std::cout << "Converting PTS chunk " << chunk.chunk_id
-                    << " with " << chunk.points.size() << " points" << std::endl;
-
-                // Simple PTS conversion - just copy points with potential format adjustments
-                result.processed_points = chunk.points;
-
-                // Example: Apply coordinate offset if specified in parameters
-                if (!task.parameters.empty() && task.parameters.size() >= sizeof(double) * 3) {
-                    double offset_x, offset_y, offset_z;
-                    std::memcpy(&offset_x, task.parameters.data(), sizeof(double));
-                    std::memcpy(&offset_y, task.parameters.data() + sizeof(double), sizeof(double));
-                    std::memcpy(&offset_z, task.parameters.data() + sizeof(double) * 2, sizeof(double));
-
-                    for (auto& point : result.processed_points) {
-                        point[0] += static_cast<float>(offset_x);
-                        point[1] += static_cast<float>(offset_y);
-                        point[2] += static_cast<float>(offset_z);
-                    }
-
-                    std::cout << "Applied offset: (" << offset_x << ", " << offset_y << ", " << offset_z << ")" << std::endl;
-                }
-
-                std::cout << "PTS conversion completed for " << result.processed_points.size() << " points" << std::endl;
-
-            }
-            catch (const std::exception& e) {
-                result.success = false;
-                result.error_message = "PTS conversion error: " + std::string(e.what());
-            }
-
-            return result;
-        }
-
-        ProcessingResult calculateDistance(const ProcessingTask& task, const PointCloudChunk& chunk) {
-            ProcessingResult result;
-            result.task_id = task.task_id;
-            result.chunk_id = task.chunk_id;
-            result.success = true;
-
-            try {
-                std::cout << "Calculating distances for chunk " << chunk.chunk_id
-                    << " with " << chunk.points.size() << " points" << std::endl;
-
-                // Simple distance calculation - calculate distance from origin for each point
-                result.processed_points = chunk.points;
-
-                // Calculate distance from origin and store in intensity field
-                for (auto& point : result.processed_points) {
-                    float distance = static_cast<float>(std::sqrt(point[0] * point[0] + point[1] * point[1] + point[2] * point[2]));
-                }
-
-                std::cout << "Distance calculation completed for " << result.processed_points.size() << " points" << std::endl;
-
-            }
-            catch (const std::exception& e) {
-                result.success = false;
-                result.error_message = "Distance calculation error: " + std::string(e.what());
-            }
-
-            return result;
-        }
-
-    } // namespace PointCloudProcessors
-
+    
     namespace Pt2MeshProcessors {
         bool convert_gltf2nodes2(const std::string& dataset_name,
             const std::string& bim_folder,

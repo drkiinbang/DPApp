@@ -18,7 +18,7 @@ enum class TaskType : uint8_t { UNKNOWN = 0
     , CONVERT_PTS = 1
     , BIM_DISTANCE_CALCULATION = 2
     , BIM_PC2_DIST = 3
-    , TEST_INTEGER_SUM
+    , TEST_INTEGER_SUM = 4
     };
 
 /// TaskType to string

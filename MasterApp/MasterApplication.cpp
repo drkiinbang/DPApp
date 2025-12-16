@@ -1,4 +1,4 @@
-#include <iostream>
+﻿#include <iostream>
 #include <string>
 #include <thread>
 #include <chrono>
@@ -96,6 +96,15 @@ public:
             handleTaskFailed(task, error);
             });
 
+        if (server_) {
+            auto connected_clients = server_->getConnectedClients();
+            for (const auto& client_id : connected_clients) {
+                task_manager_->registerSlave(client_id);
+                ILOG << "Auto-registered existing slave: " << client_id;
+            }
+            ILOG << "Registered " << connected_clients.size() << " existing slaves to TaskManager";
+        }
+
         ILOG << "TaskManager initialized for task type: " << taskStr(task_type);
         return true;
     }
@@ -183,6 +192,112 @@ public:
         else {
             runInteractive();
         }
+    }
+
+    void runTestIntegerSum(int num_chunks = 3) {
+        std::cout << "\n" << std::string(70, '=') << std::endl;
+        std::cout << "TEST: Integer Sum Calculation" << std::endl;
+        std::cout << std::string(70, '=') << std::endl;
+
+        /// ========== 파라미터 생성 ==========
+        std::vector<int32_t> test_integers = { 1, 5, 3, 7, 2, 8, 4, 6, 9, 10 };
+
+        int64_t expected_sum = 0;
+        for (int32_t val : test_integers) {
+            expected_sum += val;
+        }
+
+        std::cout << "Test integers: [";
+        for (size_t i = 0; i < test_integers.size(); ++i) {
+            std::cout << test_integers[i];
+            if (i < test_integers.size() - 1) std::cout << ", ";
+        }
+        std::cout << "]" << std::endl;
+        std::cout << "Expected sum per Slave: " << expected_sum << std::endl;
+
+        /// ========== 파라미터 직렬화 ==========
+        std::vector<uint8_t> test_params(sizeof(int32_t) * 10);
+        for (size_t i = 0; i < test_integers.size(); ++i) {
+            std::memcpy(test_params.data() + (i * sizeof(int32_t)),
+                &test_integers[i],
+                sizeof(int32_t));
+        }
+
+        /// ========== TaskManager 초기화 ==========
+        if (!initializeTaskManager(TaskType::TEST_INTEGER_SUM)) {
+            std::cerr << "Failed to initialize TaskManager" << std::endl;
+            return;
+        }
+
+        /// ========== 테스트 작업 생성 ==========
+        std::cout << "Creating " << num_chunks << " TEST tasks..." << std::endl;
+        for (int i = 0; i < num_chunks; ++i) {
+            uint32_t task_id = task_manager_->addTask(static_cast<uint32_t>(i), test_params);
+            std::cout << "Created task " << task_id << std::endl;
+        }
+
+        /// ========== 작업 완료 대기 ==========
+        std::cout << "Waiting for tasks to complete..." << std::endl;
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+
+        auto start_time = std::chrono::steady_clock::now();
+        const auto timeout = std::chrono::seconds(60);
+
+        while (task_manager_->getActiveTaskCount() > 0 &&
+            std::chrono::steady_clock::now() - start_time < timeout) {
+            auto active_count = task_manager_->getActiveTaskCount();
+            std::cout << "  Active tasks: " << active_count << std::endl;
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        }
+
+        // ========== 결과 수집 및 처리 ==========
+        std::cout << "\n" << std::string(70, '-') << std::endl;
+        std::cout << "TEST RESULTS" << std::endl;
+        std::cout << std::string(70, '-') << std::endl;
+
+        auto results = task_manager_->getCompletedResults();
+
+        int64_t total_sum = 0;
+        int success_count = 0;
+        int fail_count = 0;
+
+        for (const auto& result : results) {
+            if (result.success) {
+                success_count++;
+
+                if (result.result_data.size() >= sizeof(int64_t)) {
+                    int64_t slave_sum = 0;
+                    std::memcpy(&slave_sum, result.result_data.data(), sizeof(int64_t));
+                    total_sum += slave_sum;
+
+                    std::cout << "✓ Task " << result.task_id
+                        << " (chunk " << result.chunk_id << "): Sum = " << slave_sum << std::endl;
+                }
+            }
+            else {
+                fail_count++;
+                std::cout << "✗ Task " << result.task_id << ": FAILED" << std::endl;
+            }
+        }
+
+        // ========== 최종 결과 ==========
+        std::cout << "\n" << std::string(70, '=') << std::endl;
+        std::cout << "SUMMARY" << std::endl;
+        std::cout << std::string(70, '=') << std::endl;
+        std::cout << "Total tasks: " << (success_count + fail_count) << std::endl;
+        std::cout << "Successful: " << success_count << std::endl;
+        std::cout << "Failed: " << fail_count << std::endl;
+        std::cout << "Expected per task: " << expected_sum << std::endl;
+        std::cout << "Expected total: " << (expected_sum * success_count) << std::endl;
+        std::cout << "Actual total: " << total_sum << std::endl;
+
+        if (total_sum == expected_sum * success_count) {
+            std::cout << "\n✓✓✓ TEST PASSED! ✓✓✓" << std::endl;
+        }
+        else {
+            std::cout << "\n✗✗✗ TEST FAILED! ✗✗✗" << std::endl;
+        }
+        std::cout << std::string(70, '=') << "\n" << std::endl;
     }
 
     void runDaemon() {
@@ -305,6 +420,7 @@ private:
     void printHelp() {
         ILOG << "";
         ILOG << "=== DPApp Master Console Commands ===";
+        ILOG << "test                     - Test this application using the integer summation taks.";
         ILOG << "load <file> <task_type>  - Load point cloud and create processing tasks.";
         ILOG << "pts2bim_dist <bimfile> <lasfile> <task_type>  - Load bim and las for co-registration.";
         ILOG << "status                   - Show system status";
@@ -324,8 +440,8 @@ private:
         ILOG << "";
         ILOG << "  [Name]                [Description]";
         ILOG << "  --------------------  ----------------------------------------------------";
-        ILOG << "  convert_pts           Convert points with coordinate adjustments";
-        ILOG << "  bim                   Calculate distances from origin";
+        ILOG << "  convert_pts              Convert points with coordinate adjustments";
+        ILOG << "  bim_distance_calculation Calculate distances from origin";
         ILOG << "  ";
         ILOG << "  Note: Only one task type can be processed per session.";
         ILOG << "        Restart the application to change task type.";
@@ -359,6 +475,20 @@ private:
 
                 loadAndProcessPointCloud(filename, task_type);
             }
+        }
+        else if (cmd == "test") {
+            int num_tasks = 3;
+            std::string num_str;
+            if (iss >> num_str) {
+                try {
+                    num_tasks = std::stoi(num_str);
+                }
+                catch (...) {
+                    num_tasks = 3;
+                }
+            }
+            runTestIntegerSum(num_tasks);
+            return;
         }
         else if (cmd == "pts2bim_dist") {
             std::string gltfPath, pc2Path;
@@ -532,16 +662,43 @@ private:
             task.parameters = task_info.parameters;
 
             auto task_data = NetworkUtils::serializeTask(task);
-            auto chunk_data = NetworkUtils::serializeChunk(*task_info.chunk_data);
+            
+            std::vector<uint8_t> chunk_data;
 
+            if (task_info.chunk_data) {
+                // PointCloud 데이터가 있는 경우 (일반 작업: CONVERT_PTS, BIM_DISTANCE_CALCULATION 등)
+                chunk_data = NetworkUtils::serializeChunk(*task_info.chunk_data);
+                ILOG << "Task " << task_info.task_id << " has chunk data ("
+                    << task_info.chunk_data->points.size() << " points)";
+            }
+            else {
+                // PointCloud 데이터가 없는 경우 (TEST_INTEGER_SUM 등 파라미터 기반 작업)
+                ILOG << "Task " << task_info.task_id << " has no chunk data (parameter-based task)";
+                // chunk_data는 빈 벡터로 유지됨
+            }
+
+            // ========== 데이터 결합 ==========
             std::vector<uint8_t> combined_data;
+
+            // Task 데이터 크기 저장 (4 바이트)
             uint32_t task_data_size = static_cast<uint32_t>(task_data.size());
             combined_data.insert(combined_data.end(),
                 reinterpret_cast<uint8_t*>(&task_data_size),
                 reinterpret_cast<uint8_t*>(&task_data_size) + sizeof(uint32_t));
 
+            // Task 데이터 저장
             combined_data.insert(combined_data.end(), task_data.begin(), task_data.end());
-            combined_data.insert(combined_data.end(), chunk_data.begin(), chunk_data.end());
+
+            // Chunk 데이터 크기 저장 (4 바이트) - 새로 추가!
+            uint32_t chunk_data_size = static_cast<uint32_t>(chunk_data.size());
+            combined_data.insert(combined_data.end(),
+                reinterpret_cast<uint8_t*>(&chunk_data_size),
+                reinterpret_cast<uint8_t*>(&chunk_data_size) + sizeof(uint32_t));
+
+            // Chunk 데이터 저장 (빈 벡터일 수도 있음)
+            if (!chunk_data.empty()) {
+                combined_data.insert(combined_data.end(), chunk_data.begin(), chunk_data.end());
+            }
 
             NetworkMessage message(MessageType::TASK_ASSIGNMENT, combined_data);
 

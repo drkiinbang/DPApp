@@ -438,60 +438,81 @@ private:
 
     void handleTaskAssignment(const NetworkMessage& message) {
         try {
-            const std::vector<uint8_t>& combined_data = message.data;
+            const uint8_t* data = message.data.data();
+            size_t offset = 0;
 
-            // Check the size of combined_data
-            if (combined_data.size() < sizeof(uint32_t)) {
-                throw std::runtime_error("Message too small to contain task data size");
+            // ========== 1단계: Task 데이터 크기 읽기 ==========
+            if (offset + sizeof(uint32_t) > message.data.size()) {
+                ELOG << "Error: Message too small to read task data size";
+                return;
             }
+            uint32_t task_data_size = *reinterpret_cast<const uint32_t*>(data + offset);
+            offset += sizeof(uint32_t);
 
-            // Read the first 4 bytes
-            uint32_t task_data_size = 0;
-            std::memcpy(&task_data_size, combined_data.data(), sizeof(uint32_t));
-
-            size_t offset = sizeof(uint32_t);
-            if (combined_data.size() < offset + task_data_size) {
-                throw std::runtime_error("Message is smaller than expected task data size");
+            // ========== 2단계: Task 데이터 추출 ==========
+            if (offset + task_data_size > message.data.size()) {
+                ELOG << "Error: Message too small to read task data";
+                return;
             }
-
-            // Extract task data and deserialize
-            std::vector<uint8_t> task_data(combined_data.begin() + offset, combined_data.begin() + offset + task_data_size);
-            ProcessingTask task = NetworkUtils::deserializeTask(task_data);
-
-            // Update offset
+            std::vector<uint8_t> task_data(data + offset, data + offset + task_data_size);
             offset += task_data_size;
-            if (combined_data.size() <= offset) {
-                throw std::runtime_error("No chunk data found after task data");
+
+            // ========== 3단계: Chunk 데이터 크기 읽기 ==========
+            uint32_t chunk_data_size = 0;
+            if (offset + sizeof(uint32_t) <= message.data.size()) {
+                chunk_data_size = *reinterpret_cast<const uint32_t*>(data + offset);
+                offset += sizeof(uint32_t);
             }
 
-            // Deserialize the rest data (chunk_data)
-            std::vector<uint8_t> chunk_data(combined_data.begin() + offset, combined_data.end());
-            PointCloudChunk chunk = NetworkUtils::deserializeChunk(chunk_data);
-
-            // Add task to queue
-            {
-                std::lock_guard<std::mutex> lock(task_queue_mutex_);
-                task_queue_.emplace(task, chunk);
+            // ========== 4단계: Chunk 데이터 추출 ==========
+            std::vector<uint8_t> chunk_data;
+            if (chunk_data_size > 0) {
+                if (offset + chunk_data_size > message.data.size()) {
+                    ELOG << "Error: Message too small to read chunk data";
+                    return;
+                }
+                chunk_data.assign(data + offset, data + offset + chunk_data_size);
+                offset += chunk_data_size;
             }
 
-            task_queue_cv_.notify_one();
+            // ========== Task 역직렬화 ==========
+            ProcessingTask task = NetworkUtils::deserializeTask(task_data);
 
             ILOG << "Received task " << task.task_id
                 << " (type: " << taskStr(task.task_type)
-                << ", chunk: " << chunk.chunk_id
-                << ", points: " << chunk.points.size() << ")";
+                << ", chunk_data_size: " << chunk_data_size << " bytes)";
 
+            // ========== Chunk 데이터 처리 ==========
+            PointCloudChunk chunk;
+            if (!chunk_data.empty()) {
+                // PointCloud 데이터가 있는 경우
+                chunk = NetworkUtils::deserializeChunk(chunk_data);
+                ILOG << "Task " << task.task_id << " includes chunk with "
+                    << chunk.points.size() << " points";
+            }
+            else {
+                // PointCloud 데이터가 없는 경우 (파라미터 기반 작업)
+                ILOG << "Task " << task.task_id << " has no chunk data (parameter-based)";
+                chunk.chunk_id = task.chunk_id;
+                chunk.points.clear();  // 빈 포인트 클라우드
+            }
+
+            // ========== 작업 처리 ==========
+            ProcessingResult result = task_processor_->processTask(task, chunk);
+
+            // ========== 결과 전송 ==========
+            if (result.success) {
+                ILOG << "Task " << task.task_id << " completed successfully";
+            }
+            else {
+                WLOG << "Task " << task.task_id << " failed: " << result.error_message;
+            }
+
+            // 결과를 Master로 전송...
+            sendTaskResult(result);
         }
         catch (const std::exception& e) {
-            ELOG << "Error processing task assignment: " << e.what();
-
-            // Send error response
-            ProcessingResult error_result;
-            error_result.task_id = 0; // Unknown due to parsing failure
-            error_result.chunk_id = 0;
-            error_result.success = false;
-            error_result.error_message = "Task assignment parsing failed: " + std::string(e.what());
-            sendTaskResult(error_result);
+            ELOG << "Error handling task assignment: " << e.what();
         }
     }
 
