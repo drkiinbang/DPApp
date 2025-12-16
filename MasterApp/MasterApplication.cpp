@@ -681,7 +681,7 @@ private:
 
         for (const auto& result : results) {
             for (const auto& point : result.processed_points) {
-                outfile << point.x << " " << point.y << " " << point.z;
+                outfile << point[0] << " " << point[1] << " " << point[2];
 
                 outfile << "\n";
                 total_points++;
@@ -1128,7 +1128,7 @@ private:
 
         for (const auto& result : results) {
             for (const auto& point : result.processed_points) {
-                outfile << point.x << " " << point.y << " " << point.z;
+                outfile << point[0] << " " << point[1] << " " << point[2];
 
                 outfile << "\n";
                 total_points++;
