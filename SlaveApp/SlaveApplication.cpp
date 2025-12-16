@@ -711,7 +711,7 @@ void signalHandler(int signal) {
     if (g_app) {
         g_app->stop();
     }
-    exit(0);
+    //exit(0);
 }
 
 int main(int argc, char* argv[]) {
