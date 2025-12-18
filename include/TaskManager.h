@@ -36,6 +36,8 @@
 #include "LaslibReader.hpp"
 #include "Pc2Reader.hpp"
 #include "bimtree/nanoflann.hpp"
+#include "../../BimImport/BimImport.h"
+#include "bim/MeshChunk.h"
 
 namespace fs = std::filesystem;
 
@@ -83,6 +85,7 @@ namespace DPApp {
         uint32_t max_retries;
         std::vector<uint8_t> parameters;
         std::shared_ptr<PointCloudChunk> chunk_data;
+        std::shared_ptr<BimPcChunk> bimpc_chunk_data;
 
         TaskInfo() : task_id(0), chunk_id(0), task_type(TaskType::CONVERT_PTS),
             priority(TaskPriority::NORMAL), status(TaskStatus::PENDING),
@@ -136,9 +139,11 @@ namespace DPApp {
             const std::string& file_path,
             uint32_t max_points_per_chunk = MAX_NUM_PTS_CHUNK);
 
-        std::vector<std::shared_ptr<PointCloudChunk>> loadXYZFileStreaming(const std::string& file_path, uint32_t max_points_per_chunk);
+        std::vector<std::shared_ptr<PointCloudChunk>> loadXYZFileStreaming(
+            const std::string& file_path, uint32_t max_points_per_chunk);
 
-        std::vector<std::shared_ptr<PointCloudChunk>> loadLasFileStreaming(const std::string& file_path, uint32_t max_points_per_chunk);
+        std::vector<std::shared_ptr<PointCloudChunk>> loadLasFileStreaming(
+            const std::string& file_path, uint32_t max_points_per_chunk);
     }
 
     /**
@@ -187,17 +192,62 @@ namespace DPApp {
 
             TaskInfo task_info;
             task_info.task_id = task_id;
-            task_info.chunk_id = chunk->chunk_id;
-            task_info.task_type = current_task_type_;    // Use session task type
-            task_info.priority = TaskPriority::NORMAL;   // All tasks same priority
-            task_info.parameters = task_parameters_;     // Use session parameters
-            task_info.chunk_data = chunk;
+            task_info.chunk_id = bimpc_chunk->chunk_id;
+            task_info.task_type = current_task_type_;
+            task_info.priority = TaskPriority::NORMAL;
+            task_info.parameters = task_parameters_;
+            task_info.chunk_data = nullptr; /// [ToDo] not used
+            task_info.bimpc_chunk_data = bimpc_chunk;    /// BimPcChunk
 
             tasks_[task_id] = std::move(task_info);
 
-            std::cout << "Task added: " << task_id << " (" << taskStr(current_task_type_) << ")" << std::endl;
+            std::cout << "Task added (BimPc): " << task_id
+                << " (" << taskStr(current_task_type_) << ")"
+                << " - points: " << bimpc_chunk->points.size()
+                << ", vertices: " << bimpc_chunk->bim.vertices.size()
+                << ", indices: " << bimpc_chunk->bim.faces.size() << " faces"
+                << std::endl;
 
             return task_id;
+        }
+
+        uint32_t addTask(std::shared_ptr<PointCloudChunk> pc_chunk) {
+            std::lock_guard<std::mutex> lock(tasks_mutex_);
+
+            uint32_t task_id = next_task_id_++;
+
+            TaskInfo task_info;
+            task_info.task_id = task_id;
+            task_info.chunk_id = pc_chunk->chunk_id;
+            task_info.task_type = current_task_type_;
+            task_info.priority = TaskPriority::NORMAL;
+            task_info.parameters = task_parameters_;
+            task_info.chunk_data = pc_chunk; /// pc chunk
+            task_info.bimpc_chunk_data = nullptr;    /// empty
+
+            tasks_[task_id] = std::move(task_info);
+
+            std::cout << "Task added (BimPc): " << task_id
+                << " (" << taskStr(current_task_type_) << ")"
+                << " - points: " << pc_chunk->points.size()
+                << std::endl;
+
+            return task_id;
+        }
+
+        void addBimPcResult(const BimPcResult& result) {
+            std::lock_guard<std::mutex> lock(results_mutex_);
+            bimpc_results_.push_back(result);
+        }
+
+        const std::vector<BimPcResult> getBimPcResults() {
+            std::lock_guard<std::mutex> lock(results_mutex_);
+            return bimpc_results_;
+        }
+
+        void clearBimPcResults() {
+            std::lock_guard<std::mutex> lock(results_mutex_);
+            bimpc_results_.clear();
         }
 
         /**
@@ -656,6 +706,7 @@ namespace DPApp {
         std::map<uint32_t, TaskInfo> tasks_;
         std::map<std::string, SlaveWorkerInfo> slaves_;
         std::vector<ProcessingResult> completed_results_;
+        std::vector<BimPcResult> bimpc_results_;
 
         std::mutex tasks_mutex_;
         std::mutex slaves_mutex_;
@@ -681,6 +732,9 @@ namespace DPApp {
         // Task processing - handles both supported task types internally
         ProcessingResult processTask(const ProcessingTask& task, const PointCloudChunk& chunk);
 
+        /// BimPcChunk processing
+        BimPcResult processTask(const ProcessingTask& task, const BimPcChunk& chunk);
+
         // Supported task type queries
         std::vector<TaskType> getSupportedTaskTypes() const;
         bool supportsTaskType(const TaskType task_type) const;
@@ -705,6 +759,10 @@ namespace DPApp {
 
         /// Simple distance calculation (simplified BIM functionality)
         ProcessingResult calculateDistance(const ProcessingTask& task, const PointCloudChunk& chunk);
+    }
+
+    namespace BimPcProcessors {
+        BimPcResult processBimPc(const ProcessingTask& task, const BimPcChunk& chunk);
     }
 
     ///
@@ -879,6 +937,49 @@ namespace DPApp {
             return chunks;
         }
 
+        bool loadLasFileStreaming(const std::string& file_path, std::vector<Point3D>& pc)
+        {
+            try {
+                las::LASToolsReader lasReader;
+
+                if (!lasReader.open(file_path)) {
+                    std::cerr << "Failed to open input file: " << file_path << std::endl;
+                    return false;
+                }
+
+                size_t total_num_points = lasReader.getPointCount();
+
+                if (!lasReader.loadAllPoints()) {
+                    std::cerr << "Failed in loadAllPoints\n";
+                    return false;
+                }
+
+                size_t gap = static_cast<size_t>(total_num_points * 0.1);
+
+                uint32_t chunk_counter = 0;
+                for (const auto& p : lasReader.getLoadedPoints()) {
+                    pc.emplace_back(p.x, p.y, p.z);
+                    chunk_counter++;
+
+                    // Progress reporting (every chunk)
+                    if (chunk_counter % gap == 0) {
+                        std::cout << chunk_counter << " of " << total_num_points << " are loaded.,\n";
+                    }
+                }
+
+                std::cout << pc.size() << " of " << total_num_points << " are loaded.,\n";
+
+                lasReader.close();
+
+                std::cout << "Streaming load completed" << std::endl;
+            }
+            catch (const std::exception& e) {
+                std::cerr << "Error in Las streaming: " << e.what() << std::endl;
+            }
+
+            return true;
+        }
+
     } // namespace PointCloudLoader
 
     /// TaskProcessor Implementation
@@ -931,6 +1032,51 @@ namespace DPApp {
         }
 
         // Update processing time statistics
+        auto end_time = std::chrono::steady_clock::now();
+        auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+            end_time - start_time).count() / 1000.0;
+
+        uint32_t total_tasks = processed_task_count_ + failed_task_count_;
+        if (total_tasks > 0) {
+            avg_processing_time_ = (avg_processing_time_ * (total_tasks - 1) + processing_time) / total_tasks;
+        }
+
+        return result;
+    }
+
+    /// BimPcChunk processTask
+    BimPcResult TaskProcessor::processTask(const ProcessingTask& task, const BimPcChunk& chunk) {
+        auto start_time = std::chrono::steady_clock::now();
+
+        BimPcResult result;
+        result.task_id = task.task_id;
+        result.chunk_id = task.chunk_id;
+
+        try {
+            if (task.task_type == TaskType::BIM_PC2_DIST) {
+                result = BimPcProcessors::processBimPc(task, chunk);
+            }
+            else {
+                result.success = false;
+                result.error_message = "Unsupported task type for BimPcChunk: " +
+                    std::string(taskStr(task.task_type));
+                failed_task_count_++;
+                return result;
+            }
+
+            if (result.success) {
+                processed_task_count_++;
+            }
+            else {
+                failed_task_count_++;
+            }
+        }
+        catch (const std::exception& e) {
+            result.success = false;
+            result.error_message = "Processing error: " + std::string(e.what());
+            failed_task_count_++;
+        }
+
         auto end_time = std::chrono::steady_clock::now();
         auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
             end_time - start_time).count() / 1000.0;
@@ -3303,5 +3449,86 @@ namespace DPApp {
             return true;
         }
     }
-    
+
+    /// BIM–PointCloud processing functions
+    namespace BimPcProcessors {
+
+        ///
+        /// @brief BIM–PointCloud processing function (Dummy)
+        /// TODO: Actual processing logic will be implemented later
+        ///
+        /// @param task Task information to process
+        /// @param chunk BimPcChunk data (PointCloud + Mesh)
+        /// @return BimPcResult Processing result
+        ///
+        BimPcResult processBimPc(const ProcessingTask& task, const BimPcChunk& chunk) {
+            BimPcResult result;
+            result.task_id = task.task_id;
+            result.chunk_id = chunk.chunk_id;
+
+            auto start_time = std::chrono::steady_clock::now();
+
+            try {
+                std::cout << "=== BimPcProcessors::processBimPc ===" << std::endl;
+                std::cout << "Task ID: " << task.task_id << std::endl;
+                std::cout << "Chunk ID: " << chunk.chunk_id << std::endl;
+                std::cout << "Points: " << chunk.points.size() << std::endl;
+                std::cout << "Mesh vertices: " << chunk.bim.vertices.size() / 3 << std::endl;
+                std::cout << "Mesh faces: " << chunk.bim.faces.size() << std::endl;
+
+                /// ========================================
+                /// [ToDo] Implement actual processing logic
+                /// ========================================
+                /// Example:
+                /// - Compute distance from each point to the nearest mesh face
+                /// - Use KD-Tree for efficient spatial search
+                /// - Classify points (inside / outside the mesh)
+                /// ========================================
+
+                /// Generate dummy results
+                result.total_points_processed = static_cast<uint32_t>(chunk.points.size());
+                result.total_faces_processed = static_cast<uint32_t>(chunk.bim.faces.size());
+
+                /// Dummy distance statistics
+                result.min_distance = 0.0;
+                result.max_distance = 100.0;
+                result.avg_distance = 50.0;
+                result.std_deviation = 25.0;
+
+                /// Dummy per-point results (only first few samples)
+                size_t sample_count = (std::min)(chunk.points.size(), static_cast<size_t>(100));
+                result.point_distances.resize(sample_count);
+                result.nearest_face_ids.resize(sample_count);
+
+                for (size_t i = 0; i < sample_count; ++i) {
+                    result.point_distances[i] = static_cast<double>(i % 100);   /// Dummy distance
+                    result.nearest_face_ids[i] = static_cast<int32_t>(i % 10); /// Dummy face ID
+                }
+
+                /// Dummy classification results
+                result.points_within_threshold =
+                    static_cast<uint32_t>(chunk.points.size() * 0.7);
+                result.points_outside_threshold =
+                    static_cast<uint32_t>(chunk.points.size() * 0.3);
+
+                result.success = true;
+
+                std::cout << "Processing completed successfully (DUMMY)" << std::endl;
+                std::cout << "=======================================" << std::endl;
+            }
+            catch (const std::exception& e) {
+                result.success = false;
+                result.error_message =
+                    "BimPc processing error: " + std::string(e.what());
+                std::cerr << "Error: " << result.error_message << std::endl;
+            }
+
+            auto end_time = std::chrono::steady_clock::now();
+            result.processing_time_ms =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    end_time - start_time).count();
+
+            return result;
+        }
+    } /// namespace BimPcProcessors
 } /// namespace DPApp

@@ -15,6 +15,80 @@
 
 using namespace DPApp;
 
+namespace DPApp {
+    namespace PointCloudLoader {
+        std::vector<std::shared_ptr<BimPcChunk>> loadBimPcChunks(const std::string& bim_folder, const std::string& pointcloud_file)
+        {
+            ///
+            /// [ToDo] 새로운 데이터 구조와 함수에 맞추어 수정 필요
+            ///
+
+            std::vector<std::shared_ptr<BimPcChunk>> chunks;
+
+            try {
+                std::cout << "Loading BIM mesh folder: " << bim_folder << std::endl;
+                std::cout << "Loading PointCloud file: " << pointcloud_file << std::endl;
+
+                // 1. Mesh 데이터 로드
+                std::vector<chunkbim::MeshChunk> bimData;
+                auto retval = loadGltf(bim_folder, bimData, 0);
+                std::cout << "Loaded " << bimData.size() << " bim chunks" << std::endl;
+
+                // 2. PointCloud 데이터 로드
+                std::vector<pctree::XYZPoint> pc;
+                if (!loadLasFileStreaming(pointcloud_file, pc))
+                    return chunks;
+
+                size_t numChunks = bimData.size();
+                size_t numChunkPts = pc.size() / numChunks + 1;
+
+                ///
+                /// [ToDo] the following codes should be modified. 
+                /// Search points using a part-mesh bounding box.
+                ///
+                std::vector<std::shared_ptr<PointCloudChunk>> pcChunks = loadLasFileStreaming(pointcloud_file, numChunkPts);
+
+                for (size_t i = 0; i < numChunks; ++i) {
+                    auto bimpc_chunk = std::make_shared<BimPcChunk>();
+
+                    bimpc_chunk->chunk_id = i;
+
+                    // PointCloud 데이터 복사
+                    bimpc_chunk->points.reserve(numChunkPts);
+
+                    for (size_t j = 0; j < numChunkPts; ++j) {
+                        auto idx = j + i * numChunkPts;
+                        if (idx < pc.size()) {
+                            bimpc_chunk->points.push_back(pc[j + i * numChunkPts]);
+                        }
+                        else
+                            break;
+                    }
+
+                    bimpc_chunk->bim = bimData[i];
+
+                    bimpc_chunk->calculateBounds();
+
+                    std::cout << "Created BimPcChunk " << bimpc_chunk->chunk_id
+                        << " - points: " << bimpc_chunk->points.size()
+                        << ", vertices: " << bimpc_chunk->bim.vertices.size()
+                        << ", faces: " << bimpc_chunk->bim.faces.size()
+                        << std::endl;
+
+                    chunks.push_back(bimpc_chunk);
+                }
+
+                std::cout << "Created " << chunks.size() << " BimPcChunks" << std::endl;
+            }
+            catch (const std::exception& e) {
+                std::cerr << "Error loading BimPcChunks: " << e.what() << std::endl;
+            }
+
+            return chunks;
+        }
+    }
+}
+
 class MasterApplication {
 private:
     DPApp::RuntimeConfig cfg_;
@@ -194,6 +268,144 @@ public:
         }
     }
 
+    /**
+     * @brief BIM-PointCloud distributed processing execution
+     * @param mesh_folder (GLTF/GLB) bim files
+     * @param pointcloud_file pc file path (*.las)
+     */
+    void runBimPcProcess(const std::string& mesh_folder, const std::string& pointcloud_file) {
+        std::cout << "\n" << std::string(70, '=') << std::endl;
+        std::cout << "BIM-PointCloud Distributed Processing" << std::endl;
+        std::cout << std::string(70, '=') << std::endl;
+        std::cout << "Mesh folder: " << mesh_folder << std::endl;
+        std::cout << "PointCloud file: " << pointcloud_file << std::endl;
+
+        /// ========== Initialize TaskManager ==========
+        if (!initializeTaskManager(TaskType::BIM_PC2_DIST)) {
+            std::cerr << "Failed to initialize TaskManager" << std::endl;
+            return;
+        }
+
+        /// ========== Check Slave Connections ==========
+        auto slaves = task_manager_->getAllSlaves();
+        if (slaves.empty()) {
+            std::cerr << "WARNING: No slaves connected! Tasks will remain pending." << std::endl;
+            std::cerr << "Please connect at least one slave before running." << std::endl;
+        }
+        else {
+            std::cout << "Connected slaves: " << slaves.size() << std::endl;
+            for (const auto& slave : slaves) {
+                std::cout << "  - " << slave.slave_id << std::endl;
+            }
+        }
+
+        /// ========== Load BimPcChunks ==========
+        std::cout << "\nLoading BIM and PointCloud data..." << std::endl;
+
+        auto chunks = PointCloudLoader::loadBimPcChunks(mesh_folder, pointcloud_file);
+
+        if (chunks.empty()) {
+            std::cerr << "Failed to load BimPcChunks" << std::endl;
+            return;
+        }
+
+        std::cout << "Created " << chunks.size() << " BimPcChunks" << std::endl;
+
+        /// ========== Create Tasks ==========
+        std::cout << "\nCreating " << chunks.size() << " tasks..." << std::endl;
+        for (const auto& chunk : chunks) {
+            uint32_t task_id = task_manager_->addTask(chunk);
+            ILOG << "Created task " << task_id << " for BimPcChunk " << chunk->chunk_id;
+        }
+
+        /// ========== Wait for Task Completion ==========
+        std::cout << "\nWaiting for tasks to complete..." << std::endl;
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+
+        auto start_time = std::chrono::steady_clock::now();
+        const auto timeout = std::chrono::seconds(300);  /// 5-minute timeout
+
+        while (task_manager_->getPendingTaskCount() > 0 || task_manager_->getActiveTaskCount() > 0) {
+            if (std::chrono::steady_clock::now() - start_time > timeout) {
+                std::cerr << "Timeout waiting for tasks to complete" << std::endl;
+                break;
+            }
+
+            auto pending = task_manager_->getPendingTaskCount();
+            auto active = task_manager_->getActiveTaskCount();
+            auto completed = task_manager_->getCompletedTaskCount();
+
+            std::cout << "  Pending: " << pending
+                << ", Active: " << active
+                << ", Completed: " << completed << std::endl;
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        }
+
+        /// ========== Collect Results ==========
+        std::cout << "\n" << std::string(70, '-') << std::endl;
+        std::cout << "PROCESSING RESULTS" << std::endl;
+        std::cout << std::string(70, '-') << std::endl;
+
+        auto results = task_manager_->getBimPcResults();
+
+        int success_count = 0;
+        int fail_count = 0;
+        double total_processing_time = 0;
+        uint32_t total_points = 0;
+        uint32_t total_faces = 0;
+
+        for (const auto& result : results) {
+            if (result.success) {
+                success_count++;
+                total_processing_time += result.processing_time_ms;
+                total_points += result.total_points_processed;
+                total_faces += result.total_faces_processed;
+
+                std::cout << "+ Task " << result.task_id
+                    << " (chunk " << result.chunk_id << "): "
+                    << result.total_points_processed << " points, "
+                    << result.total_faces_processed << " faces, "
+                    << result.processing_time_ms << "ms" << std::endl;
+
+                std::cout << "    Distance: min=" << result.min_distance
+                    << ", max=" << result.max_distance
+                    << ", avg=" << result.avg_distance << std::endl;
+
+                std::cout << "    Classification: within=" << result.points_within_threshold
+                    << ", outside=" << result.points_outside_threshold << std::endl;
+            }
+            else {
+                fail_count++;
+                std::cout << "x Task " << result.task_id
+                    << " (chunk " << result.chunk_id << "): FAILED - "
+                    << result.error_message << std::endl;
+            }
+        }
+
+        /// ========== Final Summary ==========
+        std::cout << "\n" << std::string(70, '=') << std::endl;
+        std::cout << "SUMMARY" << std::endl;
+        std::cout << std::string(70, '=') << std::endl;
+        std::cout << "Total chunks: " << chunks.size() << std::endl;
+        std::cout << "Successful: " << success_count << std::endl;
+        std::cout << "Failed: " << fail_count << std::endl;
+        std::cout << "Total points processed: " << total_points << std::endl;
+        std::cout << "Total faces processed: " << total_faces << std::endl;
+        std::cout << "Total processing time: " << total_processing_time << " ms" << std::endl;
+
+        if (success_count == static_cast<int>(chunks.size())) {
+            std::cout << "\n+++ ALL TASKS COMPLETED SUCCESSFULLY +++" << std::endl;
+        }
+        else if (success_count > 0) {
+            std::cout << "\n*** PARTIAL SUCCESS ***" << std::endl;
+        }
+        else {
+            std::cout << "\nxxx ALL TASKS FAILED xxx" << std::endl;
+        }
+        std::cout << std::string(70, '=') << "\n" << std::endl;
+    }
+
     void runDaemon() {
         ILOG << "Master server running in daemon mode...";
         ILOG << "REST API: http://localhost:" << api_port_ << "/api";
@@ -314,30 +526,24 @@ private:
     void printHelp() {
         ILOG << "";
         ILOG << "=== DPApp Master Console Commands ===";
-        ILOG << "load <file> <task_type>  - Load point cloud and create processing tasks.";
-        ILOG << "pts2bim_dist <bimfile> <lasfile> <task_type>  - Load bim and las for co-registration.";
-        ILOG << "status                   - Show system status";
-        ILOG << "slaves                   - List connected slaves";
-        ILOG << "tasks                    - List all tasks";
-        ILOG << "progress                 - Show overall progress";
-        ILOG << "results                  - Show completed results count";
-        ILOG << "save <file>              - Save merged results to file";
-        ILOG << "clear                    - Clear all completed tasks";
-        ILOG << "shutdown [slave_id]      - Shutdown specific slave or all slaves";
-        ILOG << "help                     - Show this help";
-        ILOG << "quit                     - Stop and exit";
+        ILOG << "bimpc <mesh_folder> <pc_file>  - Process BIM mesh + PointCloud";  // ★ 추가
+        ILOG << "load <file> <task_type>        - Load file and create tasks";
+        ILOG << "status                         - Show system status";
+        ILOG << "slaves                         - List connected slaves";
+        ILOG << "tasks                          - List all tasks";
+        ILOG << "progress                       - Show overall progress";
+        ILOG << "results                        - Show completed results count";
+        ILOG << "save <file>                    - Save merged results to file";
+        ILOG << "clear                          - Clear all completed tasks";
+        ILOG << "shutdown [slave_id]            - Shutdown specific slave or all";
+        ILOG << "help                           - Show this help";
+        ILOG << "quit                           - Stop and exit";
         ILOG << "=====================================";
         ILOG << "";
-        ILOG << "--- Available Task Types (one per session) ---";
-        ILOG << "  Usage for 'load': load C:/data/scan.xyz <task_type_name>";
-        ILOG << "";
-        ILOG << "  [Name]                [Description]";
-        ILOG << "  --------------------  ----------------------------------------------------";
-        ILOG << "  convert_pts           Convert points with coordinate adjustments";
-        ILOG << "  bim                   Calculate distances from origin";
-        ILOG << "  ";
-        ILOG << "  Note: Only one task type can be processed per session.";
-        ILOG << "        Restart the application to change task type.";
+        ILOG << "--- BIM-PointCloud Processing ---";
+        ILOG << "  bimpc C:/data/meshes C:/data/scan.las";
+        ILOG << "  - mesh_folder: Folder containing .gltf/.glb files";
+        ILOG << "  - pc_file: PointCloud file (.las, .xyz, .pts)";
         ILOG << "";
     }
 
@@ -346,7 +552,20 @@ private:
         std::string cmd;
         iss >> cmd;
 
-        if (cmd == "load") {
+        if (cmd == "bimpc") {
+            std::string mesh_folder, pc_file;
+            iss >> mesh_folder >> pc_file;
+
+            if (mesh_folder.empty() || pc_file.empty()) {
+                WLOG << "Usage: bimpc <mesh_folder> <pointcloud_file>";
+                WLOG << "Example: bimpc C:/data/meshes C:/data/scan.las";
+            }
+            else {
+                runBimPcProcess(mesh_folder, pc_file);
+            }
+            return;
+        }
+        else if (cmd == "load") {
             std::string filename, task_type_str;
             iss >> filename >> task_type_str;
 
@@ -486,9 +705,38 @@ private:
 
     void handleTaskResult(const NetworkMessage& message, const std::string& client_id) {
         try {
-            ProcessingResult result = NetworkUtils::deserializeResult(message.data);
-            if (task_manager_) {
-                task_manager_->completeTask(result.task_id, result);
+            /// Read the result type flag from the message
+            if (message.data.size() < 1) {
+                ELOG << "Invalid task result message from " << client_id;
+                return;
+            }
+
+            uint8_t is_bimpc_result = message.data[0];
+            std::vector<uint8_t> result_data(message.data.begin() + 1, message.data.end());
+
+            if (is_bimpc_result) {
+                /// Handle BimPcResult
+                BimPcResult result = NetworkUtils::deserializeBimPcResult(result_data);
+                if (task_manager_) {
+                    task_manager_->addBimPcResult(result);
+
+                    /// Update status by calling existing completeTask as well
+                    ProcessingResult simple_result;
+                    simple_result.task_id = result.task_id;
+                    simple_result.chunk_id = result.chunk_id;
+                    simple_result.success = result.success;
+                    simple_result.error_message = result.error_message;
+                    task_manager_->completeTask(result.task_id, simple_result);
+                }
+                ILOG << "BimPcResult received for task " << result.task_id
+                    << " from " << client_id;
+            }
+            else {
+                /// Handle standard ProcessingResult
+                ProcessingResult result = NetworkUtils::deserializeResult(result_data);
+                if (task_manager_) {
+                    task_manager_->completeTask(result.task_id, result);
+                }
             }
         }
         catch (const std::exception& e) {
@@ -507,6 +755,16 @@ private:
     }
 
     void createTasksFromChunks(const std::vector<std::shared_ptr<PointCloudChunk>>& chunks) {
+        ILOG << "Creating " << chunks.size() << " tasks for " << taskStr(current_task_type_);
+
+        for (const auto& chunk_ptr : chunks) {
+            uint32_t task_id = task_manager_->addTask(chunk_ptr);
+            ILOG << "Created task " << task_id << " for chunk " << chunk_ptr->chunk_id
+                << " (" << chunk_ptr->points.size() << " points)";
+        }
+    }
+
+    void createTasksFromChunks(const std::vector<std::shared_ptr<BimPcChunk>>& chunks) {
         ILOG << "Creating " << chunks.size() << " tasks for " << taskStr(current_task_type_);
 
         for (const auto& chunk_ptr : chunks) {
@@ -541,22 +799,55 @@ private:
             task.parameters = task_info.parameters;
 
             auto task_data = NetworkUtils::serializeTask(task);
-            auto chunk_data = NetworkUtils::serializeChunk(*task_info.chunk_data);
+            std::vector<uint8_t> chunk_data;
 
+            /// Serialize specific chunk based on TaskType
+            bool is_bimpc_task = (task_info.task_type == TaskType::BIM_PC2_DIST &&
+                task_info.bimpc_chunk_data != nullptr);
+
+            if (is_bimpc_task) {
+                chunk_data = NetworkUtils::serializeBimPcChunk(*task_info.bimpc_chunk_data);
+                ILOG << "Task " << task_info.task_id << " has BimPcChunk data ("
+                    << task_info.bimpc_chunk_data->points.size() << " points, "
+                    << task_info.bimpc_chunk_data->bim.faces.size() << " faces)";
+            }
+            else if (task_info.chunk_data) {
+                chunk_data = NetworkUtils::serializeChunk(*task_info.chunk_data);
+                ILOG << "Task " << task_info.task_id << " has PointCloudChunk data ("
+                    << task_info.chunk_data->points.size() << " points)";
+            }
+            else {
+                ILOG << "Task " << task_info.task_id << " has no chunk data";
+            }
+
+            /// Combine data
             std::vector<uint8_t> combined_data;
+
+            /// Task data size and payload
             uint32_t task_data_size = static_cast<uint32_t>(task_data.size());
             combined_data.insert(combined_data.end(),
                 reinterpret_cast<uint8_t*>(&task_data_size),
                 reinterpret_cast<uint8_t*>(&task_data_size) + sizeof(uint32_t));
-
             combined_data.insert(combined_data.end(), task_data.begin(), task_data.end());
-            combined_data.insert(combined_data.end(), chunk_data.begin(), chunk_data.end());
+
+            /// is_bimpc flag (1 byte)
+            uint8_t is_bimpc_flag = is_bimpc_task ? 1 : 0;
+            combined_data.push_back(is_bimpc_flag);
+
+            /// Chunk data size and payload
+            uint32_t chunk_data_size = static_cast<uint32_t>(chunk_data.size());
+            combined_data.insert(combined_data.end(),
+                reinterpret_cast<uint8_t*>(&chunk_data_size),
+                reinterpret_cast<uint8_t*>(&chunk_data_size) + sizeof(uint32_t));
+
+            if (!chunk_data.empty()) {
+                combined_data.insert(combined_data.end(), chunk_data.begin(), chunk_data.end());
+            }
 
             NetworkMessage message(MessageType::TASK_ASSIGNMENT, combined_data);
 
             if (server_->sendMessage(task_info.assigned_slave, message)) {
-                ILOG << "Task " << task_info.task_id
-                    << " sent to " << task_info.assigned_slave;
+                ILOG << "Task " << task_info.task_id << " sent to " << task_info.assigned_slave;
             }
             else {
                 ELOG << "Failed to send task " << task_info.task_id

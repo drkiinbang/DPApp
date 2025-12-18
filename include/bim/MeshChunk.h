@@ -31,6 +31,32 @@ namespace chunkbim {
 		std::vector<FaceVtx> faces;
 		std::string name;
 		int id;
+
+        /// Bounding box
+        float min_x, min_y, min_z;
+        float max_x, max_y, max_z;
+
+        void calculateBounds() {
+            if (vertices.empty()) {
+                min_x = min_y = min_z = 0;
+                max_x = max_y = max_z = 0;
+                return;
+            }
+
+            min_x = max_x = vertices[0][0];
+            min_y = max_y = vertices[0][1];
+            min_z = max_z = vertices[0][2];
+
+            for (const auto& point : vertices) {
+                min_x = (std::min)(min_x, point[0]);
+                min_y = (std::min)(min_y, point[1]);
+                min_z = (std::min)(min_z, point[2]);
+
+                max_x = (std::max)(max_x, point[0]);
+                max_y = (std::max)(max_y, point[1]);
+                max_z = (std::max)(max_z, point[2]);
+            }
+        }
 	};
 }
 

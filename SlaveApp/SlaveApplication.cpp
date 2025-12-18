@@ -269,10 +269,15 @@ private:
     struct TaskQueueItem {
         ProcessingTask task;
         PointCloudChunk chunk;
-        std::chrono::steady_clock::time_point received_time;
+        BimPcChunk bimpc_chunk;
+        bool is_bimpc;
 
+        TaskQueueItem() : is_bimpc(false) {}
         TaskQueueItem(const ProcessingTask& t, const PointCloudChunk& c)
-            : task(t), chunk(c), received_time(std::chrono::steady_clock::now()) {
+            : task(t), chunk(c), is_bimpc(false) {
+        }
+        TaskQueueItem(const ProcessingTask& t, const BimPcChunk& bc)
+            : task(t), bimpc_chunk(bc), is_bimpc(true) {
         }
     };
 
@@ -438,60 +443,76 @@ private:
 
     void handleTaskAssignment(const NetworkMessage& message) {
         try {
-            const std::vector<uint8_t>& combined_data = message.data;
+            const uint8_t* data = message.data.data();
+            size_t offset = 0;
 
-            // Check the size of combined_data
-            if (combined_data.size() < sizeof(uint32_t)) {
-                throw std::runtime_error("Message too small to contain task data size");
-            }
-
-            // Read the first 4 bytes
+            /// 1. Read Task data size
             uint32_t task_data_size = 0;
-            std::memcpy(&task_data_size, combined_data.data(), sizeof(uint32_t));
+            std::memcpy(&task_data_size, data + offset, sizeof(uint32_t));
+            offset += sizeof(uint32_t);
 
-            size_t offset = sizeof(uint32_t);
-            if (combined_data.size() < offset + task_data_size) {
-                throw std::runtime_error("Message is smaller than expected task data size");
-            }
-
-            // Extract task data and deserialize
-            std::vector<uint8_t> task_data(combined_data.begin() + offset, combined_data.begin() + offset + task_data_size);
-            ProcessingTask task = NetworkUtils::deserializeTask(task_data);
-
-            // Update offset
+            /// 2. Deserialize Task data
+            std::vector<uint8_t> task_buffer(data + offset, data + offset + task_data_size);
             offset += task_data_size;
-            if (combined_data.size() <= offset) {
-                throw std::runtime_error("No chunk data found after task data");
-            }
+            ProcessingTask task = NetworkUtils::deserializeTask(task_buffer);
 
-            // Deserialize the rest data (chunk_data)
-            std::vector<uint8_t> chunk_data(combined_data.begin() + offset, combined_data.end());
-            PointCloudChunk chunk = NetworkUtils::deserializeChunk(chunk_data);
+            /// 3. Read is_bimpc flag
+            uint8_t is_bimpc_flag = data[offset];
+            offset += 1;
 
-            // Add task to queue
-            {
-                std::lock_guard<std::mutex> lock(task_queue_mutex_);
-                task_queue_.emplace(task, chunk);
-            }
-
-            task_queue_cv_.notify_one();
+            /// 4. Read Chunk data size
+            uint32_t chunk_data_size = 0;
+            std::memcpy(&chunk_data_size, data + offset, sizeof(uint32_t));
+            offset += sizeof(uint32_t);
 
             ILOG << "Received task " << task.task_id
                 << " (type: " << taskStr(task.task_type)
-                << ", chunk: " << chunk.chunk_id
-                << ", points: " << chunk.points.size() << ")";
+                << ", is_bimpc: " << (is_bimpc_flag ? "Yes" : "No")
+                << ", chunk_data_size: " << chunk_data_size << " bytes)";
 
+            /// 5. Deserialize Chunk and add to the queue
+            if (is_bimpc_flag && chunk_data_size > 0) {
+                /// Handle BimPcChunk
+                std::vector<uint8_t> chunk_buffer(data + offset, data + offset + chunk_data_size);
+                BimPcChunk bimpc_chunk = NetworkUtils::deserializeBimPcChunk(chunk_buffer);
+
+                ILOG << "Task " << task.task_id << " has BimPcChunk ("
+                    << bimpc_chunk.points.size() << " points, "
+                    << bimpc_chunk.bim.faces.size() << " faces)";
+
+                {
+                    std::lock_guard<std::mutex> lock(task_queue_mutex_);
+                    task_queue_.push(TaskQueueItem(task, bimpc_chunk));
+                }
+                task_queue_cv_.notify_one();
+            }
+            else if (chunk_data_size > 0) {
+                /// Handle PointCloudChunk
+                std::vector<uint8_t> chunk_buffer(data + offset, data + offset + chunk_data_size);
+                PointCloudChunk chunk = NetworkUtils::deserializeChunk(chunk_buffer);
+
+                ILOG << "Task " << task.task_id << " has PointCloudChunk ("
+                    << chunk.points.size() << " points)";
+
+                {
+                    std::lock_guard<std::mutex> lock(task_queue_mutex_);
+                    task_queue_.push(TaskQueueItem(task, chunk));
+                }
+                task_queue_cv_.notify_one();
+            }
+            else {
+                /// Handle case with no chunk data
+                ILOG << "Task " << task.task_id << " has no chunk data";
+
+                {
+                    std::lock_guard<std::mutex> lock(task_queue_mutex_);
+                    task_queue_.push(TaskQueueItem(task, PointCloudChunk()));
+                }
+                task_queue_cv_.notify_one();
+            }
         }
         catch (const std::exception& e) {
-            ELOG << "Error processing task assignment: " << e.what();
-
-            // Send error response
-            ProcessingResult error_result;
-            error_result.task_id = 0; // Unknown due to parsing failure
-            error_result.chunk_id = 0;
-            error_result.success = false;
-            error_result.error_message = "Task assignment parsing failed: " + std::string(e.what());
-            sendTaskResult(error_result);
+            ELOG << "Error handling task assignment: " << e.what();
         }
     }
 
@@ -508,9 +529,9 @@ private:
         ILOG << "Processing thread " << thread_id << " started";
 
         while (running_) {
-            TaskQueueItem item(ProcessingTask{}, PointCloudChunk{});
+            TaskQueueItem item;
 
-            // Get task from queue
+            /// Get task from queqe
             {
                 std::unique_lock<std::mutex> lock(task_queue_mutex_);
                 task_queue_cv_.wait(lock, [this] { return !task_queue_.empty() || !running_; });
@@ -526,41 +547,70 @@ private:
                 }
             }
 
-            ILOG << "Thread " << thread_id << " processing task " << item.task.task_id;
+            ILOG << "Thread " << thread_id << " processing task " << item.task.task_id
+                << " (is_bimpc: " << (item.is_bimpc ? "Yes" : "No") << ")";
 
-            // Process task
             auto start_time = std::chrono::steady_clock::now();
 
-            ProcessingResult result;
-            try {
-                result = task_processor_->processTask(item.task, item.chunk);
+            /// Handle branch processing between BimPcChunk and zPointCloudChunk
+            if (item.is_bimpc) {
+                /// Process BimPcChunk
+                BimPcResult result;
+                try {
+                    result = task_processor_->processTask(item.task, item.bimpc_chunk);
+                }
+                catch (const std::exception& e) {
+                    result.task_id = item.task.task_id;
+                    result.chunk_id = item.task.chunk_id;
+                    result.success = false;
+                    result.error_message = "Processing exception: " + std::string(e.what());
+                }
 
+                auto end_time = std::chrono::steady_clock::now();
+                auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    end_time - start_time).count();
+
+                ILOG << "Thread " << thread_id << " completed BimPc task " << item.task.task_id
+                    << " in " << processing_time << "ms (success: "
+                    << (result.success ? "Yes" : "No") << ")";
+
+                if (!result.success) {
+                    WLOG << "Task " << item.task.task_id << " failed: " << result.error_message;
+                }
+
+                /// Send BimPc result back to Master
+                sendBimPcResult(result);
+                updateStats(result.success, processing_time / 1000.0);
             }
-            catch (const std::exception& e) {
-                result.task_id = item.task.task_id;
-                result.chunk_id = item.task.chunk_id;
-                result.success = false;
-                result.error_message = "Processing exception: " + std::string(e.what());
+            else {
+                /// Process PointCloudChunk
+                ProcessingResult result;
+                try {
+                    result = task_processor_->processTask(item.task, item.chunk);
+                }
+                catch (const std::exception& e) {
+                    result.task_id = item.task.task_id;
+                    result.chunk_id = item.task.chunk_id;
+                    result.success = false;
+                    result.error_message = "Processing exception: " + std::string(e.what());
+                }
+
+                auto end_time = std::chrono::steady_clock::now();
+                auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    end_time - start_time).count();
+
+                ILOG << "Thread " << thread_id << " completed task " << item.task.task_id
+                    << " in " << processing_time << "ms (success: "
+                    << (result.success ? "Yes" : "No") << ")";
+
+                if (!result.success) {
+                    WLOG << "Task " << item.task.task_id << " failed: " << result.error_message;
+                }
+
+                /// Send result back to Master
+                sendTaskResult(result);
+                updateStats(result.success, processing_time / 1000.0);
             }
-
-            auto end_time = std::chrono::steady_clock::now();
-
-            auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-                end_time - start_time).count();
-
-            ILOG << "Thread " << thread_id << " completed task " << item.task.task_id
-                << " in " << processing_time << "ms (success: "
-                << (result.success ? "Yes" : "No") << ")";
-
-            if (!result.success) {
-                WLOG << "Task " << item.task.task_id << " failed: " << result.error_message;
-            }
-
-            // Send result to master
-            sendTaskResult(result);
-
-            // Update statistics
-            updateStats(result.success, processing_time / 1000.0);
         }
 
         ILOG << "Processing thread " << thread_id << " stopped";
@@ -569,7 +619,13 @@ private:
     void sendTaskResult(const ProcessingResult& result) {
         try {
             std::vector<uint8_t> result_data = NetworkUtils::serializeResult(result);
-            NetworkMessage message(MessageType::TASK_RESULT, result_data);
+
+            /// Add is_bimpc flag (1 byte)
+            std::vector<uint8_t> message_data;
+            message_data.push_back(0);  /// is_bimpc = false
+            message_data.insert(message_data.end(), result_data.begin(), result_data.end());
+
+            NetworkMessage message(MessageType::TASK_RESULT, message_data);
 
             if (client_->sendMessage(message)) {
                 ILOG << "Task result " << result.task_id << " sent to master";
@@ -577,10 +633,32 @@ private:
             else {
                 ELOG << "Failed to send task result " << result.task_id << " to master";
             }
-
         }
         catch (const std::exception& e) {
             ELOG << "Error sending task result: " << e.what();
+        }
+    }
+
+    void sendBimPcResult(const BimPcResult& result) {
+        try {
+            std::vector<uint8_t> result_data = NetworkUtils::serializeBimPcResult(result);
+
+            /// Add is_bimpc flag (1 byte)
+            std::vector<uint8_t> message_data;
+            message_data.push_back(1);  /// is_bimpc = true
+            message_data.insert(message_data.end(), result_data.begin(), result_data.end());
+
+            NetworkMessage message(MessageType::TASK_RESULT, message_data);
+
+            if (client_->sendMessage(message)) {
+                ILOG << "BimPcResult " << result.task_id << " sent to master";
+            }
+            else {
+                ELOG << "Failed to send BimPcResult " << result.task_id << " to master";
+            }
+        }
+        catch (const std::exception& e) {
+            ELOG << "Error sending BimPcResult: " << e.what();
         }
     }
 

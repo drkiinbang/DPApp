@@ -250,6 +250,413 @@ namespace DPApp {
             return chunk;
         }
 
+        // ================================================================
+        // MeshChunk 직렬화
+        // ================================================================
+        std::vector<uint8_t> serializeMeshChunk(const chunkbim::MeshChunk& meshChunk) {
+            std::vector<uint8_t> data;
+
+            // 1. id (4 bytes)
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&meshChunk.id),
+                reinterpret_cast<const uint8_t*>(&meshChunk.id) + sizeof(int));
+
+            // 2. name 길이 및 데이터
+            uint32_t name_length = static_cast<uint32_t>(meshChunk.name.size());
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&name_length),
+                reinterpret_cast<const uint8_t*>(&name_length) + sizeof(uint32_t));
+            if (name_length > 0) {
+                data.insert(data.end(), meshChunk.name.begin(), meshChunk.name.end());
+            }
+
+            // 3. vertices 개수 (4 bytes)
+            uint32_t vertex_count = static_cast<uint32_t>(meshChunk.vertices.size());
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&vertex_count),
+                reinterpret_cast<const uint8_t*>(&vertex_count) + sizeof(uint32_t));
+
+            // 4. vertices 데이터 (각 vertex는 pctree::XYZPoint = double x 3 = 24 bytes)
+            for (const auto& vtx : meshChunk.vertices) {
+                double coords[3] = { vtx[0], vtx[1], vtx[2] };
+                data.insert(data.end(),
+                    reinterpret_cast<const uint8_t*>(coords),
+                    reinterpret_cast<const uint8_t*>(coords) + sizeof(double) * 3);
+            }
+
+            // 5. faces 개수 (4 bytes)
+            uint32_t face_count = static_cast<uint32_t>(meshChunk.faces.size());
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&face_count),
+                reinterpret_cast<const uint8_t*>(&face_count) + sizeof(uint32_t));
+
+            // 6. faces 데이터 (각 FaceVtx: normal(double x 3 = 24) + idxVtx(uint x 3 = 12) = 36 bytes)
+            for (const auto& face : meshChunk.faces) {
+                // normal (double x 3)
+                double normal[3] = { face.normal[0], face.normal[1], face.normal[2] };
+                data.insert(data.end(),
+                    reinterpret_cast<const uint8_t*>(normal),
+                    reinterpret_cast<const uint8_t*>(normal) + sizeof(double) * 3);
+
+                // idxVtx (unsigned int x 3)
+                data.insert(data.end(),
+                    reinterpret_cast<const uint8_t*>(face.idxVtx),
+                    reinterpret_cast<const uint8_t*>(face.idxVtx) + sizeof(unsigned int) * 3);
+            }
+
+            // 7. Bounding box (float x 6 = 24 bytes)
+            float bbox[6] = { meshChunk.min_x, meshChunk.min_y, meshChunk.min_z,
+                              meshChunk.max_x, meshChunk.max_y, meshChunk.max_z };
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(bbox),
+                reinterpret_cast<const uint8_t*>(bbox) + sizeof(float) * 6);
+
+            return data;
+        }
+
+        // ================================================================
+        // MeshChunk 역직렬화
+        // ================================================================
+        chunkbim::MeshChunk deserializeMeshChunk(const std::vector<uint8_t>& data) {
+            chunkbim::MeshChunk meshChunk;
+            size_t offset = 0;
+
+            // 1. id
+            std::memcpy(&meshChunk.id, data.data() + offset, sizeof(int));
+            offset += sizeof(int);
+
+            // 2. name
+            uint32_t name_length = 0;
+            std::memcpy(&name_length, data.data() + offset, sizeof(uint32_t));
+            offset += sizeof(uint32_t);
+            if (name_length > 0) {
+                meshChunk.name.assign(
+                    reinterpret_cast<const char*>(data.data() + offset), name_length);
+                offset += name_length;
+            }
+
+            // 3. vertices 개수
+            uint32_t vertex_count = 0;
+            std::memcpy(&vertex_count, data.data() + offset, sizeof(uint32_t));
+            offset += sizeof(uint32_t);
+
+            // 4. vertices 데이터
+            meshChunk.vertices.resize(vertex_count);
+            for (uint32_t i = 0; i < vertex_count; ++i) {
+                double coords[3];
+                std::memcpy(coords, data.data() + offset, sizeof(double) * 3);
+                offset += sizeof(double) * 3;
+                meshChunk.vertices[i] = pctree::XYZPoint(coords[0], coords[1], coords[2]);
+            }
+
+            // 5. faces 개수
+            uint32_t face_count = 0;
+            std::memcpy(&face_count, data.data() + offset, sizeof(uint32_t));
+            offset += sizeof(uint32_t);
+
+            // 6. faces 데이터
+            meshChunk.faces.resize(face_count);
+            for (uint32_t i = 0; i < face_count; ++i) {
+                // normal
+                double normal[3];
+                std::memcpy(normal, data.data() + offset, sizeof(double) * 3);
+                offset += sizeof(double) * 3;
+                meshChunk.faces[i].normal = pctree::XYZPoint(normal[0], normal[1], normal[2]);
+
+                // idxVtx
+                std::memcpy(meshChunk.faces[i].idxVtx, data.data() + offset, sizeof(unsigned int) * 3);
+                offset += sizeof(unsigned int) * 3;
+            }
+
+            // 7. Bounding box
+            float bbox[6];
+            std::memcpy(bbox, data.data() + offset, sizeof(float) * 6);
+            offset += sizeof(float) * 6;
+            meshChunk.min_x = bbox[0];
+            meshChunk.min_y = bbox[1];
+            meshChunk.min_z = bbox[2];
+            meshChunk.max_x = bbox[3];
+            meshChunk.max_y = bbox[4];
+            meshChunk.max_z = bbox[5];
+
+            return meshChunk;
+        }
+
+        // ================================================================
+        // BimPcChunk 직렬화 (mesh::MeshChunk 사용 버전)
+        // ================================================================
+        std::vector<uint8_t> serializeBimPcChunk(const BimPcChunk& chunk) {
+            std::vector<uint8_t> data;
+
+            // 1. chunk_id (4 bytes)
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&chunk.chunk_id),
+                reinterpret_cast<const uint8_t*>(&chunk.chunk_id) + sizeof(uint32_t));
+
+            // 2. Points 개수 (4 bytes)
+            uint32_t point_count = static_cast<uint32_t>(chunk.points.size());
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&point_count),
+                reinterpret_cast<const uint8_t*>(&point_count) + sizeof(uint32_t));
+
+            // 3. Points 데이터 (각 Point3D = double x 3 = 24 bytes)
+            for (const auto& point : chunk.points) {
+                double coords[3] = { point[0], point[1], point[2] };
+                data.insert(data.end(),
+                    reinterpret_cast<const uint8_t*>(coords),
+                    reinterpret_cast<const uint8_t*>(coords) + sizeof(double) * 3);
+            }
+
+            // 4. PointCloud Bounding box (float x 6 = 24 bytes)
+            float pc_bbox[6] = { chunk.min_x, chunk.min_y, chunk.min_z,
+                                 chunk.max_x, chunk.max_y, chunk.max_z };
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(pc_bbox),
+                reinterpret_cast<const uint8_t*>(pc_bbox) + sizeof(float) * 6);
+
+            // 5. MeshChunk (bim) 직렬화
+            std::vector<uint8_t> bim_data = serializeMeshChunk(chunk.bim);
+
+            // 5-1. bim_data 크기 (4 bytes)
+            uint32_t bim_data_size = static_cast<uint32_t>(bim_data.size());
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&bim_data_size),
+                reinterpret_cast<const uint8_t*>(&bim_data_size) + sizeof(uint32_t));
+
+            // 5-2. bim_data
+            data.insert(data.end(), bim_data.begin(), bim_data.end());
+
+            return data;
+        }
+
+        // ================================================================
+        // BimPcChunk 역직렬화 (mesh::MeshChunk 사용 버전)
+        // ================================================================
+        BimPcChunk deserializeBimPcChunk(const std::vector<uint8_t>& data) {
+            BimPcChunk chunk;
+            size_t offset = 0;
+
+            // 1. chunk_id
+            std::memcpy(&chunk.chunk_id, data.data() + offset, sizeof(uint32_t));
+            offset += sizeof(uint32_t);
+
+            // 2. Points 개수
+            uint32_t point_count = 0;
+            std::memcpy(&point_count, data.data() + offset, sizeof(uint32_t));
+            offset += sizeof(uint32_t);
+
+            // 3. Points 데이터
+            chunk.points.resize(point_count);
+            for (uint32_t i = 0; i < point_count; ++i) {
+                double coords[3];
+                std::memcpy(coords, data.data() + offset, sizeof(double) * 3);
+                offset += sizeof(double) * 3;
+                chunk.points[i] = Point3D(coords[0], coords[1], coords[2]);
+            }
+
+            // 4. PointCloud Bounding box
+            float pc_bbox[6];
+            std::memcpy(pc_bbox, data.data() + offset, sizeof(float) * 6);
+            offset += sizeof(float) * 6;
+            chunk.min_x = pc_bbox[0];
+            chunk.min_y = pc_bbox[1];
+            chunk.min_z = pc_bbox[2];
+            chunk.max_x = pc_bbox[3];
+            chunk.max_y = pc_bbox[4];
+            chunk.max_z = pc_bbox[5];
+
+            // 5. MeshChunk (bim) 역직렬화
+            // 5-1. bim_data 크기
+            uint32_t bim_data_size = 0;
+            std::memcpy(&bim_data_size, data.data() + offset, sizeof(uint32_t));
+            offset += sizeof(uint32_t);
+
+            // 5-2. bim_data
+            std::vector<uint8_t> bim_data(data.begin() + offset, data.begin() + offset + bim_data_size);
+            offset += bim_data_size;
+
+            chunk.bim = deserializeMeshChunk(bim_data);
+
+            return chunk;
+        }
+
+        // ================================================================
+        // BimPcResult 직렬화
+        // ================================================================
+        std::vector<uint8_t> serializeBimPcResult(const BimPcResult& result) {
+            std::vector<uint8_t> data;
+
+            // 1. task_id, chunk_id (8 bytes)
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&result.task_id),
+                reinterpret_cast<const uint8_t*>(&result.task_id) + sizeof(uint32_t));
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&result.chunk_id),
+                reinterpret_cast<const uint8_t*>(&result.chunk_id) + sizeof(uint32_t));
+
+            // 2. success (1 byte)
+            uint8_t success_byte = result.success ? 1 : 0;
+            data.push_back(success_byte);
+
+            // 3. error_message 길이 및 데이터
+            uint32_t error_len = static_cast<uint32_t>(result.error_message.size());
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&error_len),
+                reinterpret_cast<const uint8_t*>(&error_len) + sizeof(uint32_t));
+            if (error_len > 0) {
+                data.insert(data.end(), result.error_message.begin(), result.error_message.end());
+            }
+
+            // 4. 처리 통계
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&result.total_points_processed),
+                reinterpret_cast<const uint8_t*>(&result.total_points_processed) + sizeof(uint32_t));
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&result.total_faces_processed),
+                reinterpret_cast<const uint8_t*>(&result.total_faces_processed) + sizeof(uint32_t));
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&result.processing_time_ms),
+                reinterpret_cast<const uint8_t*>(&result.processing_time_ms) + sizeof(double));
+
+            // 5. 거리 계산 결과
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&result.min_distance),
+                reinterpret_cast<const uint8_t*>(&result.min_distance) + sizeof(double));
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&result.max_distance),
+                reinterpret_cast<const uint8_t*>(&result.max_distance) + sizeof(double));
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&result.avg_distance),
+                reinterpret_cast<const uint8_t*>(&result.avg_distance) + sizeof(double));
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&result.std_deviation),
+                reinterpret_cast<const uint8_t*>(&result.std_deviation) + sizeof(double));
+
+            // 6. point_distances 개수 및 데이터
+            uint32_t dist_count = static_cast<uint32_t>(result.point_distances.size());
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&dist_count),
+                reinterpret_cast<const uint8_t*>(&dist_count) + sizeof(uint32_t));
+            if (dist_count > 0) {
+                data.insert(data.end(),
+                    reinterpret_cast<const uint8_t*>(result.point_distances.data()),
+                    reinterpret_cast<const uint8_t*>(result.point_distances.data()) + dist_count * sizeof(double));
+            }
+
+            // 7. nearest_face_ids 개수 및 데이터
+            uint32_t face_id_count = static_cast<uint32_t>(result.nearest_face_ids.size());
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&face_id_count),
+                reinterpret_cast<const uint8_t*>(&face_id_count) + sizeof(uint32_t));
+            if (face_id_count > 0) {
+                data.insert(data.end(),
+                    reinterpret_cast<const uint8_t*>(result.nearest_face_ids.data()),
+                    reinterpret_cast<const uint8_t*>(result.nearest_face_ids.data()) + face_id_count * sizeof(int32_t));
+            }
+
+            // 8. 분류 결과
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&result.points_within_threshold),
+                reinterpret_cast<const uint8_t*>(&result.points_within_threshold) + sizeof(uint32_t));
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&result.points_outside_threshold),
+                reinterpret_cast<const uint8_t*>(&result.points_outside_threshold) + sizeof(uint32_t));
+
+            // 9. extra_data
+            uint32_t extra_len = static_cast<uint32_t>(result.extra_data.size());
+            data.insert(data.end(),
+                reinterpret_cast<const uint8_t*>(&extra_len),
+                reinterpret_cast<const uint8_t*>(&extra_len) + sizeof(uint32_t));
+            if (extra_len > 0) {
+                data.insert(data.end(), result.extra_data.begin(), result.extra_data.end());
+            }
+
+            return data;
+        }
+
+        // ================================================================
+        // BimPcResult 역직렬화
+        // ================================================================
+        BimPcResult deserializeBimPcResult(const std::vector<uint8_t>& data) {
+            BimPcResult result;
+            size_t offset = 0;
+
+            // 1. task_id, chunk_id
+            std::memcpy(&result.task_id, data.data() + offset, sizeof(uint32_t));
+            offset += sizeof(uint32_t);
+            std::memcpy(&result.chunk_id, data.data() + offset, sizeof(uint32_t));
+            offset += sizeof(uint32_t);
+
+            // 2. success
+            result.success = (data[offset] != 0);
+            offset += 1;
+
+            // 3. error_message
+            uint32_t error_len = 0;
+            std::memcpy(&error_len, data.data() + offset, sizeof(uint32_t));
+            offset += sizeof(uint32_t);
+            if (error_len > 0) {
+                result.error_message.assign(
+                    reinterpret_cast<const char*>(data.data() + offset), error_len);
+                offset += error_len;
+            }
+
+            // 4. 처리 통계
+            std::memcpy(&result.total_points_processed, data.data() + offset, sizeof(uint32_t));
+            offset += sizeof(uint32_t);
+            std::memcpy(&result.total_faces_processed, data.data() + offset, sizeof(uint32_t));
+            offset += sizeof(uint32_t);
+            std::memcpy(&result.processing_time_ms, data.data() + offset, sizeof(double));
+            offset += sizeof(double);
+
+            // 5. 거리 계산 결과
+            std::memcpy(&result.min_distance, data.data() + offset, sizeof(double));
+            offset += sizeof(double);
+            std::memcpy(&result.max_distance, data.data() + offset, sizeof(double));
+            offset += sizeof(double);
+            std::memcpy(&result.avg_distance, data.data() + offset, sizeof(double));
+            offset += sizeof(double);
+            std::memcpy(&result.std_deviation, data.data() + offset, sizeof(double));
+            offset += sizeof(double);
+
+            // 6. point_distances
+            uint32_t dist_count = 0;
+            std::memcpy(&dist_count, data.data() + offset, sizeof(uint32_t));
+            offset += sizeof(uint32_t);
+            if (dist_count > 0) {
+                result.point_distances.resize(dist_count);
+                std::memcpy(result.point_distances.data(), data.data() + offset, dist_count * sizeof(double));
+                offset += dist_count * sizeof(double);
+            }
+
+            // 7. nearest_face_ids
+            uint32_t face_id_count = 0;
+            std::memcpy(&face_id_count, data.data() + offset, sizeof(uint32_t));
+            offset += sizeof(uint32_t);
+            if (face_id_count > 0) {
+                result.nearest_face_ids.resize(face_id_count);
+                std::memcpy(result.nearest_face_ids.data(), data.data() + offset, face_id_count * sizeof(int32_t));
+                offset += face_id_count * sizeof(int32_t);
+            }
+
+            // 8. 분류 결과
+            std::memcpy(&result.points_within_threshold, data.data() + offset, sizeof(uint32_t));
+            offset += sizeof(uint32_t);
+            std::memcpy(&result.points_outside_threshold, data.data() + offset, sizeof(uint32_t));
+            offset += sizeof(uint32_t);
+
+            // 9. extra_data
+            uint32_t extra_len = 0;
+            std::memcpy(&extra_len, data.data() + offset, sizeof(uint32_t));
+            offset += sizeof(uint32_t);
+            if (extra_len > 0) {
+                result.extra_data.assign(data.begin() + offset, data.begin() + offset + extra_len);
+                offset += extra_len;
+            }
+
+            return result;
+        }
+
     } // namespace NetworkUtils
 
     //========================================

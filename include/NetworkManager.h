@@ -29,6 +29,8 @@
 #include "RuntimeConfig.h"
 #include "ThreadPool.h"
 
+#include "bim/MeshChunk.h"
+
 namespace DPApp {
 
     // 메시지 타입 정의
@@ -153,6 +155,16 @@ namespace DPApp {
         ProcessingResult deserializeResult(const std::vector<uint8_t>& data);
         std::vector<uint8_t> serializeChunk(const PointCloudChunk& chunk);
         PointCloudChunk deserializeChunk(const std::vector<uint8_t>& data);
+
+        /// BIM/PC chunk serialization/deserialization
+        std::vector<uint8_t> serializeMeshChunk(const chunkbim::MeshChunk& meshChunk);
+        chunkbim::MeshChunk deserializeMeshChunk(const std::vector<uint8_t>& data);
+        std::vector<uint8_t> serializeBimPcChunk(const BimPcChunk& chunk);
+        BimPcChunk deserializeBimPcChunk(const std::vector<uint8_t>& data);
+
+        /// BIM/PC processing result serialization/deserialization
+        std::vector<uint8_t> serializeBimPcResult(const BimPcResult& result);
+        BimPcResult deserializeBimPcResult(const std::vector<uint8_t>& data);
     }
 
     // Slave용 네트워크 클라이언트
