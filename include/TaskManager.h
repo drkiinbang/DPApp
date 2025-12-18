@@ -264,12 +264,9 @@ namespace DPApp {
          * @brief Assign pending tasks to available slave workers
          */
         bool assignTasksToSlaves() {
-            if (stopping_) {
-                return false;  // Don't assign tasks when stopping
-            }
+            if (stopping_) { return false; }
 
-            std::lock_guard<std::mutex> tasks_lock(tasks_mutex_);
-            std::lock_guard<std::mutex> slaves_lock(slaves_mutex_);
+            std::scoped_lock lock(tasks_mutex_, slaves_mutex_);
 
             // Find pending tasks and sort by priority
             std::vector<uint32_t> pending_tasks;
@@ -343,9 +340,7 @@ namespace DPApp {
          * @brief Complete a task with results
          */
         bool completeTask(uint32_t task_id, const ProcessingResult& result) {
-            std::lock_guard<std::mutex> tasks_lock(tasks_mutex_);
-            std::lock_guard<std::mutex> slaves_lock(slaves_mutex_);
-            std::lock_guard<std::mutex> results_lock(results_mutex_);
+            std::scoped_lock lock(tasks_mutex_, slaves_mutex_, results_mutex_);
 
             auto task_it = tasks_.find(task_id);
             if (task_it == tasks_.end()) {
@@ -393,9 +388,7 @@ namespace DPApp {
          * @brief Mark a task as failed
          */
         bool failTask(uint32_t task_id, const std::string& error_message) {
-            std::lock_guard<std::mutex> tasks_lock(tasks_mutex_);
-            std::lock_guard<std::mutex> slaves_lock(slaves_mutex_);
-
+            std::scoped_lock lock(tasks_mutex_, slaves_mutex_);
             failTaskInternal(task_id, error_message);
             return true;
         }
@@ -419,9 +412,8 @@ namespace DPApp {
          * @brief Unregister a slave worker and reassign its tasks
          */
         void unregisterSlave(const std::string& slave_id) {
-            std::lock_guard<std::mutex> tasks_lock(tasks_mutex_);
-            std::lock_guard<std::mutex> slaves_lock(slaves_mutex_);
-            
+            std::scoped_lock lock(tasks_mutex_, slaves_mutex_);
+
             auto slave_it = slaves_.find(slave_id);
             if (slave_it != slaves_.end()) {
                 // Reassign tasks from the unregistered slave back to pending
@@ -563,7 +555,9 @@ namespace DPApp {
          * @brief Check for timed out tasks and slaves
          */
         void checkTimeouts() {
-            std::lock_guard<std::mutex> tasks_lock(tasks_mutex_);
+            // 1. Task와 Slave 뮤텍스를 한 번에 안전하게 잠금 (scoped_lock 사용 권장)
+            // 이렇게 하면 루프 도중에 락을 잡았다 풀었다 할 필요가 없습니다.
+            std::scoped_lock lock(tasks_mutex_, slaves_mutex_);
 
             auto now = std::chrono::steady_clock::now();
 
@@ -581,7 +575,7 @@ namespace DPApp {
 
                         // Release slave
                         if (!task_info.assigned_slave.empty()) {
-                            std::lock_guard<std::mutex> slaves_lock(slaves_mutex_);
+                            // 이미 slaves_mutex_를 위에서 잡았으므로 바로 접근 가능
                             auto slave_it = slaves_.find(task_info.assigned_slave);
                             if (slave_it != slaves_.end()) {
                                 slave_it->second.is_busy = false;
