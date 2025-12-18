@@ -589,8 +589,9 @@ namespace DPApp {
                             }
                         }
 
-                        // Retry or fail permanently
-                        failTask(task_id, "Task timeout");
+                        // 2. 중요: failTask() 대신 failTaskInternal() 호출
+                        // failTaskInternal은 락을 잡지 않으므로 데드락이 발생하지 않음
+                        failTaskInternal(task_id, "Task timeout");
                     }
                 }
             }
