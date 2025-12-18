@@ -16,7 +16,7 @@
 *.exp
 
 *.xlsx
-*.doc
+*.docx
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
