@@ -82,9 +82,9 @@ class Face {
               /// Check inner points (triangle inside)
               if (u + v <= 1.0) {
                   Point p(
-                      static_cast<double>(v2.getX()) + u * static_cast<double>(edge1.getX()) + v * static_cast<double>(edge2.getX()),
-                      static_cast<double>(v2.getY()) + u * static_cast<double>(edge1.getY()) + v * static_cast<double>(edge2.getY()),
-                      static_cast<double>(v2.getZ()) + u * static_cast<double>(edge1.getZ()) + v * static_cast<double>(edge2.getZ())
+                      static_cast<float>(static_cast<double>(v2.getX()) + u * static_cast<double>(edge1.getX()) + v * static_cast<double>(edge2.getX())),
+                      static_cast<float>(static_cast<double>(v2.getY()) + u * static_cast<double>(edge1.getY()) + v * static_cast<double>(edge2.getY())),
+                      static_cast<float>(static_cast<double>(v2.getZ()) + u * static_cast<double>(edge1.getZ()) + v * static_cast<double>(edge2.getZ()))
                   );
                   pseudoPts.emplace_back(v2.getX() + u * edge1.getX() + v * edge2.getX(),
                       v2.getY() + u * edge1.getY() + v * edge2.getY(),

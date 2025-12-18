@@ -49,7 +49,7 @@ namespace pctree
 		{ 
 			float sum2 = getSquareSum();
 			if (sum2 > std::numeric_limits<float>::epsilon()) {
-				return XYZPoint(*this/sqrt(sum2)); 
+				return XYZPoint(*this/static_cast<float>(sqrt(sum2))); 
 			}
 			else
 				return XYZPoint(*this);
