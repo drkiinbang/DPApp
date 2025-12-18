@@ -8,7 +8,7 @@
 #include <cstdint>   // for uint64_t, uint32_t
 
 
-namespace mesh {
+namespace chunkbim {
 	struct FaceVtx {
 		pctree::XYZPoint normal;
 		unsigned int idxVtx[3];
@@ -34,7 +34,7 @@ namespace mesh {
 	};
 }
 
-namespace pc {
+namespace chunkpc {
     struct PointCloudHeader {
         std::string filename;
         uint64_t point_count;

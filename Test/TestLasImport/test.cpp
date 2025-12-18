@@ -34,7 +34,7 @@ TEST(TestCaseName, LasLoadTest) {
 
 	std::cout << "입력한 패스: " << absolutePath << std::endl;
 
-	std::vector<pc::PointCloudChunk> chunks;
+	std::vector<chunkpc::PointCloudChunk> chunks;
 	const uint32_t max_points_per_chunk = 1000000;
 	auto retval = loadLasFileStreaming(absolutePath.string(), chunks, max_points_per_chunk);
 	for (auto& c : chunks) {

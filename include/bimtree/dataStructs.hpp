@@ -6,7 +6,7 @@
 #include "barycentric.hpp"
 #include "xyzpoint.hpp"
 
-namespace mesh
+namespace chunkbim
 {
 	const double deg2rad = acos(-1.0) / 180.0;
 	const double rad2deg = 180.0 / acos(-1.0);

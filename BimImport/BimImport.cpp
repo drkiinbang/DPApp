@@ -83,9 +83,9 @@ std::vector<std::string> collect_gltf_files(const std::string& folder_path) {
     return gltf_file_paths;
 }
 
-bool API loadGltf(const std::string& bim_folder, std::vector<mesh::MeshChunk>& bimData, const int option)
+bool API loadGltf(const std::string& bim_folder, std::vector<chunkbim::MeshChunk>& bimData, const int option)
 {
-	mesh::GltfMesh gltf;
+	chunkbim::GltfMesh gltf;
     std::vector<std::string> filePaths = collect_gltf_files(bim_folder);
     for (auto& path : filePaths) {
         if(!gltf.importMeshData(path, bimData, option))
@@ -111,7 +111,7 @@ bool API testGltfExtraId(const std::string& gltfPath)
         return false;        
     }
 
-    mesh::GltfMesh::verifyMeshIdsInFile(gltfPath);
+    chunkbim::GltfMesh::verifyMeshIdsInFile(gltfPath);
 
     return true;
 }

@@ -7,7 +7,7 @@
 #include "PseudoPtsInMesh.hpp"
 #include "xyzpoint.hpp"
 
-namespace mesh /// Use this one
+namespace chunkbim /// Use this one
 {
 	class MeshData
 	{

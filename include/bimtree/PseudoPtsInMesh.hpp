@@ -254,7 +254,7 @@ namespace geo
 		return true;
 	}
 
-	std::vector<pctree::XYZPoint> definePseudoInTri(mesh::Face& face,
+	std::vector<pctree::XYZPoint> definePseudoInTri(chunkbim::Face& face,
 		const pctree::XYZPoint& vtx0,
 		const pctree::XYZPoint& vtx1,
 		const pctree::XYZPoint& vtx2,
@@ -298,7 +298,7 @@ namespace geo
 
 	}
 
-	void generatePseudoGridPts(std::vector<mesh::Face>& faces, std::vector<pctree::XYZPoint>& points, const float lengthTh)
+	void generatePseudoGridPts(std::vector<chunkbim::Face>& faces, std::vector<pctree::XYZPoint>& points, const float lengthTh)
 	{
 		/// Faces
 		const auto numFaces = faces.size();

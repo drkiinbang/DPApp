@@ -12,4 +12,4 @@
 
 #include "../include/bim/MeshChunk.h"
 
-bool API loadLasFileStreaming(const std::string& file_path, std::vector<pc::PointCloudChunk>& chunks, const uint32_t max_points_per_chunk);
+bool API loadLasFileStreaming(const std::string& file_path, std::vector<chunkpc::PointCloudChunk>& chunks, const uint32_t max_points_per_chunk);

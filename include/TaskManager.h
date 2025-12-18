@@ -180,7 +180,7 @@ namespace DPApp {
         /**
          * @brief Add a new task to the processing queue (simplified - no task type parameter)
          */
-        uint32_t addTask(std::shared_ptr<PointCloudChunk> chunk) {
+        uint32_t addTask(std::shared_ptr<BimPcChunk> bimpc_chunk) {
             std::lock_guard<std::mutex> lock(tasks_mutex_);
 
             uint32_t task_id = next_task_id_++;

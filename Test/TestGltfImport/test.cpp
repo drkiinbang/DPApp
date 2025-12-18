@@ -66,7 +66,7 @@ TEST(TestCaseName, TestName) {
 
 	std::cout << "입력한 데이터 경로(폴더): " << absolutePath << std::endl;
 
-	std::vector<mesh::MeshChunk> meshChunk;
+	std::vector<chunkbim::MeshChunk> meshChunk;
 	auto retval = loadGltf(absolutePath.string(), meshChunk, 0);
 	EXPECT_TRUE(retval);
 }

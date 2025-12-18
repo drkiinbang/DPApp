@@ -78,7 +78,7 @@ public:
 		return bimInfo;
 	}
 
-	BimInfo read(std::string fileName, std::vector<mesh::Face>& faces, std::vector<pctree::XYZPoint>& vertices)
+	BimInfo read(std::string fileName, std::vector<chunkbim::Face>& faces, std::vector<pctree::XYZPoint>& vertices)
 	{
 		tinygltf::Model model;
 		tinygltf::TinyGLTF loader;
@@ -273,7 +273,7 @@ private:
 	// Node traversal function (with faces/vertices)
 	void TraverseNodeFaces(const tinygltf::Model& model, int nodeIndex,
 		BimInfo& bimInfo,
-		std::vector<mesh::Face>& faces,
+		std::vector<chunkbim::Face>& faces,
 		std::vector<pctree::XYZPoint>& vertices)
 	{
 		const tinygltf::Node& node = model.nodes[nodeIndex];

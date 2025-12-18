@@ -16,5 +16,5 @@
 
 /// option 0: read all meshes
 /// option 1: read mesheds in the nodes in a default scene
-bool API loadGltf(const std::string& bim_folder, std::vector<mesh::MeshChunk>& bimData, const int option = 0);
+bool API loadGltf(const std::string& bim_folder, std::vector<chunkbim::MeshChunk>& bimData, const int option = 0);
 bool API testGltfExtraId(const std::string& gltfPath);

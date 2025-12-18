@@ -129,7 +129,7 @@ public:
 	}
 };
 
-namespace mesh {
+namespace chunkbim {
 	/// column-major 4x4 matrix
 	struct Mat4 {
 		float m[16];
