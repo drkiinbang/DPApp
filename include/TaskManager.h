@@ -369,9 +369,9 @@ namespace DPApp {
          * @brief Unregister a slave worker and reassign its tasks
          */
         void unregisterSlave(const std::string& slave_id) {
-            std::lock_guard<std::mutex> slaves_lock(slaves_mutex_);
             std::lock_guard<std::mutex> tasks_lock(tasks_mutex_);
-
+            std::lock_guard<std::mutex> slaves_lock(slaves_mutex_);
+            
             auto slave_it = slaves_.find(slave_id);
             if (slave_it != slaves_.end()) {
                 // Reassign tasks from the unregistered slave back to pending
