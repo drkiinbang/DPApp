@@ -87,6 +87,14 @@ bool API loadGltf(const std::string& bim_folder, std::vector<chunkbim::MeshChunk
 {
 	chunkbim::GltfMesh gltf;
     std::vector<std::string> filePaths = collect_gltf_files(bim_folder);
+
+    size_t numMeshes = 0;
+    for (auto& path : filePaths) {
+        numMeshes += gltf.getNumMeshes(path);
+    }
+
+    bimData.reserve(numMeshes);
+
     for (auto& path : filePaths) {
         if(!gltf.importMeshData(path, bimData, option))
             return false;
