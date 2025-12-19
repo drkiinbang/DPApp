@@ -20,8 +20,8 @@ namespace DPApp {
         std::vector<std::shared_ptr<BimPcChunk>> loadBimPcChunks(const std::string& bim_folder, const std::string& pointcloud_file)
         {
             ///
-            /// [ToDo] 새로운 데이터 구조와 함수에 맞추어 수정 필요
-            ///
+            /// [ToDo] Needs to be updated to match the new data structures and functions
+            /// 
 
             std::vector<std::shared_ptr<BimPcChunk>> chunks;
 
@@ -29,44 +29,49 @@ namespace DPApp {
                 std::cout << "Loading BIM mesh folder: " << bim_folder << std::endl;
                 std::cout << "Loading PointCloud file: " << pointcloud_file << std::endl;
 
-                // 1. Mesh 데이터 로드
+                /// 1. Load mesh data
                 std::vector<chunkbim::MeshChunk> bimData;
                 auto retval = loadGltf(bim_folder, bimData, 0);
                 std::cout << "Loaded " << bimData.size() << " bim chunks" << std::endl;
 
-                // 2. PointCloud 데이터 로드
-                std::vector<pctree::XYZPoint> pc;
-                if (!loadLasFileStreaming(pointcloud_file, pc))
+                if (bimData.empty()) {
+                    std::cerr << "No BIM data loaded" << std::endl;
                     return chunks;
+                }
+
+                /// 2. Load point cloud data
+                std::vector<pctree::XYZPoint> pc;
+                if (!loadLasFile(pointcloud_file, pc)) {
+                    return chunks;
+                }
 
                 size_t numChunks = bimData.size();
-                size_t numChunkPts = pc.size() / numChunks + 1;
+                size_t numChunkPts = (pc.size() + numChunks - 1) / numChunks;
 
                 ///
                 /// [ToDo] the following codes should be modified. 
                 /// Search points using a part-mesh bounding box.
                 ///
-                std::vector<std::shared_ptr<PointCloudChunk>> pcChunks = loadLasFileStreaming(pointcloud_file, numChunkPts);
 
                 for (size_t i = 0; i < numChunks; ++i) {
-                    auto bimpc_chunk = std::make_shared<BimPcChunk>();
+                    chunks.emplace_back(std::make_shared<BimPcChunk>());
+                    auto& bimpc_chunk = chunks.back();
 
-                    bimpc_chunk->chunk_id = i;
+                    bimpc_chunk->chunk_id = static_cast<uint32_t>(i);
 
-                    // PointCloud 데이터 복사
-                    bimpc_chunk->points.reserve(numChunkPts);
+                    size_t start_idx = i * numChunkPts;
+                    size_t end_idx = (std::min)(start_idx + numChunkPts, pc.size());
 
-                    for (size_t j = 0; j < numChunkPts; ++j) {
-                        auto idx = j + i * numChunkPts;
-                        if (idx < pc.size()) {
-                            bimpc_chunk->points.push_back(pc[j + i * numChunkPts]);
-                        }
-                        else
-                            break;
+                    /// Insert pointcloud data into chunk
+                    if (start_idx < pc.size()) {
+                        bimpc_chunk->points.assign(
+                            pc.begin() + start_idx,
+                            pc.begin() + end_idx
+                        );
                     }
 
-                    bimpc_chunk->bim = bimData[i];
-
+                    /// Insert mesh data into chunk
+                    bimpc_chunk->bim = std::move(bimData[i]);
                     bimpc_chunk->calculateBounds();
 
                     std::cout << "Created BimPcChunk " << bimpc_chunk->chunk_id
@@ -74,8 +79,6 @@ namespace DPApp {
                         << ", vertices: " << bimpc_chunk->bim.vertices.size()
                         << ", faces: " << bimpc_chunk->bim.faces.size()
                         << std::endl;
-
-                    chunks.push_back(bimpc_chunk);
                 }
 
                 std::cout << "Created " << chunks.size() << " BimPcChunks" << std::endl;
