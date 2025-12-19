@@ -1599,6 +1599,7 @@ namespace DPApp {
                     break;
                 }
 
+                cnvrt::POINT_DOUBLE point_d;
                 if (is_offset_applied) {
                     size_t idx = 0;
                     for (const auto& p : lasReader.getLoadedPoints()) {
@@ -1607,13 +1608,10 @@ namespace DPApp {
                         buffer[idx * 3 + 2] = static_cast<float>(p.z) - offset[2];
 
                         /// Update bounding box in batch
-                        cnvrt::POINT_DOUBLE point_d;
-                        for (size_t i = 0; i < idx; ++i) {
-                            point_d.x = buffer[i * 3 + 0];
-                            point_d.y = buffer[i * 3 + 1];
-                            point_d.z = buffer[i * 3 + 2];
-                            bb.merge_point(point_d);
-                        }
+                        point_d.x = buffer[idx * 3 + 0];
+                        point_d.y = buffer[idx * 3 + 1];
+                        point_d.z = buffer[idx * 3 + 2];
+                        bb.merge_point(point_d);
 
                         ++idx;
                     }
@@ -1626,13 +1624,10 @@ namespace DPApp {
                         buffer[idx * 3 + 2] = static_cast<float>(p.z);
 
                         /// Update bounding box in batch
-                        cnvrt::POINT_DOUBLE point_d;
-                        for (size_t i = 0; i < idx; ++i) {
-                            point_d.x = buffer[i * 3 + 0];
-                            point_d.y = buffer[i * 3 + 1];
-                            point_d.z = buffer[i * 3 + 2];
-                            bb.merge_point(point_d);
-                        }
+                        point_d.x = buffer[idx * 3 + 0];
+                        point_d.y = buffer[idx * 3 + 1];
+                        point_d.z = buffer[idx * 3 + 2];
+                        bb.merge_point(point_d);
 
                         ++idx;
                     }
