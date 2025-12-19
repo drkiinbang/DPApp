@@ -142,7 +142,7 @@ namespace DPApp {
         std::vector<std::shared_ptr<PointCloudChunk>> loadXYZFileStreaming(
             const std::string& file_path, uint32_t max_points_per_chunk);
 
-        std::vector<std::shared_ptr<PointCloudChunk>> loadLasFileStreaming(
+        std::vector<std::shared_ptr<PointCloudChunk>> loadLasFile(
             const std::string& file_path, uint32_t max_points_per_chunk);
     }
 
@@ -783,7 +783,7 @@ namespace DPApp {
                     chunks = loadXYZFileStreaming(file_path, max_points_per_chunk);
                 }
                 else if (extension == ".las" || extension == ".laz") {
-                    chunks = loadLasFileStreaming(file_path, max_points_per_chunk);
+                    chunks = loadLasFile(file_path, max_points_per_chunk);
                 }
                 else {
                     std::cerr << "Unsupported file format: " << extension << std::endl;
@@ -877,7 +877,7 @@ namespace DPApp {
             return chunks;
         }
 
-        std::vector<std::shared_ptr<PointCloudChunk>> loadLasFileStreaming(const std::string& file_path, const uint32_t max_points_per_chunk)
+        std::vector<std::shared_ptr<PointCloudChunk>> loadLasFile(const std::string& file_path, const uint32_t max_points_per_chunk)
         {
             std::vector<std::shared_ptr<PointCloudChunk>> chunks;
 
@@ -932,7 +932,7 @@ namespace DPApp {
             return chunks;
         }
 
-        bool loadLasFileStreaming(const std::string& file_path, std::vector<Point3D>& pc)
+        bool loadLasFile(const std::string& file_path, std::vector<Point3D>& pc)
         {
             try {
                 las::LASToolsReader lasReader;
@@ -2281,7 +2281,7 @@ namespace DPApp {
 
         /*
         /// Load a las file
-        bool loadLasFileStreaming(const std::string& file_path, std::shared_ptr<tree::KDTree3D>& tree)
+        bool loadLasFile(const std::string& file_path, std::shared_ptr<tree::KDTree3D>& tree)
         {
             try {
                 las::LASToolsReader lasReader;
@@ -2326,7 +2326,7 @@ namespace DPApp {
             
             std::shared_ptr<tree::KDTree3D> tree;
 
-            if (!loadLasFileStreaming(file_path, tree)) {
+            if (!loadLasFile(file_path, tree)) {
                 return false;
             }
                         

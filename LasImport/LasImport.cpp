@@ -13,7 +13,7 @@
 #include "lasdefinitions.hpp"
 
 
-bool loadLasFileStreaming(const std::string& file_path, std::vector<chunkpc::PointCloudChunk>& chunks, const uint32_t max_points_per_chunk)
+bool loadLasFile(const std::string& file_path, std::vector<chunkpc::PointCloudChunk>& chunks, const uint32_t max_points_per_chunk)
 {
     try {
         las::LASToolsReader lasReader;

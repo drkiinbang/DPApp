@@ -36,7 +36,7 @@ TEST(TestCaseName, LasLoadTest) {
 
 	std::vector<chunkpc::PointCloudChunk> chunks;
 	const uint32_t max_points_per_chunk = 1000000;
-	auto retval = loadLasFileStreaming(absolutePath.string(), chunks, max_points_per_chunk);
+	auto retval = loadLasFile(absolutePath.string(), chunks, max_points_per_chunk);
 	for (auto& c : chunks) {
 		std::cout << c.min_x << " " << c.min_y << " " << c.min_z << " " << c.max_x << " " << c.max_y << " " << c.max_z << " " << c.getNumPts() << " points\n";
 	}
