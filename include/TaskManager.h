@@ -227,7 +227,7 @@ namespace DPApp {
 
             tasks_[task_id] = std::move(task_info);
 
-            std::cout << "Task added (BimPc): " << task_id
+            std::cout << "Task added (PointCloud chunk): " << task_id
                 << " (" << taskStr(current_task_type_) << ")"
                 << " - points: " << pc_chunk->points.size()
                 << std::endl;
@@ -240,7 +240,7 @@ namespace DPApp {
             bimpc_results_.push_back(result);
         }
 
-        const std::vector<BimPcResult> getBimPcResults() {
+        std::vector<BimPcResult> getBimPcResults() const {
             std::lock_guard<std::mutex> lock(results_mutex_);
             return bimpc_results_;
         }
@@ -555,36 +555,25 @@ namespace DPApp {
          * @brief Check for timed out tasks and slaves
          */
         void checkTimeouts() {
-            // 1. Task와 Slave 뮤텍스를 한 번에 안전하게 잠금 (scoped_lock 사용 권장)
-            // 이렇게 하면 루프 도중에 락을 잡았다 풀었다 할 필요가 없습니다.
             std::scoped_lock lock(tasks_mutex_, slaves_mutex_);
-
             auto now = std::chrono::steady_clock::now();
 
-            // Check task timeouts
             int timed_out_count = 0;
             for (auto& [task_id, task_info] : tasks_) {
-                if (task_info.status == TaskStatus::ASSIGNED || task_info.status == TaskStatus::IN_PROGRESS) {
+                if (task_info.status == TaskStatus::ASSIGNED ||
+                    task_info.status == TaskStatus::IN_PROGRESS) {
+
                     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
                         now - task_info.assigned_time).count();
 
                     if (elapsed > static_cast<int64_t>(task_timeout_seconds_)) {
-                        std::cout << "Task " << task_id << " timed out after " << elapsed << " seconds" << std::endl;
+                        std::cout << "Task " << task_id << " timed out after "
+                            << elapsed << " seconds" << std::endl;
+
                         task_info.status = TaskStatus::TIMEOUT;
                         timed_out_count++;
 
-                        // Release slave
-                        if (!task_info.assigned_slave.empty()) {
-                            // 이미 slaves_mutex_를 위에서 잡았으므로 바로 접근 가능
-                            auto slave_it = slaves_.find(task_info.assigned_slave);
-                            if (slave_it != slaves_.end()) {
-                                slave_it->second.is_busy = false;
-                                slave_it->second.current_task_id.clear();
-                            }
-                        }
-
-                        // 2. 중요: failTask() 대신 failTaskInternal() 호출
-                        // failTaskInternal은 락을 잡지 않으므로 데드락이 발생하지 않음
+                        // failTaskInternal이 slave 상태 업데이트를 처리함
                         failTaskInternal(task_id, "Task timeout");
                     }
                 }
@@ -703,9 +692,9 @@ namespace DPApp {
         std::vector<ProcessingResult> completed_results_;
         std::vector<BimPcResult> bimpc_results_;
 
-        std::mutex tasks_mutex_;
-        std::mutex slaves_mutex_;
-        std::mutex results_mutex_;
+        mutable std::mutex tasks_mutex_;
+        mutable std::mutex slaves_mutex_;
+        mutable std::mutex results_mutex_;
 
         std::atomic<uint32_t> next_task_id_;
         uint32_t task_timeout_seconds_;
@@ -716,14 +705,64 @@ namespace DPApp {
     };
 
     /**
+    * @brief Thread-safe statistics tracker
+    */
+    class ProcessingStats {
+    public:
+        ProcessingStats()
+            : processed_count_(0)
+            , failed_count_(0)
+            , total_time_(0.0)
+        {
+        }
+
+        void recordSuccess(double processing_time) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            processed_count_++;
+            total_time_ += processing_time;
+        }
+
+        void recordFailure() {
+            std::lock_guard<std::mutex> lock(mutex_);
+            failed_count_++;
+        }
+
+        uint32_t getProcessedCount() const {
+            std::lock_guard<std::mutex> lock(mutex_);
+            return processed_count_;
+        }
+
+        uint32_t getFailedCount() const {
+            std::lock_guard<std::mutex> lock(mutex_);
+            return failed_count_;
+        }
+
+        double getAverageProcessingTime() const {
+            std::lock_guard<std::mutex> lock(mutex_);
+            return processed_count_ > 0 ? total_time_ / processed_count_ : 0.0;
+        }
+
+    private:
+        mutable std::mutex mutex_;
+        uint32_t processed_count_;
+        uint32_t failed_count_;
+        double total_time_;
+    };
+
+    /**
      * @brief Task Processor class for individual workers (Slave nodes)
      * Fixed 2 task types: CONVERT_PTS and BIM_DISTANCE_CALCULATION
      */
     class TaskProcessor {
     public:
-        TaskProcessor();
-        ~TaskProcessor();
+        TaskProcessor() {
+            std::cout << "TaskProcessor initialized" << std::endl;
+        }
 
+        ~TaskProcessor() {
+            std::cout << "TaskProcessor destroyed" << std::endl;
+        }
+        
         // Task processing - handles both supported task types internally
         ProcessingResult processTask(const ProcessingTask& task, const PointCloudChunk& chunk);
 
@@ -735,14 +774,12 @@ namespace DPApp {
         bool supportsTaskType(const TaskType task_type) const;
 
         // Statistics
-        uint32_t getProcessedTaskCount() const { return processed_task_count_; }
-        uint32_t getFailedTaskCount() const { return failed_task_count_; }
-        double getAverageProcessingTime() const { return avg_processing_time_; }
+        uint32_t getProcessedTaskCount() const { return stats_.getProcessedCount(); }
+        uint32_t getFailedTaskCount() const { return stats_.getFailedCount(); }
+        double getAverageProcessingTime() const { return stats_.getAverageProcessingTime(); }
 
     private:
-        std::atomic<uint32_t> processed_task_count_;
-        std::atomic<uint32_t> failed_task_count_;
-        std::atomic<double> avg_processing_time_;
+        ProcessingStats stats_;  /// replace atomic variables for safety
     };
 
     /**
@@ -977,16 +1014,6 @@ namespace DPApp {
 
     } // namespace PointCloudLoader
 
-    /// TaskProcessor Implementation
-    TaskProcessor::TaskProcessor()
-        : processed_task_count_(0), failed_task_count_(0), avg_processing_time_(0.0) {
-        std::cout << "TaskProcessor initialized with 2 fixed task types (CONVERT_PTS, BIM_DISTANCE_CALCULATION)" << std::endl;
-    }
-
-    TaskProcessor::~TaskProcessor() {
-        std::cout << "TaskProcessor destroyed" << std::endl;
-    }
-
     ProcessingResult TaskProcessor::processTask(const ProcessingTask& task, const PointCloudChunk& chunk) {
         auto start_time = std::chrono::steady_clock::now();
 
@@ -995,7 +1022,7 @@ namespace DPApp {
         result.chunk_id = task.chunk_id;
 
         try {
-            // Direct switch on task type - no dynamic registration needed
+            /// Direct switch on task type - no dynamic registration needed
             switch (task.task_type) {
             case TaskType::CONVERT_PTS:
                 result = PointCloudProcessors::convertPts(task, chunk);
@@ -1008,32 +1035,36 @@ namespace DPApp {
             default:
                 result.success = false;
                 result.error_message = "Unsupported task type: " + std::string(taskStr(task.task_type));
-                failed_task_count_++;
+                stats_.recordFailure();
                 return result;
             }
-
-            if (result.success) {
-                processed_task_count_++;
-            }
-            else {
-                failed_task_count_++;
-            }
-
         }
         catch (const std::exception& e) {
             result.success = false;
             result.error_message = "Processing error: " + std::string(e.what());
-            failed_task_count_++;
+            stats_.recordFailure();
+            return result;
         }
 
-        // Update processing time statistics
+        /// Update processing time statistics
         auto end_time = std::chrono::steady_clock::now();
-        auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+        double processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
             end_time - start_time).count() / 1000.0;
 
-        uint32_t total_tasks = processed_task_count_ + failed_task_count_;
-        if (total_tasks > 0) {
-            avg_processing_time_ = (avg_processing_time_ * (total_tasks - 1) + processing_time) / total_tasks;
+        if (result.success) {
+            stats_.recordSuccess(processing_time);
+        }
+        else {
+            /// Handles logical failure cases that were not processed 
+            /// by either the catch blocks or default case above
+            /// In theory, a guard may be required to prevent duplicated recordFailure() calls.
+            /// However, under the current control flow, any path that already called recordFailure() returns early.
+            /// Threrefore, reaching this block implies no prior failure
+            /// has been recorded, and it is safe to handle it here
+            if (result.error_message.empty()) {
+                /// An empty error message indicates a failure theat was not caught above
+                stats_.recordFailure();
+            }
         }
 
         return result;
@@ -1055,30 +1086,32 @@ namespace DPApp {
                 result.success = false;
                 result.error_message = "Unsupported task type for BimPcChunk: " +
                     std::string(taskStr(task.task_type));
-                failed_task_count_++;
+                stats_.recordFailure();
                 return result;
-            }
-
-            if (result.success) {
-                processed_task_count_++;
-            }
-            else {
-                failed_task_count_++;
             }
         }
         catch (const std::exception& e) {
             result.success = false;
             result.error_message = "Processing error: " + std::string(e.what());
-            failed_task_count_++;
+            stats_.recordFailure();
+            return result; 
+            /// Considering the current control flow, returning here is safe
+            /// because recordFailure() has already been called
+            /// preventing duplicated failure recording downstream.
         }
 
         auto end_time = std::chrono::steady_clock::now();
-        auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+        double processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
             end_time - start_time).count() / 1000.0;
 
-        uint32_t total_tasks = processed_task_count_ + failed_task_count_;
-        if (total_tasks > 0) {
-            avg_processing_time_ = (avg_processing_time_ * (total_tasks - 1) + processing_time) / total_tasks;
+        if (result.success) {
+            stats_.recordSuccess(processing_time);
+        }
+        else {
+            /// Fore failure cases which were not caught in if statement or catch
+            if (result.error_message.empty()) {
+                stats_.recordFailure();
+            }
         }
 
         return result;
@@ -1204,11 +1237,8 @@ namespace DPApp {
             float global_bbox_max[3] = { std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest() }; // 최소값으로 초기화
 
             // .nodes2 파일로 geometry 정보 출력하기 위한 outputfilestream 생성
-            std::ofstream* filestream = nullptr;
-            filestream = new std::ofstream(output_file_name, std::ios::out | std::ios::binary);
-
-            if (!filestream->good())
-            {
+            std::ofstream filestream(output_file_name, std::ios::out | std::ios::binary);
+            if (!filestream.good()) {
                 std::cerr << "file open failure : " << output_file_name << std::endl;
                 return false;
             }
@@ -1338,7 +1368,7 @@ namespace DPApp {
                 delete[] vertex_buffer;
 
                 // .nodes2 파일에 bim_info 저장
-                bim_info.save(bim_id, node_name, is_offset_applied, offset, *filestream);
+                bim_info.save(bim_id, node_name, is_offset_applied, offset, filestream);
 
                 // Progress 출력
                 processed_gltf_files++;
@@ -1347,7 +1377,7 @@ namespace DPApp {
                     std::cout << "Processed " << processed_gltf_files << " / " << total_gltf_files << " (" << progress << "%)" << std::endl;
             }
 
-            filestream->close();
+            filestream.close();
 
             return true;
         }
