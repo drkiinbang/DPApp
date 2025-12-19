@@ -221,7 +221,7 @@ namespace DPApp {
             const uint8_t* ptr;
             ptr = reinterpret_cast<const uint8_t*>(&chunk.chunk_id); data.insert(data.end(), ptr, ptr + sizeof(uint32_t));
             ptr = reinterpret_cast<const uint8_t*>(&points_count); data.insert(data.end(), ptr, ptr + sizeof(uint64_t));
-            ptr = reinterpret_cast<const uint8_t*>(&chunk.min_x); data.insert(data.end(), ptr, ptr + sizeof(double) * 6);
+            ptr = reinterpret_cast<const uint8_t*>(&chunk.min_x); data.insert(data.end(), ptr, ptr + sizeof(float) * 6);
             ptr = reinterpret_cast<const uint8_t*>(&filename_len); data.insert(data.end(), ptr, ptr + sizeof(uint64_t));
             data.insert(data.end(), chunk.header.filename.begin(), chunk.header.filename.end());
             for (const auto& point : chunk.points) {
@@ -239,7 +239,8 @@ namespace DPApp {
             std::memcpy(&chunk.chunk_id, data.data() + offset, sizeof(uint32_t)); offset += sizeof(uint32_t);
             uint64_t points_count;
             std::memcpy(&points_count, data.data() + offset, sizeof(uint64_t)); offset += sizeof(uint64_t);
-            std::memcpy(&chunk.min_x, data.data() + offset, sizeof(double) * 6); offset += sizeof(double) * 6;
+            std::memcpy(&chunk.min_x, data.data() + offset, sizeof(float) * 6); offset += sizeof(float) * 6;
+
             uint64_t filename_len;
             std::memcpy(&filename_len, data.data() + offset, sizeof(uint64_t)); offset += sizeof(uint64_t);
             size_t expected_size = header_size + filename_len + (points_count * sizeof(Point3D));
