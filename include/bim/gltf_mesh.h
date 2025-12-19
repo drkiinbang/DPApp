@@ -380,6 +380,41 @@ namespace chunkbim {
 			}
 		}
 
+		size_t getNumMeshes(const std::string& filename) {
+			tinygltf::Model model;
+			tinygltf::TinyGLTF loader;
+			std::string err, warn;
+
+			bool ok = false;
+
+			const auto dotPos = filename.find_last_of('.');
+			if (dotPos == std::string::npos) {
+				std::cerr << "No file extension.\n";
+				return size_t(0);
+			}
+			std::string ext = filename.substr(dotPos + 1);
+			to_lower(ext);
+			if (ext == "glb") {
+				ok = loader.LoadBinaryFromFile(&model, &err, &warn, filename);
+			}
+			else if (ext == "gltf") {
+				ok = loader.LoadASCIIFromFile(&model, &err, &warn, filename);
+			}
+			else {
+				std::cerr << "Unsupported extension: " << ext << "\n";
+				return size_t(0);
+			}
+
+			if (!warn.empty()) std::cerr << "Warn: " << warn << "\n";
+			if (!err.empty())  std::cerr << "Err : " << err << "\n";
+			if (!ok) {
+				std::cerr << "Failed to load glTF\n";
+				return size_t(0);
+			}
+
+			return model.meshes.size();
+		}
+
 		bool importMeshData(const std::string& filename,
 			std::vector<MeshChunk>& meshChunks,
 			const int extractionOption = 0)
