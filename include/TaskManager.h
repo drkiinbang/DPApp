@@ -156,6 +156,13 @@ namespace DPApp {
         TaskType current_task_type_;        // Fixed task type for this session
         std::vector<uint8_t> task_parameters_; // Fixed parameters for this session
 
+        /// Structure to hold pending callback information
+        struct PendingFailCallback {
+            bool should_invoke = false;
+            TaskInfo task_info;
+            std::string error_message;
+        };
+
     public:
         explicit TaskManager(const uint32_t timeout_seconds, TaskType task_type, const std::vector<uint8_t>& parameters)
             : next_task_id_(1), task_timeout_seconds_(timeout_seconds), current_slave_index_(0),
@@ -340,56 +347,90 @@ namespace DPApp {
          * @brief Complete a task with results
          */
         bool completeTask(uint32_t task_id, const ProcessingResult& result) {
-            std::scoped_lock lock(tasks_mutex_, slaves_mutex_, results_mutex_);
+            /// Data for deferred callback invocation
+            bool should_invoke_completed_callback = false;
+            TaskInfo task_info_copy;
+            PendingFailCallback pending_fail;
 
-            auto task_it = tasks_.find(task_id);
-            if (task_it == tasks_.end()) {
-                return false;
-            }
+            /// Critical section - hold locks only for data manipulation
+            {
+                std::scoped_lock lock(tasks_mutex_, slaves_mutex_, results_mutex_);
 
-            TaskInfo& task_info = task_it->second;
+                auto task_it = tasks_.find(task_id);
+                if (task_it == tasks_.end()) {
+                    return false;
+                }
 
-            if (result.success) {
-                task_info.status = TaskStatus::COMPLETED;
-                completed_results_.push_back(result);
+                TaskInfo& task_info = task_it->second;
 
-                // Update slave statistics
-                if (!task_info.assigned_slave.empty()) {
-                    auto slave_it = slaves_.find(task_info.assigned_slave);
-                    if (slave_it != slaves_.end()) {
-                        slave_it->second.is_busy = false;
-                        slave_it->second.current_task_id.clear();
-                        slave_it->second.completed_tasks++;
+                if (result.success) {
+                    task_info.status = TaskStatus::COMPLETED;
+                    completed_results_.push_back(result);
 
-                        // Calculate processing time
-                        auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            std::chrono::steady_clock::now() - task_info.assigned_time).count() / 1000.0;
+                    /// Update slave statistics
+                    if (!task_info.assigned_slave.empty()) {
+                        auto slave_it = slaves_.find(task_info.assigned_slave);
+                        if (slave_it != slaves_.end()) {
+                            slave_it->second.is_busy = false;
+                            slave_it->second.current_task_id.clear();
+                            slave_it->second.completed_tasks++;
 
-                        updateSlaveStatistics(task_info.assigned_slave, true, processing_time);
+                            /// Calculate processing time
+                            auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now() - task_info.assigned_time).count() / 1000.0;
+
+                            updateSlaveStatistics(task_info.assigned_slave, true, processing_time);
+                        }
                     }
+
+                    task_info.completed_time = std::chrono::steady_clock::now();
+
+                    /// Prepare for deferred callback invocation
+                    if (task_completed_callback_) {
+                        should_invoke_completed_callback = true;
+                        task_info_copy = task_info;
+                    }
+
+                    std::cout << "Task " << task_id << " completed successfully" << std::endl;
                 }
-
-                task_info.completed_time = std::chrono::steady_clock::now();
-
-                if (task_completed_callback_) {
-                    task_completed_callback_(task_info, result);
+                else {
+                    /// Handle failure case - get pending callback info
+                    pending_fail = failTaskInternalNoCallback(task_id, result.error_message);
                 }
-
-                std::cout << "Task " << task_id << " completed successfully" << std::endl;
             }
-            else {
-                failTaskInternal(task_id, result.error_message);
+            /// Lock released here
+
+            /// Invoke callbacks outside of critical section to prevent deadlock
+            if (should_invoke_completed_callback) {
+                task_completed_callback_(task_info_copy, result);
+            }
+            if (pending_fail.should_invoke) {
+                task_failed_callback_(pending_fail.task_info, pending_fail.error_message);
             }
 
             return true;
         }
 
         /**
-         * @brief Mark a task as failed
-         */
+        * @brief Mark a task as failed
+        * This function handles task failure with retry logic.
+        * Callbacks are invoked AFTER releasing locks to prevent deadlock.
+        */
         bool failTask(uint32_t task_id, const std::string& error_message) {
-            std::scoped_lock lock(tasks_mutex_, slaves_mutex_);
-            failTaskInternal(task_id, error_message);
+            PendingFailCallback pending_fail;
+
+            /// Critical section - hold locks only for data manipulation
+            {
+                std::scoped_lock lock(tasks_mutex_, slaves_mutex_);
+                pending_fail = failTaskInternalNoCallback(task_id, error_message);
+            }
+            /// Lock released here
+
+            /// Invoke callback outside of critical section to prevent deadlock
+            if (pending_fail.should_invoke) {
+                task_failed_callback_(pending_fail.task_info, pending_fail.error_message);
+            }
+
             return true;
         }
 
@@ -552,35 +593,53 @@ namespace DPApp {
         }
 
         /**
-         * @brief Check for timed out tasks and slaves
-         */
+        * @brief Check for timed out tasks and handle them
+        * This function scans all active tasks for timeouts and marks them as failed.
+        * Callbacks are collected during the scan and invoked AFTER releasing locks
+        * to prevent deadlock.
+        */
         void checkTimeouts() {
-            std::scoped_lock lock(tasks_mutex_, slaves_mutex_);
-            auto now = std::chrono::steady_clock::now();
+            /// Collect all pending callbacks for deferred invocation
+            std::vector<PendingFailCallback> pending_callbacks;
 
-            int timed_out_count = 0;
-            for (auto& [task_id, task_info] : tasks_) {
-                if (task_info.status == TaskStatus::ASSIGNED ||
-                    task_info.status == TaskStatus::IN_PROGRESS) {
+            /// Critical section - hold locks only for data manipulation
+            {
+                std::scoped_lock lock(tasks_mutex_, slaves_mutex_);
+                auto now = std::chrono::steady_clock::now();
 
-                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-                        now - task_info.assigned_time).count();
+                int timed_out_count = 0;
+                for (auto& [task_id, task_info] : tasks_) {
+                    if (task_info.status == TaskStatus::ASSIGNED ||
+                        task_info.status == TaskStatus::IN_PROGRESS) {
 
-                    if (elapsed > static_cast<int64_t>(task_timeout_seconds_)) {
-                        std::cout << "Task " << task_id << " timed out after "
-                            << elapsed << " seconds" << std::endl;
+                        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                            now - task_info.assigned_time).count();
 
-                        task_info.status = TaskStatus::TIMEOUT;
-                        timed_out_count++;
+                        if (elapsed > static_cast<int64_t>(task_timeout_seconds_)) {
+                            std::cout << "Task " << task_id << " timed out after "
+                                << elapsed << " seconds" << std::endl;
 
-                        // failTaskInternal이 slave 상태 업데이트를 처리함
-                        failTaskInternal(task_id, "Task timeout");
+                            task_info.status = TaskStatus::TIMEOUT;
+                            timed_out_count++;
+
+                            /// Process failure and collect callback info
+                            auto pending = failTaskInternalNoCallback(task_id, "Task timeout");
+                            if (pending.should_invoke) {
+                                pending_callbacks.push_back(std::move(pending));
+                            }
+                        }
                     }
                 }
-            }
 
-            if (timed_out_count > 0) {
-                std::cout << "Found " << timed_out_count << " timed out tasks" << std::endl;
+                if (timed_out_count > 0) {
+                    std::cout << "Found " << timed_out_count << " timed out tasks" << std::endl;
+                }
+            }
+            /// Lock released here
+
+            /// Invoke all collected callbacks outside of critical section
+            for (const auto& pending : pending_callbacks) {
+                task_failed_callback_(pending.task_info, pending.error_message);
             }
         }
 
@@ -610,6 +669,62 @@ namespace DPApp {
         }
 
     private:
+		/**
+	    * @brief Internal task failure handling with retry logic (no callback invocation)
+	    * This function performs all failure handling logic but doesn't invoke
+	    * callbacks. Instead, it returns information needed to invoke the callback
+	    * after locks are released.
+	    *
+	    * IMPORTANT: Caller must hold tasks_mutex_ and slaves_mutex_ before calling.
+        */
+        PendingFailCallback failTaskInternalNoCallback(uint32_t task_id, const std::string& error_message) {
+            PendingFailCallback result;
+            result.should_invoke = false;
+            result.error_message = error_message;
+
+            auto task_it = tasks_.find(task_id);
+            if (task_it == tasks_.end()) {
+                return result;
+            }
+
+            TaskInfo& task_info = task_it->second;
+            task_info.retry_count++;
+
+            /// Update slave statistics
+            if (!task_info.assigned_slave.empty()) {
+                auto slave_it = slaves_.find(task_info.assigned_slave);
+                if (slave_it != slaves_.end()) {
+                    slave_it->second.is_busy = false;
+                    slave_it->second.current_task_id.clear();
+                    slave_it->second.failed_tasks++;
+
+                    auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - task_info.assigned_time).count() / 1000.0;
+
+                    updateSlaveStatistics(task_info.assigned_slave, false, processing_time);
+                }
+            }
+
+            /// Check retry logic
+            if (task_info.retry_count < task_info.max_retries) {
+                task_info.status = TaskStatus::PENDING;
+                task_info.assigned_slave.clear();
+                std::cout << "Task " << task_id << " failed, retrying..." << std::endl;
+            }
+            else {
+                task_info.status = TaskStatus::FAILED;
+                std::cout << "Task " << task_id << " failed permanently." << std::endl;
+
+                /// Prepare callback info for deferred invocation
+                if (task_failed_callback_) {
+                    result.should_invoke = true;
+                    result.task_info = task_info;
+                }
+            }
+
+            return result;
+        }
+
         /**
          * @brief Internal task failure handling with retry logic
          */

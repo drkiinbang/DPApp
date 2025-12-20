@@ -68,5 +68,8 @@
     <ClInclude Include="..\include\Pc2Reader.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\include\BinaryReadWriter.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

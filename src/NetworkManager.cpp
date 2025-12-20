@@ -3,6 +3,7 @@
 
 #include "../include/NetworkManager.h"
 #include "../include/Logger.h"
+#include "../include/BinaryReadWriter.hpp"
 
 #include <iostream>
 #include <sstream>
@@ -17,10 +18,10 @@ namespace DPApp {
     //========================================
     // NetworkMessage Implementation
     //========================================
-    NetworkMessage::NetworkMessage(MessageType type, const std::vector<uint8_t>& payload)
-        : data(payload) {
+    NetworkMessage::NetworkMessage(MessageType type, std::vector<uint8_t> payload)
+        : data(std::move(payload)) { /// [Fix] Move payload into member variable
         header.type = type;
-        header.data_length = static_cast<uint32_t>(payload.size());
+        header.data_length = static_cast<uint32_t>(data.size()); // use member .size()
         calculateChecksum();
     }
 
@@ -33,7 +34,7 @@ namespace DPApp {
         return buffer;
     }
 
-    NetworkMessage NetworkMessage::deserialize(const std::vector<uint8_t>& header_buffer, const std::vector<uint8_t>& data_buffer) {
+    NetworkMessage NetworkMessage::deserialize(const std::vector<uint8_t>& header_buffer, std::vector<uint8_t> data_buffer) {
         if (header_buffer.size() < sizeof(MessageHeader)) {
             throw std::runtime_error("Buffer too small for message header");
         }
@@ -45,7 +46,7 @@ namespace DPApp {
             throw std::runtime_error("Invalid magic number");
         }
 
-        message.data = data_buffer;
+        message.data = std::move(data_buffer);
 
         if (message.header.data_length != message.data.size()) {
             throw std::runtime_error("Data length mismatch in header vs actual data");
@@ -79,8 +80,13 @@ namespace DPApp {
             }
             buffer.resize(bytes_to_receive);
             size_t total_bytes_received = 0;
+
             while (total_bytes_received < bytes_to_receive) {
-                int bytes_received = recv(socket_fd, reinterpret_cast<char*>(buffer.data()) + total_bytes_received, static_cast<int>(bytes_to_receive - total_bytes_received), 0);
+                /// Fix char* casting and clarify remaining byte calculation
+                int bytes_received = recv(socket_fd,
+                    reinterpret_cast<char*>(buffer.data()) + total_bytes_received,
+                    static_cast<int>(bytes_to_receive - total_bytes_received), 0);
+
                 if (bytes_received == 0) {
                     ILOG << "Disconnected: bytes_received == 0";
                     return false;
@@ -89,16 +95,19 @@ namespace DPApp {
 #ifdef _WIN32
                     int error = WSAGetLastError();
                     if (error == WSAEWOULDBLOCK || error == WSAEINTR) {
-                        ILOG << "Retry (in case nonblocking socket or interrupt)";
+                        /// [Fix] Sleep briefly (1 ms) to prevent CPU spikes
+                        /// A better approach is to use select(), but sleep is an effective minimal fix
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
                         continue;
                     }
 #else
                     if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
-                        ILOG << "errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR";
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
                         continue;
                     }
 #endif
-                    ILOG << "Disconnected: bytes_received < 0";
+                    /// Provide more detailed logging
+                    ILOG << "Disconnected: error code " << error;
                     return false;
                 }
                 total_bytes_received += bytes_received;
@@ -138,525 +147,568 @@ namespace DPApp {
             return ~crc;
         }
 
+        /// ================================================================
+        /// Task Serialization
+        /// ================================================================
         std::vector<uint8_t> serializeTask(const ProcessingTask& task) {
             std::vector<uint8_t> data;
-            data.reserve(sizeof(uint32_t) * 2 + sizeof(uint8_t) + sizeof(uint64_t) + task.parameters.size());
-            const uint8_t* ptr;
-            ptr = reinterpret_cast<const uint8_t*>(&task.task_id);
-            data.insert(data.end(), ptr, ptr + sizeof(uint32_t));
-            ptr = reinterpret_cast<const uint8_t*>(&task.chunk_id);
-            data.insert(data.end(), ptr, ptr + sizeof(uint32_t));
-            data.push_back(static_cast<uint8_t>(task.task_type));
-            uint64_t param_len = task.parameters.size();
-            ptr = reinterpret_cast<const uint8_t*>(&param_len);
-            data.insert(data.end(), ptr, ptr + sizeof(uint64_t));
-            data.insert(data.end(), task.parameters.begin(), task.parameters.end());
+            BinaryWriter writer(data);
+
+            /// 1. Task ID and Chunk ID
+            writer.write(task.task_id);
+            writer.write(task.chunk_id);
+
+            /// 2. Task Type
+            writer.write(static_cast<uint8_t>(task.task_type));
+
+            /// 3. Parameters (Batch Write)
+            uint64_t param_len = static_cast<uint64_t>(task.parameters.size());
+            writer.write(param_len);
+
+            if (param_len > 0) {
+                /// Write the entire parameter buffer at once
+                writer.writeBytes(task.parameters.data(), static_cast<size_t>(param_len));
+            }
+
             return data;
         }
 
+        /// ================================================================
+        /// Task Deserialization
+        /// ================================================================
         ProcessingTask deserializeTask(const std::vector<uint8_t>& data) {
-            if (data.size() < sizeof(uint32_t) * 2 + sizeof(uint8_t) + sizeof(uint64_t)) throw std::runtime_error("Invalid task data size");
+            BinaryReader reader(data);
             ProcessingTask task;
-            size_t offset = 0;
-            std::memcpy(&task.task_id, data.data() + offset, sizeof(uint32_t)); offset += sizeof(uint32_t);
-            std::memcpy(&task.chunk_id, data.data() + offset, sizeof(uint32_t)); offset += sizeof(uint32_t);
-            task.task_type = static_cast<TaskType>(data[offset]); offset += sizeof(uint8_t);
-            uint64_t param_len;
-            std::memcpy(&param_len, data.data() + offset, sizeof(uint64_t)); offset += sizeof(uint64_t);
-            if (offset + param_len > data.size()) throw std::runtime_error("Invalid task data format");
-            task.parameters.assign(data.begin() + offset, data.begin() + offset + param_len);
+
+            /// 1. Task ID and Chunk ID
+            task.task_id = reader.read<uint32_t>();
+            task.chunk_id = reader.read<uint32_t>();
+
+            /// 2. Task Type
+            task.task_type = static_cast<TaskType>(reader.read<uint8_t>());
+
+            /// 3. Parameters (Batch Read)
+            uint64_t param_len = reader.read<uint64_t>();
+            if (param_len > 0) {
+                /// Get a direct pointer to the data buffer (Zero-copy or single memcpy)
+                const void* ptr = reader.readBytesRef(static_cast<size_t>(param_len));
+                const uint8_t* byte_ptr = static_cast<const uint8_t*>(ptr);
+                task.parameters.assign(byte_ptr, byte_ptr + param_len);
+            }
+
             return task;
         }
 
+        /// ================================================================
+        /// Result Serialization
+        /// ================================================================
         std::vector<uint8_t> serializeResult(const ProcessingResult& result) {
             std::vector<uint8_t> data;
-            uint64_t error_msg_len = result.error_message.length();
-            uint64_t points_len = result.processed_points.size();
-            uint64_t result_data_len = result.result_data.size();
-            size_t total_size = sizeof(uint32_t) * 2 + sizeof(bool) + sizeof(uint64_t) * 3 + error_msg_len + (points_len * sizeof(Point3D)) + result_data_len;
-            data.reserve(total_size);
-            const uint8_t* ptr;
-            ptr = reinterpret_cast<const uint8_t*>(&result.task_id); data.insert(data.end(), ptr, ptr + sizeof(uint32_t));
-            ptr = reinterpret_cast<const uint8_t*>(&result.chunk_id); data.insert(data.end(), ptr, ptr + sizeof(uint32_t));
-            ptr = reinterpret_cast<const uint8_t*>(&result.success); data.insert(data.end(), ptr, ptr + sizeof(bool));
-            ptr = reinterpret_cast<const uint8_t*>(&error_msg_len); data.insert(data.end(), ptr, ptr + sizeof(uint64_t));
-            ptr = reinterpret_cast<const uint8_t*>(&points_len); data.insert(data.end(), ptr, ptr + sizeof(uint64_t));
-            ptr = reinterpret_cast<const uint8_t*>(&result_data_len); data.insert(data.end(), ptr, ptr + sizeof(uint64_t));
-            data.insert(data.end(), result.error_message.begin(), result.error_message.end());
-            for (const auto& point : result.processed_points) {
-                ptr = reinterpret_cast<const uint8_t*>(&point);
-                data.insert(data.end(), ptr, ptr + sizeof(Point3D));
+            BinaryWriter writer(data);
+
+            /// 1. Headers
+            writer.write(result.task_id);
+            writer.write(result.chunk_id);
+            writer.write(static_cast<uint8_t>(result.success ? 1 : 0));
+
+            uint64_t error_msg_len = static_cast<uint64_t>(result.error_message.length());
+            uint64_t points_len = static_cast<uint64_t>(result.processed_points.size());
+            uint64_t result_data_len = static_cast<uint64_t>(result.result_data.size());
+
+            writer.write(error_msg_len);
+            writer.write(points_len);
+            writer.write(result_data_len);
+
+            /// 2. Error Message
+            if (error_msg_len > 0) {
+                writer.writeBytes(result.error_message.data(), static_cast<size_t>(error_msg_len));
             }
-            data.insert(data.end(), result.result_data.begin(), result.result_data.end());
+
+            /// 3. Processed Points (Optimized Batch Write)
+            if (points_len > 0) {
+                /// Since Point3D might not be a POD type (contains vector), we flatten it first.
+                /// Prepare a contiguous float buffer [x, y, z, x, y, z, ...]
+                std::vector<float> raw_floats;
+                raw_floats.reserve(points_len * 3);
+                for (const auto& point : result.processed_points) {
+                    raw_floats.push_back(point.x());
+                    raw_floats.push_back(point.y());
+                    raw_floats.push_back(point.z());
+                }
+                /// Write all floats in one go (fastest on Intel/AMD)
+                writer.writeBytes(raw_floats.data(), raw_floats.size() * sizeof(float));
+            }
+
+            /// 4. Result Data
+            if (result_data_len > 0) {
+                writer.writeBytes(result.result_data.data(), static_cast<size_t>(result_data_len));
+            }
+
             return data;
         }
 
+        /// ================================================================
+        /// Result Deserialization
+        /// ================================================================
         ProcessingResult deserializeResult(const std::vector<uint8_t>& data) {
-            size_t header_size = sizeof(uint32_t) * 2 + sizeof(bool) + sizeof(uint64_t) * 3;
-            if (data.size() < header_size) throw std::runtime_error("Invalid result data size");
+            BinaryReader reader(data);
             ProcessingResult result;
-            size_t offset = 0;
-            std::memcpy(&result.task_id, data.data() + offset, sizeof(uint32_t)); offset += sizeof(uint32_t);
-            std::memcpy(&result.chunk_id, data.data() + offset, sizeof(uint32_t)); offset += sizeof(uint32_t);
-            std::memcpy(&result.success, data.data() + offset, sizeof(bool)); offset += sizeof(bool);
-            uint64_t error_msg_len, points_len, result_data_len;
-            std::memcpy(&error_msg_len, data.data() + offset, sizeof(uint64_t)); offset += sizeof(uint64_t);
-            std::memcpy(&points_len, data.data() + offset, sizeof(uint64_t)); offset += sizeof(uint64_t);
-            std::memcpy(&result_data_len, data.data() + offset, sizeof(uint64_t)); offset += sizeof(uint64_t);
-            size_t expected_size = header_size + error_msg_len + (points_len * sizeof(Point3D)) + result_data_len;
-            if (data.size() != expected_size) throw std::runtime_error("Invalid result data format");
-            if (error_msg_len > 0) { result.error_message.assign(reinterpret_cast<const char*>(data.data() + offset), error_msg_len); offset += error_msg_len; }
-            result.processed_points.resize(points_len);
-            std::memcpy(result.processed_points.data(), data.data() + offset, points_len * sizeof(Point3D)); offset += points_len * sizeof(Point3D);
-            if (result_data_len > 0) result.result_data.assign(data.begin() + offset, data.end());
+
+            /// 1. Headers
+            result.task_id = reader.read<uint32_t>();
+            result.chunk_id = reader.read<uint32_t>();
+            result.success = (reader.read<uint8_t>() != 0);
+
+            uint64_t error_msg_len = reader.read<uint64_t>();
+            uint64_t points_len = reader.read<uint64_t>();
+            uint64_t result_data_len = reader.read<uint64_t>();
+
+            /// 2. Error Message
+            if (error_msg_len > 0) {
+                const void* ptr = reader.readBytesRef(static_cast<size_t>(error_msg_len));
+                result.error_message.assign(static_cast<const char*>(ptr), static_cast<size_t>(error_msg_len));
+            }
+
+            /// 3. Processed Points (Optimized Batch Read)
+            if (points_len > 0) {
+                result.processed_points.resize(static_cast<size_t>(points_len));
+
+                /// Calculate total size for all points (3 floats per point)
+                size_t total_floats = static_cast<size_t>(points_len) * 3;
+                size_t total_bytes = total_floats * sizeof(float);
+
+                /// Get direct pointer to raw memory (No per-point function call overhead)
+                /// Since we are on Intel/AMD (Little Endian), we can cast bytes directly to float*
+                const uint8_t* raw_bytes = static_cast<const uint8_t*>(reader.readBytesRef(total_bytes));
+
+                for (size_t i = 0; i < static_cast<size_t>(points_len); ++i) {
+                    float x, y, z;
+                    std::memcpy(&x, raw_bytes + (i * 3 + 0) * sizeof(float), sizeof(float));
+                    std::memcpy(&y, raw_bytes + (i * 3 + 1) * sizeof(float), sizeof(float));
+                    std::memcpy(&z, raw_bytes + (i * 3 + 2) * sizeof(float), sizeof(float));
+                    result.processed_points[i] = Point3D(x, y, z);
+                }
+            }
+
+            /// 4. Result Data
+            if (result_data_len > 0) {
+                const void* ptr = reader.readBytesRef(static_cast<size_t>(result_data_len));
+                const uint8_t* byte_ptr = static_cast<const uint8_t*>(ptr);
+                result.result_data.assign(byte_ptr, byte_ptr + result_data_len);
+            }
+
             return result;
         }
 
+        /// ================================================================
+        /// Chunk Serialization
+        /// ================================================================
         std::vector<uint8_t> serializeChunk(const PointCloudChunk& chunk) {
             std::vector<uint8_t> data;
-            uint64_t points_count = chunk.points.size();
-            uint64_t filename_len = chunk.header.filename.length();
-            size_t total_size = sizeof(uint32_t) + sizeof(uint64_t) + sizeof(double) * 6 + sizeof(uint64_t) + filename_len + (points_count * sizeof(Point3D));
-            data.reserve(total_size);
-            const uint8_t* ptr;
-            ptr = reinterpret_cast<const uint8_t*>(&chunk.chunk_id); data.insert(data.end(), ptr, ptr + sizeof(uint32_t));
-            ptr = reinterpret_cast<const uint8_t*>(&points_count); data.insert(data.end(), ptr, ptr + sizeof(uint64_t));
-            ptr = reinterpret_cast<const uint8_t*>(&chunk.min_x); data.insert(data.end(), ptr, ptr + sizeof(float) * 6);
-            ptr = reinterpret_cast<const uint8_t*>(&filename_len); data.insert(data.end(), ptr, ptr + sizeof(uint64_t));
-            data.insert(data.end(), chunk.header.filename.begin(), chunk.header.filename.end());
-            for (const auto& point : chunk.points) {
-                ptr = reinterpret_cast<const uint8_t*>(&point);
-                data.insert(data.end(), ptr, ptr + sizeof(Point3D));
+            BinaryWriter writer(data);
+
+            /// 1. Chunk Metadata
+            writer.write(chunk.chunk_id);
+            uint64_t points_count = static_cast<uint64_t>(chunk.points.size());
+            writer.write(points_count);
+
+            writer.write(chunk.min_x); writer.write(chunk.min_y); writer.write(chunk.min_z);
+            writer.write(chunk.max_x); writer.write(chunk.max_y); writer.write(chunk.max_z);
+
+            uint64_t filename_len = static_cast<uint64_t>(chunk.header.filename.length());
+            writer.write(filename_len);
+            if (filename_len > 0) {
+                writer.writeBytes(chunk.header.filename.data(), static_cast<size_t>(filename_len));
             }
+
+            /// 2. Points Data (Optimized Batch Write)
+            if (points_count > 0) {
+                /// Flatten point data into a continuous float buffer
+                std::vector<float> raw_floats;
+                raw_floats.reserve(points_count * 3);
+                for (const auto& point : chunk.points) {
+                    raw_floats.push_back(point.x());
+                    raw_floats.push_back(point.y());
+                    raw_floats.push_back(point.z());
+                }
+                /// Bulk write to the buffer
+                writer.writeBytes(raw_floats.data(), raw_floats.size() * sizeof(float));
+            }
+
             return data;
         }
 
+        /// ================================================================
+        /// Chunk Deserialization
+        /// ================================================================
         PointCloudChunk deserializeChunk(const std::vector<uint8_t>& data) {
-            size_t header_size = sizeof(uint32_t) + sizeof(uint64_t) + sizeof(double) * 6 + sizeof(uint64_t);
-            if (data.size() < header_size) throw std::runtime_error("Invalid chunk data size");
+            BinaryReader reader(data);
             PointCloudChunk chunk;
-            size_t offset = 0;
-            std::memcpy(&chunk.chunk_id, data.data() + offset, sizeof(uint32_t)); offset += sizeof(uint32_t);
-            uint64_t points_count;
-            std::memcpy(&points_count, data.data() + offset, sizeof(uint64_t)); offset += sizeof(uint64_t);
-            std::memcpy(&chunk.min_x, data.data() + offset, sizeof(float) * 6); offset += sizeof(float) * 6;
 
-            uint64_t filename_len;
-            std::memcpy(&filename_len, data.data() + offset, sizeof(uint64_t)); offset += sizeof(uint64_t);
-            size_t expected_size = header_size + filename_len + (points_count * sizeof(Point3D));
-            if (data.size() != expected_size) throw std::runtime_error("Invalid chunk data format");
-            if (filename_len > 0) { chunk.header.filename.assign(reinterpret_cast<const char*>(data.data() + offset), filename_len); offset += filename_len; }
-            chunk.points.resize(points_count);
-            std::memcpy(chunk.points.data(), data.data() + offset, points_count * sizeof(Point3D));
+            /// 1. Chunk Metadata
+            chunk.chunk_id = reader.read<uint32_t>();
+            uint64_t points_count = reader.read<uint64_t>();
+
+            chunk.min_x = reader.read<float>(); chunk.min_y = reader.read<float>(); chunk.min_z = reader.read<float>();
+            chunk.max_x = reader.read<float>(); chunk.max_y = reader.read<float>(); chunk.max_z = reader.read<float>();
+
+            uint64_t filename_len = reader.read<uint64_t>();
+            if (filename_len > 0) {
+                const void* ptr = reader.readBytesRef(static_cast<size_t>(filename_len));
+                chunk.header.filename.assign(static_cast<const char*>(ptr), static_cast<size_t>(filename_len));
+            }
+
+            /// 2. Points Data (Optimized Batch Read)
+            if (points_count > 0) {
+                chunk.points.resize(static_cast<size_t>(points_count));
+
+                size_t total_floats = static_cast<size_t>(points_count) * 3;
+                size_t total_bytes = total_floats * sizeof(float);
+
+                /// Get pointer to raw bytes and cast to float*
+                /// This assumes Little Endian architecture (Intel/AMD standard)
+                const uint8_t* raw_bytes = static_cast<const uint8_t*>(reader.readBytesRef(total_bytes));
+
+                for (size_t i = 0; i < static_cast<size_t>(points_count); ++i) {
+                    float x, y, z;
+                    std::memcpy(&x, raw_bytes + (i * 3 + 0) * sizeof(float), sizeof(float));
+                    std::memcpy(&y, raw_bytes + (i * 3 + 1) * sizeof(float), sizeof(float));
+                    std::memcpy(&z, raw_bytes + (i * 3 + 2) * sizeof(float), sizeof(float));
+                    chunk.points[i] = Point3D(x, y, z);
+                }
+            }
+
             return chunk;
         }
 
-        // ================================================================
-        // MeshChunk 직렬화
-        // ================================================================
+        /// ================================================================
+        /// MeshChunk Serialization (Optimized Batch Write)
+        /// ================================================================
         std::vector<uint8_t> serializeMeshChunk(const chunkbim::MeshChunk& meshChunk) {
             std::vector<uint8_t> data;
+            BinaryWriter writer(data);
 
-            // 1. id (4 bytes)
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&meshChunk.id),
-                reinterpret_cast<const uint8_t*>(&meshChunk.id) + sizeof(int));
+            /// 1. ID and Name
+            writer.write(meshChunk.id);
+            writer.writeString(meshChunk.name);
 
-            // 2. name 길이 및 데이터
-            uint32_t name_length = static_cast<uint32_t>(meshChunk.name.size());
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&name_length),
-                reinterpret_cast<const uint8_t*>(&name_length) + sizeof(uint32_t));
-            if (name_length > 0) {
-                data.insert(data.end(), meshChunk.name.begin(), meshChunk.name.end());
-            }
-
-            // 3. vertices 개수 (4 bytes)
+            /// 2. Vertices (Batch Write)
             uint32_t vertex_count = static_cast<uint32_t>(meshChunk.vertices.size());
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&vertex_count),
-                reinterpret_cast<const uint8_t*>(&vertex_count) + sizeof(uint32_t));
+            writer.write(vertex_count);
 
-            // 4. vertices 데이터 (각 vertex는 pctree::XYZPoint = double x 3 = 24 bytes)
-            for (const auto& vtx : meshChunk.vertices) {
-                double coords[3] = { vtx[0], vtx[1], vtx[2] };
-                data.insert(data.end(),
-                    reinterpret_cast<const uint8_t*>(coords),
-                    reinterpret_cast<const uint8_t*>(coords) + sizeof(double) * 3);
+            if (vertex_count > 0) {
+                /// Flatten XYZPoint (non-POD due to internal vector) to raw floats
+                std::vector<float> raw_vertices;
+                raw_vertices.reserve(vertex_count * 3);
+                for (const auto& vtx : meshChunk.vertices) {
+                    raw_vertices.push_back(vtx.x());
+                    raw_vertices.push_back(vtx.y());
+                    raw_vertices.push_back(vtx.z());
+                }
+                writer.writeBytes(raw_vertices.data(), raw_vertices.size() * sizeof(float));
             }
 
-            // 5. faces 개수 (4 bytes)
+            /// 3. Faces (Batch Write)
             uint32_t face_count = static_cast<uint32_t>(meshChunk.faces.size());
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&face_count),
-                reinterpret_cast<const uint8_t*>(&face_count) + sizeof(uint32_t));
+            writer.write(face_count);
 
-            // 6. faces 데이터 (각 FaceVtx: normal(double x 3 = 24) + idxVtx(uint x 3 = 12) = 36 bytes)
-            for (const auto& face : meshChunk.faces) {
-                // normal (double x 3)
-                double normal[3] = { face.normal[0], face.normal[1], face.normal[2] };
-                data.insert(data.end(),
-                    reinterpret_cast<const uint8_t*>(normal),
-                    reinterpret_cast<const uint8_t*>(normal) + sizeof(double) * 3);
+            if (face_count > 0) {
+                /// Separate normals and indices for efficient batch writing
+                std::vector<float> raw_normals;
+                std::vector<unsigned int> raw_indices;
 
-                // idxVtx (unsigned int x 3)
-                data.insert(data.end(),
-                    reinterpret_cast<const uint8_t*>(face.idxVtx),
-                    reinterpret_cast<const uint8_t*>(face.idxVtx) + sizeof(unsigned int) * 3);
+                raw_normals.reserve(face_count * 3);
+                raw_indices.reserve(face_count * 3);
+
+                for (const auto& face : meshChunk.faces) {
+                    /// Normals
+                    raw_normals.push_back(face.normal.x());
+                    raw_normals.push_back(face.normal.y());
+                    raw_normals.push_back(face.normal.z());
+
+                    /// Indices
+                    raw_indices.push_back(face.idxVtx[0]);
+                    raw_indices.push_back(face.idxVtx[1]);
+                    raw_indices.push_back(face.idxVtx[2]);
+                }
+
+                writer.writeBytes(raw_normals.data(), raw_normals.size() * sizeof(float));
+                writer.writeBytes(raw_indices.data(), raw_indices.size() * sizeof(unsigned int));
             }
 
-            // 7. Bounding box (float x 6 = 24 bytes)
-            float bbox[6] = { meshChunk.min_x, meshChunk.min_y, meshChunk.min_z,
-                              meshChunk.max_x, meshChunk.max_y, meshChunk.max_z };
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(bbox),
-                reinterpret_cast<const uint8_t*>(bbox) + sizeof(float) * 6);
+            /// 4. Bounding box
+            writer.write(meshChunk.min_x); writer.write(meshChunk.min_y); writer.write(meshChunk.min_z);
+            writer.write(meshChunk.max_x); writer.write(meshChunk.max_y); writer.write(meshChunk.max_z);
 
             return data;
         }
 
-        // ================================================================
-        // MeshChunk 역직렬화
-        // ================================================================
+        /// ================================================================
+        /// MeshChunk Deserialization (Optimized Batch Read)
+        /// ================================================================
         chunkbim::MeshChunk deserializeMeshChunk(const std::vector<uint8_t>& data) {
+            BinaryReader reader(data);
             chunkbim::MeshChunk meshChunk;
-            size_t offset = 0;
 
-            // 1. id
-            std::memcpy(&meshChunk.id, data.data() + offset, sizeof(int));
-            offset += sizeof(int);
+            /// 1. ID and Name
+            meshChunk.id = reader.read<int>();
+            meshChunk.name = reader.readString();
 
-            // 2. name
-            uint32_t name_length = 0;
-            std::memcpy(&name_length, data.data() + offset, sizeof(uint32_t));
-            offset += sizeof(uint32_t);
-            if (name_length > 0) {
-                meshChunk.name.assign(
-                    reinterpret_cast<const char*>(data.data() + offset), name_length);
-                offset += name_length;
+            /// 2. Vertices (Batch Read)
+            uint32_t vertex_count = reader.read<uint32_t>();
+
+            if (vertex_count > 0) {
+                meshChunk.vertices.resize(vertex_count);
+                size_t total_bytes = static_cast<size_t>(vertex_count) * 3 * sizeof(float);
+
+                /// Direct memory access
+                const uint8_t* raw_bytes = static_cast<const uint8_t*>(reader.readBytesRef(total_bytes));
+
+                for (uint32_t i = 0; i < vertex_count; ++i) {
+                    float x, y, z;
+                    std::memcpy(&x, raw_bytes + (i * 3 + 0) * sizeof(float), sizeof(float));
+                    std::memcpy(&y, raw_bytes + (i * 3 + 1) * sizeof(float), sizeof(float));
+                    std::memcpy(&z, raw_bytes + (i * 3 + 2) * sizeof(float), sizeof(float));
+                    meshChunk.vertices[i] = pctree::XYZPoint(x, y, z);
+                }
             }
 
-            // 3. vertices 개수
-            uint32_t vertex_count = 0;
-            std::memcpy(&vertex_count, data.data() + offset, sizeof(uint32_t));
-            offset += sizeof(uint32_t);
+            /// 3. Faces (Batch Read)
+            uint32_t face_count = reader.read<uint32_t>();
 
-            // 4. vertices 데이터
-            meshChunk.vertices.resize(vertex_count);
-            for (uint32_t i = 0; i < vertex_count; ++i) {
-                double coords[3];
-                std::memcpy(coords, data.data() + offset, sizeof(double) * 3);
-                offset += sizeof(double) * 3;
-                meshChunk.vertices[i] = pctree::XYZPoint(coords[0], coords[1], coords[2]);
+            if (face_count > 0) {
+                meshChunk.faces.resize(face_count);
+
+                /// Read Normals (Batch)
+                size_t normals_bytes = static_cast<size_t>(face_count) * 3 * sizeof(float);
+                const uint8_t* raw_normal_bytes = static_cast<const uint8_t*>(reader.readBytesRef(normals_bytes));
+
+                /// Read Indices (Batch)
+                size_t indices_bytes = static_cast<size_t>(face_count) * 3 * sizeof(unsigned int);
+                const uint8_t* raw_index_bytes = static_cast<const uint8_t*>(reader.readBytesRef(indices_bytes));
+
+                for (uint32_t i = 0; i < face_count; ++i) {
+                    float nx, ny, nz;
+                    std::memcpy(&nx, raw_normal_bytes + (i * 3 + 0) * sizeof(float), sizeof(float));
+                    std::memcpy(&ny, raw_normal_bytes + (i * 3 + 1) * sizeof(float), sizeof(float));
+                    std::memcpy(&nz, raw_normal_bytes + (i * 3 + 2) * sizeof(float), sizeof(float));
+                    meshChunk.faces[i].normal = pctree::XYZPoint(nx, ny, nz);
+
+                    unsigned int idx0, idx1, idx2;
+                    std::memcpy(&idx0, raw_index_bytes + (i * 3 + 0) * sizeof(unsigned int), sizeof(unsigned int));
+                    std::memcpy(&idx1, raw_index_bytes + (i * 3 + 1) * sizeof(unsigned int), sizeof(unsigned int));
+                    std::memcpy(&idx2, raw_index_bytes + (i * 3 + 2) * sizeof(unsigned int), sizeof(unsigned int));
+                    meshChunk.faces[i].idxVtx[0] = idx0;
+                    meshChunk.faces[i].idxVtx[1] = idx1;
+                    meshChunk.faces[i].idxVtx[2] = idx2;
+                }
             }
 
-            // 5. faces 개수
-            uint32_t face_count = 0;
-            std::memcpy(&face_count, data.data() + offset, sizeof(uint32_t));
-            offset += sizeof(uint32_t);
-
-            // 6. faces 데이터
-            meshChunk.faces.resize(face_count);
-            for (uint32_t i = 0; i < face_count; ++i) {
-                // normal
-                double normal[3];
-                std::memcpy(normal, data.data() + offset, sizeof(double) * 3);
-                offset += sizeof(double) * 3;
-                meshChunk.faces[i].normal = pctree::XYZPoint(normal[0], normal[1], normal[2]);
-
-                // idxVtx
-                std::memcpy(meshChunk.faces[i].idxVtx, data.data() + offset, sizeof(unsigned int) * 3);
-                offset += sizeof(unsigned int) * 3;
-            }
-
-            // 7. Bounding box
-            float bbox[6];
-            std::memcpy(bbox, data.data() + offset, sizeof(float) * 6);
-            offset += sizeof(float) * 6;
-            meshChunk.min_x = bbox[0];
-            meshChunk.min_y = bbox[1];
-            meshChunk.min_z = bbox[2];
-            meshChunk.max_x = bbox[3];
-            meshChunk.max_y = bbox[4];
-            meshChunk.max_z = bbox[5];
+            /// 4. Bounding box
+            meshChunk.min_x = reader.read<float>(); meshChunk.min_y = reader.read<float>(); meshChunk.min_z = reader.read<float>();
+            meshChunk.max_x = reader.read<float>(); meshChunk.max_y = reader.read<float>(); meshChunk.max_z = reader.read<float>();
 
             return meshChunk;
         }
 
-        // ================================================================
-        // BimPcChunk 직렬화 (mesh::MeshChunk 사용 버전)
-        // ================================================================
+        /// ================================================================
+        /// BimPcChunk Serialization (Reusing optimized logic)
+        /// ================================================================
         std::vector<uint8_t> serializeBimPcChunk(const BimPcChunk& chunk) {
             std::vector<uint8_t> data;
+            BinaryWriter writer(data);
 
-            // 1. chunk_id (4 bytes)
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&chunk.chunk_id),
-                reinterpret_cast<const uint8_t*>(&chunk.chunk_id) + sizeof(uint32_t));
+            /// 1. Meta data
+            writer.write(chunk.chunk_id);
 
-            // 2. Points 개수 (4 bytes)
+            /// 2. Point Cloud (Optimized Batch Write)
             uint32_t point_count = static_cast<uint32_t>(chunk.points.size());
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&point_count),
-                reinterpret_cast<const uint8_t*>(&point_count) + sizeof(uint32_t));
+            writer.write(point_count);
 
-            // 3. Points 데이터 (각 Point3D = double x 3 = 24 bytes)
-            for (const auto& point : chunk.points) {
-                double coords[3] = { point[0], point[1], point[2] };
-                data.insert(data.end(),
-                    reinterpret_cast<const uint8_t*>(coords),
-                    reinterpret_cast<const uint8_t*>(coords) + sizeof(double) * 3);
+            if (point_count > 0) {
+                std::vector<float> raw_floats;
+                raw_floats.reserve(point_count * 3);
+                for (const auto& point : chunk.points) {
+                    raw_floats.push_back(point.x());
+                    raw_floats.push_back(point.y());
+                    raw_floats.push_back(point.z());
+                }
+                writer.writeBytes(raw_floats.data(), raw_floats.size() * sizeof(float));
             }
 
-            // 4. PointCloud Bounding box (float x 6 = 24 bytes)
-            float pc_bbox[6] = { chunk.min_x, chunk.min_y, chunk.min_z,
-                                 chunk.max_x, chunk.max_y, chunk.max_z };
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(pc_bbox),
-                reinterpret_cast<const uint8_t*>(pc_bbox) + sizeof(float) * 6);
+            /// 3. Bounding Box
+            writer.write(chunk.min_x); writer.write(chunk.min_y); writer.write(chunk.min_z);
+            writer.write(chunk.max_x); writer.write(chunk.max_y); writer.write(chunk.max_z);
 
-            // 5. MeshChunk (bim) 직렬화
+            /// 4. MeshChunk (Nested serialization)
             std::vector<uint8_t> bim_data = serializeMeshChunk(chunk.bim);
-
-            // 5-1. bim_data 크기 (4 bytes)
             uint32_t bim_data_size = static_cast<uint32_t>(bim_data.size());
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&bim_data_size),
-                reinterpret_cast<const uint8_t*>(&bim_data_size) + sizeof(uint32_t));
 
-            // 5-2. bim_data
-            data.insert(data.end(), bim_data.begin(), bim_data.end());
+            writer.write(bim_data_size);
+            writer.writeBytes(bim_data.data(), bim_data_size);
 
             return data;
         }
 
-        // ================================================================
-        // BimPcChunk 역직렬화 (mesh::MeshChunk 사용 버전)
-        // ================================================================
+        /// ================================================================
+        /// BimPcChunk Deserialization (Reusing optimized logic)
+        /// ================================================================
         BimPcChunk deserializeBimPcChunk(const std::vector<uint8_t>& data) {
+            BinaryReader reader(data);
             BimPcChunk chunk;
-            size_t offset = 0;
 
-            // 1. chunk_id
-            std::memcpy(&chunk.chunk_id, data.data() + offset, sizeof(uint32_t));
-            offset += sizeof(uint32_t);
+            /// 1. Meta data
+            chunk.chunk_id = reader.read<uint32_t>();
 
-            // 2. Points 개수
-            uint32_t point_count = 0;
-            std::memcpy(&point_count, data.data() + offset, sizeof(uint32_t));
-            offset += sizeof(uint32_t);
+            /// 2. Point Cloud (Optimized Batch Read)
+            uint32_t point_count = reader.read<uint32_t>();
 
-            // 3. Points 데이터
-            chunk.points.resize(point_count);
-            for (uint32_t i = 0; i < point_count; ++i) {
-                double coords[3];
-                std::memcpy(coords, data.data() + offset, sizeof(double) * 3);
-                offset += sizeof(double) * 3;
-                chunk.points[i] = Point3D(coords[0], coords[1], coords[2]);
+            if (point_count > 0) {
+                chunk.points.resize(point_count);
+                size_t total_bytes = static_cast<size_t>(point_count) * 3 * sizeof(float);
+
+                /// Batch read floats directly from buffer
+                const float* raw_floats = static_cast<const float*>(reader.readBytesRef(total_bytes));
+
+                for (uint32_t i = 0; i < point_count; ++i) {
+                    chunk.points[i] = Point3D(
+                        raw_floats[i * 3 + 0],
+                        raw_floats[i * 3 + 1],
+                        raw_floats[i * 3 + 2]
+                    );
+                }
             }
 
-            // 4. PointCloud Bounding box
-            float pc_bbox[6];
-            std::memcpy(pc_bbox, data.data() + offset, sizeof(float) * 6);
-            offset += sizeof(float) * 6;
-            chunk.min_x = pc_bbox[0];
-            chunk.min_y = pc_bbox[1];
-            chunk.min_z = pc_bbox[2];
-            chunk.max_x = pc_bbox[3];
-            chunk.max_y = pc_bbox[4];
-            chunk.max_z = pc_bbox[5];
+            /// 3. Bounding Box
+            chunk.min_x = reader.read<float>(); chunk.min_y = reader.read<float>(); chunk.min_z = reader.read<float>();
+            chunk.max_x = reader.read<float>(); chunk.max_y = reader.read<float>(); chunk.max_z = reader.read<float>();
 
-            // 5. MeshChunk (bim) 역직렬화
-            // 5-1. bim_data 크기
-            uint32_t bim_data_size = 0;
-            std::memcpy(&bim_data_size, data.data() + offset, sizeof(uint32_t));
-            offset += sizeof(uint32_t);
-
-            // 5-2. bim_data
-            std::vector<uint8_t> bim_data(data.begin() + offset, data.begin() + offset + bim_data_size);
-            offset += bim_data_size;
-
-            chunk.bim = deserializeMeshChunk(bim_data);
+            /// 4. MeshChunk (Nested deserialization)
+            uint32_t bim_data_size = reader.read<uint32_t>();
+            const void* bim_ptr = reader.readBytesRef(bim_data_size);
+            const uint8_t* byte_ptr = static_cast<const uint8_t*>(bim_ptr);
+            std::vector<uint8_t> bim_buffer(byte_ptr, byte_ptr + bim_data_size);
+            chunk.bim = deserializeMeshChunk(bim_buffer);
 
             return chunk;
         }
 
-        // ================================================================
-        // BimPcResult 직렬화
-        // ================================================================
+        /// ================================================================
+        /// BimPcResult Serialization (Optimized Batch Write)
+        /// ================================================================
         std::vector<uint8_t> serializeBimPcResult(const BimPcResult& result) {
             std::vector<uint8_t> data;
+            BinaryWriter writer(data);
 
-            // 1. task_id, chunk_id (8 bytes)
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&result.task_id),
-                reinterpret_cast<const uint8_t*>(&result.task_id) + sizeof(uint32_t));
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&result.chunk_id),
-                reinterpret_cast<const uint8_t*>(&result.chunk_id) + sizeof(uint32_t));
+            /// 1. Task info and Success flag
+            writer.write(result.task_id);
+            writer.write(result.chunk_id);
+            writer.write(static_cast<uint8_t>(result.success ? 1 : 0));
 
-            // 2. success (1 byte)
-            uint8_t success_byte = result.success ? 1 : 0;
-            data.push_back(success_byte);
+            /// 2. Error Message
+            writer.writeString(result.error_message);
 
-            // 3. error_message 길이 및 데이터
-            uint32_t error_len = static_cast<uint32_t>(result.error_message.size());
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&error_len),
-                reinterpret_cast<const uint8_t*>(&error_len) + sizeof(uint32_t));
-            if (error_len > 0) {
-                data.insert(data.end(), result.error_message.begin(), result.error_message.end());
-            }
+            /// 3. Statistics
+            writer.write(result.total_points_processed);
+            writer.write(result.total_faces_processed);
+            writer.write(result.processing_time_ms);
 
-            // 4. 처리 통계
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&result.total_points_processed),
-                reinterpret_cast<const uint8_t*>(&result.total_points_processed) + sizeof(uint32_t));
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&result.total_faces_processed),
-                reinterpret_cast<const uint8_t*>(&result.total_faces_processed) + sizeof(uint32_t));
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&result.processing_time_ms),
-                reinterpret_cast<const uint8_t*>(&result.processing_time_ms) + sizeof(double));
+            /// 4. Distance results
+            writer.write(result.min_distance);
+            writer.write(result.max_distance);
+            writer.write(result.avg_distance);
+            writer.write(result.std_deviation);
 
-            // 5. 거리 계산 결과
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&result.min_distance),
-                reinterpret_cast<const uint8_t*>(&result.min_distance) + sizeof(double));
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&result.max_distance),
-                reinterpret_cast<const uint8_t*>(&result.max_distance) + sizeof(double));
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&result.avg_distance),
-                reinterpret_cast<const uint8_t*>(&result.avg_distance) + sizeof(double));
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&result.std_deviation),
-                reinterpret_cast<const uint8_t*>(&result.std_deviation) + sizeof(double));
-
-            // 6. point_distances 개수 및 데이터
+            /// 5. Point Distances (Batch Write - vector<double> is continuous)
             uint32_t dist_count = static_cast<uint32_t>(result.point_distances.size());
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&dist_count),
-                reinterpret_cast<const uint8_t*>(&dist_count) + sizeof(uint32_t));
+            writer.write(dist_count);
             if (dist_count > 0) {
-                data.insert(data.end(),
-                    reinterpret_cast<const uint8_t*>(result.point_distances.data()),
-                    reinterpret_cast<const uint8_t*>(result.point_distances.data()) + dist_count * sizeof(double));
+                writer.writeBytes(result.point_distances.data(), dist_count * sizeof(double));
             }
 
-            // 7. nearest_face_ids 개수 및 데이터
+            /// 6. Nearest Face IDs (Batch Write - vector<int32_t> is continuous)
             uint32_t face_id_count = static_cast<uint32_t>(result.nearest_face_ids.size());
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&face_id_count),
-                reinterpret_cast<const uint8_t*>(&face_id_count) + sizeof(uint32_t));
+            writer.write(face_id_count);
             if (face_id_count > 0) {
-                data.insert(data.end(),
-                    reinterpret_cast<const uint8_t*>(result.nearest_face_ids.data()),
-                    reinterpret_cast<const uint8_t*>(result.nearest_face_ids.data()) + face_id_count * sizeof(int32_t));
+                writer.writeBytes(result.nearest_face_ids.data(), face_id_count * sizeof(int32_t));
             }
 
-            // 8. 분류 결과
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&result.points_within_threshold),
-                reinterpret_cast<const uint8_t*>(&result.points_within_threshold) + sizeof(uint32_t));
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&result.points_outside_threshold),
-                reinterpret_cast<const uint8_t*>(&result.points_outside_threshold) + sizeof(uint32_t));
+            /// 7. Classification
+            writer.write(result.points_within_threshold);
+            writer.write(result.points_outside_threshold);
 
-            // 9. extra_data
+            /// 8. Extra Data
             uint32_t extra_len = static_cast<uint32_t>(result.extra_data.size());
-            data.insert(data.end(),
-                reinterpret_cast<const uint8_t*>(&extra_len),
-                reinterpret_cast<const uint8_t*>(&extra_len) + sizeof(uint32_t));
+            writer.write(extra_len);
             if (extra_len > 0) {
-                data.insert(data.end(), result.extra_data.begin(), result.extra_data.end());
+                writer.writeBytes(result.extra_data.data(), extra_len);
             }
 
             return data;
         }
 
-        // ================================================================
-        // BimPcResult 역직렬화
-        // ================================================================
+        /// ================================================================
+        /// BimPcResult Deserialization (Optimized Batch Read)
+        /// ================================================================
         BimPcResult deserializeBimPcResult(const std::vector<uint8_t>& data) {
+            BinaryReader reader(data);
             BimPcResult result;
-            size_t offset = 0;
 
-            // 1. task_id, chunk_id
-            std::memcpy(&result.task_id, data.data() + offset, sizeof(uint32_t));
-            offset += sizeof(uint32_t);
-            std::memcpy(&result.chunk_id, data.data() + offset, sizeof(uint32_t));
-            offset += sizeof(uint32_t);
+            /// 1. Task info and Success flag
+            result.task_id = reader.read<uint32_t>();
+            result.chunk_id = reader.read<uint32_t>();
+            result.success = (reader.read<uint8_t>() != 0);
 
-            // 2. success
-            result.success = (data[offset] != 0);
-            offset += 1;
+            /// 2. Error Message
+            result.error_message = reader.readString();
 
-            // 3. error_message
-            uint32_t error_len = 0;
-            std::memcpy(&error_len, data.data() + offset, sizeof(uint32_t));
-            offset += sizeof(uint32_t);
-            if (error_len > 0) {
-                result.error_message.assign(
-                    reinterpret_cast<const char*>(data.data() + offset), error_len);
-                offset += error_len;
-            }
+            /// 3. Statistics
+            result.total_points_processed = reader.read<uint32_t>();
+            result.total_faces_processed = reader.read<uint32_t>();
+            result.processing_time_ms = reader.read<double>();
 
-            // 4. 처리 통계
-            std::memcpy(&result.total_points_processed, data.data() + offset, sizeof(uint32_t));
-            offset += sizeof(uint32_t);
-            std::memcpy(&result.total_faces_processed, data.data() + offset, sizeof(uint32_t));
-            offset += sizeof(uint32_t);
-            std::memcpy(&result.processing_time_ms, data.data() + offset, sizeof(double));
-            offset += sizeof(double);
+            /// 4. Distance results
+            result.min_distance = reader.read<double>();
+            result.max_distance = reader.read<double>();
+            result.avg_distance = reader.read<double>();
+            result.std_deviation = reader.read<double>();
 
-            // 5. 거리 계산 결과
-            std::memcpy(&result.min_distance, data.data() + offset, sizeof(double));
-            offset += sizeof(double);
-            std::memcpy(&result.max_distance, data.data() + offset, sizeof(double));
-            offset += sizeof(double);
-            std::memcpy(&result.avg_distance, data.data() + offset, sizeof(double));
-            offset += sizeof(double);
-            std::memcpy(&result.std_deviation, data.data() + offset, sizeof(double));
-            offset += sizeof(double);
-
-            // 6. point_distances
-            uint32_t dist_count = 0;
-            std::memcpy(&dist_count, data.data() + offset, sizeof(uint32_t));
-            offset += sizeof(uint32_t);
+            /// 5. Point Distances (Batch Read)
+            uint32_t dist_count = reader.read<uint32_t>();
             if (dist_count > 0) {
+                size_t bytes = dist_count * sizeof(double);
+                const void* ptr = reader.readBytesRef(bytes);
+
                 result.point_distances.resize(dist_count);
-                std::memcpy(result.point_distances.data(), data.data() + offset, dist_count * sizeof(double));
-                offset += dist_count * sizeof(double);
+                /// Simple memcpy is safe here because double is a POD type
+                std::memcpy(result.point_distances.data(), ptr, bytes);
             }
 
-            // 7. nearest_face_ids
-            uint32_t face_id_count = 0;
-            std::memcpy(&face_id_count, data.data() + offset, sizeof(uint32_t));
-            offset += sizeof(uint32_t);
+            /// 6. Nearest Face IDs (Batch Read)
+            uint32_t face_id_count = reader.read<uint32_t>();
             if (face_id_count > 0) {
+                size_t bytes = face_id_count * sizeof(int32_t);
+                const void* ptr = reader.readBytesRef(bytes);
+
                 result.nearest_face_ids.resize(face_id_count);
-                std::memcpy(result.nearest_face_ids.data(), data.data() + offset, face_id_count * sizeof(int32_t));
-                offset += face_id_count * sizeof(int32_t);
+                std::memcpy(result.nearest_face_ids.data(), ptr, bytes);
             }
 
-            // 8. 분류 결과
-            std::memcpy(&result.points_within_threshold, data.data() + offset, sizeof(uint32_t));
-            offset += sizeof(uint32_t);
-            std::memcpy(&result.points_outside_threshold, data.data() + offset, sizeof(uint32_t));
-            offset += sizeof(uint32_t);
+            /// 7. Classification
+            result.points_within_threshold = reader.read<uint32_t>();
+            result.points_outside_threshold = reader.read<uint32_t>();
 
-            // 9. extra_data
-            uint32_t extra_len = 0;
-            std::memcpy(&extra_len, data.data() + offset, sizeof(uint32_t));
-            offset += sizeof(uint32_t);
+            /// 8. Extra Data
+            uint32_t extra_len = reader.read<uint32_t>();
             if (extra_len > 0) {
-                result.extra_data.assign(data.begin() + offset, data.begin() + offset + extra_len);
-                offset += extra_len;
+                const void* ptr = reader.readBytesRef(extra_len);
+                const uint8_t* byte_ptr = static_cast<const uint8_t*>(ptr);
+                result.extra_data.assign(byte_ptr, byte_ptr + extra_len);
             }
 
             return result;
         }
+
 
     } // namespace NetworkUtils
 
@@ -771,7 +823,7 @@ namespace DPApp {
                 if (header.magic != MessageHeader::MAGIC_NUMBER) { WLOG << "Invalid magic number from " << current_client_id; break; }
                 std::vector<uint8_t> data_buffer;
                 if (header.data_length > 0 && !NetworkUtils::recvAll(client->socket_fd, data_buffer, header.data_length)) { ILOG << "Client " << current_client_id << " disconnected (payload read failed)."; break; }
-                NetworkMessage message = NetworkMessage::deserialize(header_buffer, data_buffer);
+                NetworkMessage message = NetworkMessage::deserialize(header_buffer, std::move(data_buffer));
                 client->last_heartbeat = std::chrono::steady_clock::now();
                 if (message.header.type == MessageType::HANDSHAKE || message.header.type == MessageType::SLAVE_REGISTER) {
                     std::string new_slave_id(message.data.begin(), message.data.end());
@@ -867,13 +919,29 @@ namespace DPApp {
     }
 
     bool NetworkServer::broadcastMessage(const NetworkMessage& message) {
-        std::lock_guard<std::mutex> lock(clients_mutex_);
+        std::vector<std::shared_ptr<ClientConnection>> targets;
+
+        /// 1. Acquire the lock and copy only the target list
+        {
+            std::lock_guard<std::mutex> lock(clients_mutex_);
+            for (const auto& [id, conn] : clients_) {
+                if (conn->is_active) targets.push_back(conn);
+            }
+        }
+
+        /// 2. Send without holding the lock
+        /// (sendAll is assumed to be thread-safe, or per-socket locking is required)
         bool all_success = true;
-        for (const auto& [id, conn] : clients_) {
-            if (conn->is_active && !sendMessage(id, message)) all_success = false;
+        auto data = message.serialize(); /// Perform serialization only once
+
+        for (const auto& conn : targets) {
+            if (!NetworkUtils::sendAll(conn->socket_fd, data)) {
+                all_success = false;
+            }
         }
         return all_success;
     }
+
 
     std::string NetworkServer::sockaddrToString(const sockaddr_in& addr) {
         char buffer[INET_ADDRSTRLEN];
@@ -976,7 +1044,7 @@ namespace DPApp {
                     if (connected_) ILOG << "Server disconnected (payload read failed).";
                     break;
                 }
-                NetworkMessage message = NetworkMessage::deserialize(header_buffer, data_buffer);
+                NetworkMessage message = NetworkMessage::deserialize(header_buffer, std::move(data_buffer));
                 if (message_callback_) message_callback_(message, "server");
             }
             catch (const std::exception& e) {

@@ -115,6 +115,12 @@ public:
         // Notify all waiting threads about shutdown
         task_queue_cv_.notify_all();
 
+        /// [Fix] The network must be disconnected first to unblock blocked send/recv calls
+        if (client_) {
+            ILOG << "Disconnecting network to unblock threads...";
+            client_->disconnect();
+        }
+
         // Processing threads shutdown (with timeout)
         auto thread_shutdown_start = std::chrono::steady_clock::now();
         const auto max_wait_time = std::chrono::seconds(5);  // Max 5 seconds wait
@@ -776,8 +782,8 @@ private:
     std::mutex stats_mutex_;
     std::atomic<uint32_t> completed_tasks_{ 0 };
     std::atomic<uint32_t> failed_tasks_{ 0 };
-    std::atomic<double> total_processing_time_{ 0.0 };
-    std::atomic<double> avg_processing_time_{ 0.0 };
+    double total_processing_time_{ 0.0 };
+    double avg_processing_time_{ 0.0 };
 };
 
 // Global variable (for signal handler)

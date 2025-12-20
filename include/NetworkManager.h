@@ -66,10 +66,10 @@ namespace DPApp {
         std::vector<uint8_t> data;
 
         NetworkMessage() = default;
-        NetworkMessage(MessageType type, const std::vector<uint8_t>& payload);
+        NetworkMessage(MessageType type, std::vector<uint8_t> payload);
 
         std::vector<uint8_t> serialize() const;
-        static NetworkMessage deserialize(const std::vector<uint8_t>& header_buffer, const std::vector<uint8_t>& data_buffer);
+        static NetworkMessage deserialize(const std::vector<uint8_t>& header_buffer, std::vector<uint8_t> data_buffer);
 
         void calculateChecksum();
         bool verifyChecksum() const;

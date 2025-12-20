@@ -483,8 +483,7 @@ namespace las {
 
             reader_->seek(0);
             std::size_t count = 0, total_count = 0;
-            const auto total_points = static_cast<std::size_t>(reader_->npoints);
-
+            
             while (reader_->read_point()) {
                 const auto point_data = extractPointData(reader_->point);
                 if (filter(point_data)) {

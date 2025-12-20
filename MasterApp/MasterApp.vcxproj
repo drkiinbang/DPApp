@@ -148,6 +148,7 @@
     <ClInclude Include="..\include\bim\BimInfo.h" />
     <ClInclude Include="..\include\bim\BimMeshInfo.h" />
     <ClInclude Include="..\include\bim\gltf_mesh.h" />
+    <ClInclude Include="..\include\BinaryReadWriter.hpp" />
     <ClInclude Include="..\include\DefinePointType.hpp" />
     <ClInclude Include="..\include\Logger.h" />
     <ClInclude Include="..\include\NetworkManager.h" />
