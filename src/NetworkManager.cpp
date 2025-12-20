@@ -95,8 +95,6 @@ namespace DPApp {
 #ifdef _WIN32
                     int error = WSAGetLastError();
                     if (error == WSAEWOULDBLOCK || error == WSAEINTR) {
-                        /// [Fix] Sleep briefly (1 ms) to prevent CPU spikes
-                        /// A better approach is to use select(), but sleep is an effective minimal fix
                         std::this_thread::sleep_for(std::chrono::milliseconds(1));
                         continue;
                     }
