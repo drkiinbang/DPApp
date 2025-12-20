@@ -222,22 +222,28 @@ public:
 
         ILOG << "Stopping master server...";
 
+        /// Notify all slaves to shutdown gracefully
         shutdownAllSlaves();
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
+        /// Set running flag to false to signal all loops to exit
         running_ = false;
 
+        /// Request TaskManager to stop accepting new tasks
         if (task_manager_) {
             task_manager_->requestStop();
         }
 
-        auto start_time = std::chrono::steady_clock::now();
-        while (task_manager_ && task_manager_->getActiveTaskCount() > 0 &&
-            std::chrono::steady_clock::now() - start_time < std::chrono::seconds(30)) {
-            ILOG << "Waiting for " << task_manager_->getActiveTaskCount() << " active tasks to complete...";
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        /// Close sockets first to unblock any send/recv operations
+        /// This allows threads blocked on network I/O to exit
+        if (server_) {
+            server_->stop();
+        }
+        if (api_server_) {
+            api_server_->stop();
         }
 
+        /// Now join threads - they should exit quickly since sockets are closed
         if (task_assignment_thread_.joinable()) {
             task_assignment_thread_.join();
         }
@@ -246,13 +252,6 @@ public:
         }
         if (timeout_thread_.joinable()) {
             timeout_thread_.join();
-        }
-
-        if (api_server_) {
-            api_server_->stop();
-        }
-        if (server_) {
-            server_->stop();
         }
 
         ILOG << "Master server stopped";
