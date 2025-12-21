@@ -20,7 +20,13 @@ namespace DPApp {
         UNKNOWN = 0,
         CONVERT_PTS = 1,
         BIM_DISTANCE_CALCULATION = 2,
-        BIM_PC2_DIST = 3
+        BIM_PC2_DIST = 3,
+
+        // 테스트용 타입 (Master/Slave 시스템 검증용)
+        TEST_ECHO = 10,      // 단순 데이터 왕복
+        TEST_COMPUTE = 11,   // 계산 검증 (제곱 연산)
+        TEST_DELAY = 12,     // 의도적 지연 (타임아웃 테스트)
+        TEST_FAIL = 13,      // 의도적 실패 (재시도 테스트)
     };
 
     /// Convert TaskType to string
@@ -29,6 +35,10 @@ namespace DPApp {
         case TaskType::CONVERT_PTS: return "convert_pts";
         case TaskType::BIM_DISTANCE_CALCULATION: return "bim_distance_calculation";
         case TaskType::BIM_PC2_DIST: return "bim_pc2_distance";
+        case TaskType::TEST_ECHO: return "test_echo";
+        case TaskType::TEST_COMPUTE: return "test_compute";
+        case TaskType::TEST_DELAY: return "test_delay";
+        case TaskType::TEST_FAIL: return "test_fail";
         default: return "unknown";
         }
     }
@@ -39,6 +49,10 @@ namespace DPApp {
         if (str == "bim_distance_calculation") return TaskType::BIM_DISTANCE_CALCULATION;
         if (str == "bim_pc2_distance") return TaskType::BIM_PC2_DIST;
         if (str == "bim_pc_process") return TaskType::BIM_PC2_DIST;
+        if (str == "test_echo") return TaskType::TEST_ECHO;
+        if (str == "test_compute") return TaskType::TEST_COMPUTE;
+        if (str == "test_delay") return TaskType::TEST_DELAY;
+        if (str == "test_fail") return TaskType::TEST_FAIL;
         return TaskType::UNKNOWN;
     }
 
