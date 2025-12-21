@@ -1,7 +1,7 @@
 /**
  * @file MasterApplication_REST.cpp
  * @brief REST API implementation
- * 
+ *
  * This file contains:
  * - REST API route setup
  * - All REST API handlers for status, slaves, tasks, results
@@ -11,72 +11,73 @@
 
 #include "MasterApplication.h"
 #include "../include/MiniJson.h"
+#include "../include/TaskManagerTypes.h"  // TaskManager.h 대신 경량 헤더 사용
 
-/// =========================================
-/// REST API Route Setup
-/// =========================================
+ /// =========================================
+ /// REST API Route Setup
+ /// =========================================
 
 void MasterApplication::setupRestApiRoutes() {
     api_server_ = std::make_unique<RestApiServer>();
 
     api_server_->GET("/api/status", [this](const HttpRequest& req) {
         return handleGetStatus(req);
-    });
+        });
 
     api_server_->GET("/api/slaves", [this](const HttpRequest& req) {
         return handleGetSlaves(req);
-    });
+        });
 
     api_server_->GET("/api/slaves/{id}", [this](const HttpRequest& req) {
         return handleGetSlave(req);
-    });
+        });
 
     api_server_->POST("/api/slaves/{id}/shutdown", [this](const HttpRequest& req) {
         return handleShutdownSlave(req);
-    });
+        });
 
     api_server_->POST("/api/slaves/shutdown", [this](const HttpRequest& req) {
         return handleShutdownAllSlaves(req);
-    });
+        });
 
     api_server_->GET("/api/tasks", [this](const HttpRequest& req) {
         return handleGetTasks(req);
-    });
+        });
 
     api_server_->GET("/api/tasks/{id}", [this](const HttpRequest& req) {
         return handleGetTask(req);
-    });
+        });
 
     api_server_->DEL("/api/tasks", [this](const HttpRequest& req) {
         return handleClearTasks(req);
-    });
+        });
 
     api_server_->POST("/api/files/load", [this](const HttpRequest& req) {
         return handleLoadFile(req);
-    });
+        });
 
     api_server_->GET("/api/progress", [this](const HttpRequest& req) {
         return handleGetProgress(req);
-    });
+        });
 
     api_server_->GET("/api/results", [this](const HttpRequest& req) {
         return handleGetResults(req);
-    });
+        });
 
     api_server_->POST("/api/results/save", [this](const HttpRequest& req) {
         return handleSaveResults(req);
-    });
+        });
 
     api_server_->POST("/api/shutdown", [this](const HttpRequest& req) {
         return handleShutdownServer(req);
-    });
+        });
 
     api_server_->GET("/api/health", [this](const HttpRequest& req) {
         HttpResponse response;
         response.status_code = 200;
         response.body = R"({"success": true, "status": "healthy", "timestamp": ")" + getCurrentTimestamp() + "\"}";
         return response;
-    });
+        });
 
     /// =========================================
     /// Agent Management Endpoints
@@ -84,27 +85,27 @@ void MasterApplication::setupRestApiRoutes() {
 
     api_server_->GET("/api/agents", [this](const HttpRequest& req) {
         return handleGetAgents(req);
-    });
+        });
 
     api_server_->POST("/api/agents", [this](const HttpRequest& req) {
         return handleAddAgent(req);
-    });
+        });
 
     api_server_->DEL("/api/agents/{id}", [this](const HttpRequest& req) {
         return handleRemoveAgent(req);
-    });
+        });
 
     api_server_->POST("/api/agents/{id}/test", [this](const HttpRequest& req) {
         return handleTestAgent(req);
-    });
+        });
 
     api_server_->POST("/api/agents/start-slaves", [this](const HttpRequest& req) {
         return handleStartSlavesOnAgents(req);
-    });
+        });
 
     api_server_->POST("/api/agents/stop-slaves", [this](const HttpRequest& req) {
         return handleStopSlavesOnAgents(req);
-    });
+        });
 
     /// =========================================
     /// Slave Pause/Resume Endpoints
@@ -112,19 +113,19 @@ void MasterApplication::setupRestApiRoutes() {
 
     api_server_->POST("/api/slaves/{id}/pause", [this](const HttpRequest& req) {
         return handlePauseSlave(req);
-    });
+        });
 
     api_server_->POST("/api/slaves/{id}/resume", [this](const HttpRequest& req) {
         return handleResumeSlave(req);
-    });
+        });
 
     api_server_->POST("/api/slaves/pause", [this](const HttpRequest& req) {
         return handlePauseAllSlaves(req);
-    });
+        });
 
     api_server_->POST("/api/slaves/resume", [this](const HttpRequest& req) {
         return handleResumeAllSlaves(req);
-    });
+        });
 }
 
 /// =========================================
@@ -588,7 +589,7 @@ HttpResponse MasterApplication::handleShutdownServer(const HttpRequest& req) {
     std::thread([this]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         stop();
-    }).detach();
+        }).detach();
 
     std::ostringstream json;
     json << "{\n";

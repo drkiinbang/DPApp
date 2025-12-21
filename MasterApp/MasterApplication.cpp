@@ -1,7 +1,7 @@
 /**
  * @file MasterApplication.cpp
  * @brief Core implementation of MasterApplication
- * 
+ *
  * This file contains:
  * - Constructor/Destructor
  * - Initialization and lifecycle management
@@ -11,10 +11,11 @@
  */
 
 #include "MasterApplication.h"
+#include "../include/TaskManager.h"  // 전체 구현 필요 (loadGltf, loadLasFile 등)
 
-/// =========================================
-/// Global variable (for signal handler)
-/// =========================================
+ /// =========================================
+ /// Global variable (for signal handler)
+ /// =========================================
 MasterApplication* g_app = nullptr;
 
 /// =========================================
@@ -24,7 +25,7 @@ MasterApplication* g_app = nullptr;
 namespace DPApp {
     namespace PointCloudLoader {
         std::vector<std::shared_ptr<BimPcChunk>> loadBimPcChunks(
-            const std::string& bim_folder, 
+            const std::string& bim_folder,
             const std::string& pointcloud_file)
         {
             std::vector<std::shared_ptr<BimPcChunk>> chunks;
@@ -93,7 +94,7 @@ namespace DPApp {
 /// Constructor / Destructor
 /// =========================================
 
-MasterApplication::MasterApplication() 
+MasterApplication::MasterApplication()
     : running_(false), server_port_(8080), api_port_(8081) {
 }
 
@@ -119,11 +120,11 @@ bool MasterApplication::initialize(int argc, char* argv[]) {
     server_ = std::make_unique<NetworkServer>();
     server_->setMessageCallback([this](const NetworkMessage& msg, const std::string& client_id) {
         handleMessage(msg, client_id);
-    });
+        });
 
     server_->setConnectionCallback([this](const std::string& client_id, bool connected) {
         handleConnection(client_id, connected);
-    });
+        });
 
     setupRestApiRoutes();
 
@@ -151,11 +152,11 @@ bool MasterApplication::initializeTaskManager(TaskType task_type) {
 
     task_manager_->setTaskCompletedCallback([this](const TaskInfo& task, const ProcessingResult& result) {
         handleTaskCompleted(task, result);
-    });
+        });
 
     task_manager_->setTaskFailedCallback([this](const TaskInfo& task, const std::string& error) {
         handleTaskFailed(task, error);
-    });
+        });
 
     if (server_) {
         auto connected_clients = server_->getConnectedClients();

@@ -22,7 +22,7 @@
 
 #include "../include/PointCloudTypes.h"
 #include "../include/NetworkManager.h"
-#include "../include/TaskManager.h"
+#include "../include/TaskManagerTypes.h"  // TaskManager 클래스 선언 (경량 헤더, header-only 라이브러리 없음)
 #include "RestApiServer.h"
 #include "../include/RuntimeConfig.h"
 #include "../include/Logger.h"
@@ -36,7 +36,7 @@ using namespace DPApp;
 namespace DPApp {
     namespace PointCloudLoader {
         std::vector<std::shared_ptr<BimPcChunk>> loadBimPcChunks(
-            const std::string& bim_folder, 
+            const std::string& bim_folder,
             const std::string& pointcloud_file);
     }
 }
@@ -174,8 +174,8 @@ public:
     /// =========================================
 
     /// HTTP Client
-    HttpClientResponse httpPost(const std::string& host, uint16_t port, 
-                                const std::string& path, const std::string& body_content);
+    HttpClientResponse httpPost(const std::string& host, uint16_t port,
+        const std::string& path, const std::string& body_content);
     HttpClientResponse httpGet(const std::string& host, uint16_t port, const std::string& path);
 
     /// Agent Management

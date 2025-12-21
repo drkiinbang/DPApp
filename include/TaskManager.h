@@ -7,17 +7,11 @@
 
 #define MAX_NUM_PTS_CHUNK 100000
 
-#include <vector>
+// TaskManagerTypes.h에서 기본 타입 정의를 가져옴
+#include "TaskManagerTypes.h"
+
 #include <queue>
-#include <map>
-#include <memory>
-#include <mutex>
 #include <condition_variable>
-#include <atomic>
-#include <functional>
-#include <chrono>
-#include <iostream>
-#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -26,7 +20,6 @@
 #include <thread>
 #include <exception>
 
-#include "PointCloudTypes.h"
 #include "NetworkManager.h"
 #include "ReadPointFile.h"
 #include "bim/gltf_mesh.h"
@@ -47,89 +40,15 @@ const double _PI_ = acos(-1.0);
 
 namespace DPApp {
 
-    /**
-     * @brief Task execution status enumeration
-     */
-    enum class TaskStatus {
-        PENDING,        // Waiting for assignment
-        ASSIGNED,       // Assigned to a worker
-        IN_PROGRESS,    // Currently processing
-        COMPLETED,      // Successfully completed
-        FAILED,         // Failed execution
-        TIMEOUT         // Timed out
-    };
-
-    /**
-     * @brief Task priority levels
-     */
-    enum class TaskPriority {
-        LOW = 0,
-        NORMAL = 1,
-        HIGH = 2
-    };
-
-    /**
-     * @brief General task information structure
-     */
-    struct TaskInfo {
-        uint32_t task_id;
-        uint32_t chunk_id;
-        TaskType task_type;
-        TaskPriority priority;
-        TaskStatus status;
-        std::string assigned_slave;
-        std::chrono::steady_clock::time_point created_time;
-        std::chrono::steady_clock::time_point assigned_time;
-        std::chrono::steady_clock::time_point completed_time;
-        uint32_t retry_count;
-        uint32_t max_retries;
-        std::vector<uint8_t> parameters;
-        std::shared_ptr<PointCloudChunk> chunk_data;
-        std::shared_ptr<BimPcChunk> bimpc_chunk_data;
-
-        TaskInfo() : task_id(0), chunk_id(0), task_type(TaskType::CONVERT_PTS),
-            priority(TaskPriority::NORMAL), status(TaskStatus::PENDING),
-            retry_count(0), max_retries(3), created_time(std::chrono::steady_clock::now()) {
-        }
-
-        /**
-         * @brief Calculate task execution time in seconds
-         */
-        double getExecutionTime() const {
-            if (status != TaskStatus::COMPLETED) return 0.0;
-
-            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                completed_time - assigned_time);
-            return duration.count() / 1000.0;
-        }
-    };
-
-    /**
-     * @brief Slave worker information and statistics
-     */
-    struct SlaveWorkerInfo {
-        std::string slave_id;
-        bool is_active;
-        bool is_busy;
-        std::string current_task_id;
-        std::chrono::steady_clock::time_point last_heartbeat;
-        uint32_t completed_tasks;
-        uint32_t failed_tasks;
-        double avg_processing_time;  // Average processing time in seconds
-
-        SlaveWorkerInfo() : is_active(false), is_busy(false), completed_tasks(0),
-            failed_tasks(0), avg_processing_time(0.0),
-            last_heartbeat(std::chrono::steady_clock::now()) {
-        }
-
-        /**
-         * @brief Calculate success rate percentage
-         */
-        double getSuccessRate() const {
-            uint32_t total = completed_tasks + failed_tasks;
-            return total > 0 ? static_cast<double>(completed_tasks) / total : 1.0;
-        }
-    };
+    // =====================================================
+    // 아래 타입들은 TaskManagerTypes.h에 정의되어 있음:
+    // - enum class TaskStatus
+    // - enum class TaskPriority  
+    // - struct TaskInfo
+    // - struct SlaveWorkerInfo
+    // - class TaskManager
+    // - class ProcessingStats
+    // =====================================================
 
     /**
      * @brief Point cloud loading utilities
@@ -147,724 +66,6 @@ namespace DPApp {
     }
 
     /**
-     * @brief Task Manager class for distributed processing (Master node)
-     * Handles one task type per execution session
-     */
-    class TaskManager {
-    private:
-        std::atomic<bool> stopping_{ false };
-        TaskType current_task_type_;        // Fixed task type for this session
-        std::vector<uint8_t> task_parameters_; // Fixed parameters for this session
-
-        /// Structure to hold pending callback information
-        struct PendingFailCallback {
-            bool should_invoke = false;
-            TaskInfo task_info;
-            std::string error_message;
-        };
-
-    public:
-        explicit TaskManager(const uint32_t timeout_seconds, TaskType task_type, const std::vector<uint8_t>& parameters)
-            : next_task_id_(1), task_timeout_seconds_(timeout_seconds), current_slave_index_(0),
-            current_task_type_(task_type), task_parameters_(parameters) {
-            std::cout << "TaskManager initialized for task type: " << taskStr(task_type)
-                << " with " << timeout_seconds << "s timeout" << std::endl;
-        }
-
-        ~TaskManager() {
-            clearAllTasks();
-            std::cout << "TaskManager destroyed" << std::endl;
-        }
-
-        void requestStop() {
-            stopping_ = true;
-            std::cout << "TaskManager stop requested" << std::endl;
-        }
-
-        bool isStopping() const {
-            return stopping_;
-        }
-
-        TaskType getCurrentTaskType() const {
-            return current_task_type_;
-        }
-
-        /**
-         * @brief Add a new task to the processing queue (simplified - no task type parameter)
-         */
-        uint32_t addTask(std::shared_ptr<BimPcChunk> bimpc_chunk) {
-            std::lock_guard<std::mutex> lock(tasks_mutex_);
-
-            uint32_t task_id = next_task_id_++;
-
-            TaskInfo task_info;
-            task_info.task_id = task_id;
-            task_info.chunk_id = bimpc_chunk->chunk_id;
-            task_info.task_type = current_task_type_;
-            task_info.priority = TaskPriority::NORMAL;
-            task_info.parameters = task_parameters_;
-            task_info.chunk_data = nullptr; /// [ToDo] not used
-            task_info.bimpc_chunk_data = bimpc_chunk;    /// BimPcChunk
-
-            tasks_[task_id] = std::move(task_info);
-
-            std::cout << "Task added (BimPc): " << task_id
-                << " (" << taskStr(current_task_type_) << ")"
-                << " - points: " << bimpc_chunk->points.size()
-                << ", vertices: " << bimpc_chunk->bim.vertices.size()
-                << ", indices: " << bimpc_chunk->bim.faces.size() << " faces"
-                << std::endl;
-
-            return task_id;
-        }
-
-        uint32_t addTask(std::shared_ptr<PointCloudChunk> pc_chunk) {
-            std::lock_guard<std::mutex> lock(tasks_mutex_);
-
-            uint32_t task_id = next_task_id_++;
-
-            TaskInfo task_info;
-            task_info.task_id = task_id;
-            task_info.chunk_id = pc_chunk->chunk_id;
-            task_info.task_type = current_task_type_;
-            task_info.priority = TaskPriority::NORMAL;
-            task_info.parameters = task_parameters_;
-            task_info.chunk_data = pc_chunk; /// pc chunk
-            task_info.bimpc_chunk_data = nullptr;    /// empty
-
-            tasks_[task_id] = std::move(task_info);
-
-            std::cout << "Task added (PointCloud chunk): " << task_id
-                << " (" << taskStr(current_task_type_) << ")"
-                << " - points: " << pc_chunk->points.size()
-                << std::endl;
-
-            return task_id;
-        }
-
-        void addBimPcResult(const BimPcResult& result) {
-            std::lock_guard<std::mutex> lock(results_mutex_);
-            bimpc_results_.push_back(result);
-        }
-
-        std::vector<BimPcResult> getBimPcResults() const {
-            std::lock_guard<std::mutex> lock(results_mutex_);
-            return bimpc_results_;
-        }
-
-        void clearBimPcResults() {
-            std::lock_guard<std::mutex> lock(results_mutex_);
-            bimpc_results_.clear();
-        }
-
-        /**
-         * @brief Clear all tasks from the manager
-         */
-        void clearAllTasks() {
-            std::lock_guard<std::mutex> lock(tasks_mutex_);
-            size_t count = tasks_.size();
-            tasks_.clear();
-            std::cout << "Cleared " << count << " tasks" << std::endl;
-        }
-
-        /**
-         * @brief Assign pending tasks to available slave workers
-         */
-        bool assignTasksToSlaves() {
-            if (stopping_) { return false; }
-
-            std::scoped_lock lock(tasks_mutex_, slaves_mutex_);
-
-            // Find pending tasks and sort by priority
-            std::vector<uint32_t> pending_tasks;
-            for (auto& [task_id, task_info] : tasks_) {
-                if (task_info.status == TaskStatus::PENDING) {
-                    pending_tasks.push_back(task_id);
-                }
-            }
-
-            if (pending_tasks.empty()) {
-                return false;
-            }
-
-            // Sort by priority (highest first)
-            std::sort(pending_tasks.begin(), pending_tasks.end(),
-                [this](uint32_t a, uint32_t b) {
-                    return tasks_[a].priority > tasks_[b].priority;
-                });
-
-            int assigned_count = 0;
-
-            for (uint32_t task_id : pending_tasks) {
-                TaskInfo& task_info = tasks_[task_id];
-
-                std::string selected_slave = selectSlaveForTask();
-                if (!selected_slave.empty()) {
-                    task_info.status = TaskStatus::ASSIGNED;
-                    task_info.assigned_slave = selected_slave;
-                    task_info.assigned_time = std::chrono::steady_clock::now();
-
-                    // Update slave status
-                    slaves_[selected_slave].is_busy = true;
-                    slaves_[selected_slave].current_task_id = std::to_string(task_id);
-
-                    assigned_count++;
-                    std::cout << "Task " << task_id << " assigned to " << selected_slave << std::endl;
-                }
-            }
-
-            if (assigned_count > 0) {
-                std::cout << "Assigned " << assigned_count << " tasks to slaves" << std::endl;
-            }
-
-            return assigned_count > 0;
-        }
-
-        /**
-         * @brief Update task status
-         */
-        bool updateTaskStatus(uint32_t task_id, TaskStatus status) {
-            std::lock_guard<std::mutex> lock(tasks_mutex_);
-
-            auto it = tasks_.find(task_id);
-            if (it == tasks_.end()) {
-                return false;
-            }
-
-            it->second.status = status;
-
-            if (status == TaskStatus::IN_PROGRESS) {
-                it->second.assigned_time = std::chrono::steady_clock::now();
-            }
-            else if (status == TaskStatus::COMPLETED) {
-                it->second.completed_time = std::chrono::steady_clock::now();
-            }
-
-            return true;
-        }
-
-        /**
-         * @brief Complete a task with results
-         */
-        bool completeTask(uint32_t task_id, const ProcessingResult& result) {
-            /// Data for deferred callback invocation
-            bool should_invoke_completed_callback = false;
-            TaskInfo task_info_copy;
-            PendingFailCallback pending_fail;
-
-            /// Critical section - hold locks only for data manipulation
-            {
-                std::scoped_lock lock(tasks_mutex_, slaves_mutex_, results_mutex_);
-
-                auto task_it = tasks_.find(task_id);
-                if (task_it == tasks_.end()) {
-                    return false;
-                }
-
-                TaskInfo& task_info = task_it->second;
-
-                if (result.success) {
-                    task_info.status = TaskStatus::COMPLETED;
-                    completed_results_.push_back(result);
-
-                    /// Update slave statistics
-                    if (!task_info.assigned_slave.empty()) {
-                        auto slave_it = slaves_.find(task_info.assigned_slave);
-                        if (slave_it != slaves_.end()) {
-                            slave_it->second.is_busy = false;
-                            slave_it->second.current_task_id.clear();
-                            slave_it->second.completed_tasks++;
-
-                            /// Calculate processing time
-                            auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                std::chrono::steady_clock::now() - task_info.assigned_time).count() / 1000.0;
-
-                            updateSlaveStatistics(task_info.assigned_slave, true, processing_time);
-                        }
-                    }
-
-                    task_info.completed_time = std::chrono::steady_clock::now();
-
-                    /// Prepare for deferred callback invocation
-                    if (task_completed_callback_) {
-                        should_invoke_completed_callback = true;
-                        task_info_copy = task_info;
-                    }
-
-                    std::cout << "Task " << task_id << " completed successfully" << std::endl;
-                }
-                else {
-                    /// Handle failure case - get pending callback info
-                    pending_fail = failTaskInternalNoCallback(task_id, result.error_message);
-                }
-            }
-            /// Lock released here
-
-            /// Invoke callbacks outside of critical section to prevent deadlock
-            if (should_invoke_completed_callback) {
-                task_completed_callback_(task_info_copy, result);
-            }
-            if (pending_fail.should_invoke) {
-                task_failed_callback_(pending_fail.task_info, pending_fail.error_message);
-            }
-
-            return true;
-        }
-
-        /**
-        * @brief Mark a task as failed
-        * This function handles task failure with retry logic.
-        * Callbacks are invoked AFTER releasing locks to prevent deadlock.
-        */
-        bool failTask(uint32_t task_id, const std::string& error_message) {
-            PendingFailCallback pending_fail;
-
-            /// Critical section - hold locks only for data manipulation
-            {
-                std::scoped_lock lock(tasks_mutex_, slaves_mutex_);
-                pending_fail = failTaskInternalNoCallback(task_id, error_message);
-            }
-            /// Lock released here
-
-            /// Invoke callback outside of critical section to prevent deadlock
-            if (pending_fail.should_invoke) {
-                task_failed_callback_(pending_fail.task_info, pending_fail.error_message);
-            }
-
-            return true;
-        }
-
-        /**
-         * @brief Register a new slave worker
-         */
-        void registerSlave(const std::string& slave_id) {
-            std::lock_guard<std::mutex> lock(slaves_mutex_);
-
-            SlaveWorkerInfo slave_info;
-            slave_info.slave_id = slave_id;
-            slave_info.is_active = true;
-
-            slaves_[slave_id] = slave_info;
-
-            std::cout << "Slave registered: " << slave_id << std::endl;
-        }
-
-        /**
-         * @brief Unregister a slave worker and reassign its tasks
-         */
-        void unregisterSlave(const std::string& slave_id) {
-            std::scoped_lock lock(tasks_mutex_, slaves_mutex_);
-
-            auto slave_it = slaves_.find(slave_id);
-            if (slave_it != slaves_.end()) {
-                // Reassign tasks from the unregistered slave back to pending
-                int reassigned_tasks = 0;
-                for (auto& [task_id, task_info] : tasks_) {
-                    if (task_info.assigned_slave == slave_id &&
-                        (task_info.status == TaskStatus::ASSIGNED || task_info.status == TaskStatus::IN_PROGRESS)) {
-                        task_info.status = TaskStatus::PENDING;
-                        task_info.assigned_slave.clear();
-                        reassigned_tasks++;
-                    }
-                }
-
-                slaves_.erase(slave_it);
-                std::cout << "Slave unregistered: " << slave_id << " (" << reassigned_tasks << " tasks reassigned)" << std::endl;
-            }
-        }
-
-        /**
-         * @brief Update slave heartbeat timestamp
-         */
-        void updateSlaveHeartbeat(const std::string& slave_id) {
-            std::lock_guard<std::mutex> lock(slaves_mutex_);
-
-            auto it = slaves_.find(slave_id);
-            if (it != slaves_.end()) {
-                it->second.last_heartbeat = std::chrono::steady_clock::now();
-            }
-        }
-
-        // Status query methods
-        std::vector<TaskInfo> getTasksByStatus(TaskStatus status) {
-            std::lock_guard<std::mutex> lock(tasks_mutex_);
-
-            std::vector<TaskInfo> result;
-            for (const auto& pair : tasks_) {
-                if (pair.second.status == status) {
-                    result.push_back(pair.second);
-                }
-            }
-
-            return result;
-        }
-
-        std::vector<SlaveWorkerInfo> getAllSlaves() {
-            std::lock_guard<std::mutex> lock(slaves_mutex_);
-
-            std::vector<SlaveWorkerInfo> result;
-            for (const auto& pair : slaves_) {
-                result.push_back(pair.second);
-            }
-
-            return result;
-        }
-
-        // Statistics methods
-        size_t getPendingTaskCount() {
-            std::lock_guard<std::mutex> lock(tasks_mutex_);
-
-            size_t count = 0;
-            for (const auto& pair : tasks_) {
-                if (pair.second.status == TaskStatus::PENDING) {
-                    count++;
-                }
-            }
-
-            return count;
-        }
-
-        size_t getActiveTaskCount() {
-            std::lock_guard<std::mutex> lock(tasks_mutex_);
-
-            size_t count = 0;
-            for (const auto& pair : tasks_) {
-                if (pair.second.status == TaskStatus::ASSIGNED ||
-                    pair.second.status == TaskStatus::IN_PROGRESS) {
-                    count++;
-                }
-            }
-
-            return count;
-        }
-
-        size_t getCompletedTaskCount() {
-            std::lock_guard<std::mutex> lock(tasks_mutex_);
-
-            size_t count = 0;
-            for (const auto& pair : tasks_) {
-                if (pair.second.status == TaskStatus::COMPLETED) {
-                    count++;
-                }
-            }
-
-            return count;
-        }
-
-        size_t getFailedTaskCount() {
-            std::lock_guard<std::mutex> lock(tasks_mutex_);
-
-            size_t count = 0;
-            for (const auto& pair : tasks_) {
-                if (pair.second.status == TaskStatus::FAILED) {
-                    count++;
-                }
-            }
-
-            return count;
-        }
-
-        /**
-         * @brief Calculate overall processing progress
-         */
-        double getOverallProgress() {
-            std::lock_guard<std::mutex> lock(tasks_mutex_);
-
-            if (tasks_.empty()) {
-                return 1.0; // 100% if no tasks
-            }
-
-            std::vector<TaskStatus> statuses;
-            statuses.reserve(tasks_.size());
-            for (const auto& [task_id, task_info] : tasks_) {
-                statuses.push_back(task_info.status);
-            }
-
-            size_t completed = std::count(statuses.begin(), statuses.end(), TaskStatus::COMPLETED);
-            return static_cast<double>(completed) / statuses.size();
-        }
-
-        /**
-         * @brief Set task timeout in seconds
-         */
-        void setTaskTimeout(uint32_t timeout_seconds) {
-            task_timeout_seconds_ = timeout_seconds;
-            std::cout << "Task timeout set to " << timeout_seconds << " seconds" << std::endl;
-        }
-
-        /**
-        * @brief Check for timed out tasks and handle them
-        * This function scans all active tasks for timeouts and marks them as failed.
-        * Callbacks are collected during the scan and invoked AFTER releasing locks
-        * to prevent deadlock.
-        */
-        void checkTimeouts() {
-            /// Collect all pending callbacks for deferred invocation
-            std::vector<PendingFailCallback> pending_callbacks;
-
-            /// Critical section - hold locks only for data manipulation
-            {
-                std::scoped_lock lock(tasks_mutex_, slaves_mutex_);
-                auto now = std::chrono::steady_clock::now();
-
-                int timed_out_count = 0;
-                for (auto& [task_id, task_info] : tasks_) {
-                    if (task_info.status == TaskStatus::ASSIGNED ||
-                        task_info.status == TaskStatus::IN_PROGRESS) {
-
-                        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-                            now - task_info.assigned_time).count();
-
-                        if (elapsed > static_cast<int64_t>(task_timeout_seconds_)) {
-                            std::cout << "Task " << task_id << " timed out after "
-                                << elapsed << " seconds" << std::endl;
-
-                            task_info.status = TaskStatus::TIMEOUT;
-                            timed_out_count++;
-
-                            /// Process failure and collect callback info
-                            auto pending = failTaskInternalNoCallback(task_id, "Task timeout");
-                            if (pending.should_invoke) {
-                                pending_callbacks.push_back(std::move(pending));
-                            }
-                        }
-                    }
-                }
-
-                if (timed_out_count > 0) {
-                    std::cout << "Found " << timed_out_count << " timed out tasks" << std::endl;
-                }
-            }
-            /// Lock released here
-
-            /// Invoke all collected callbacks outside of critical section
-            for (const auto& pending : pending_callbacks) {
-                task_failed_callback_(pending.task_info, pending.error_message);
-            }
-        }
-
-        // Result management
-        std::vector<ProcessingResult> getCompletedResults() {
-            std::lock_guard<std::mutex> lock(results_mutex_);
-            return completed_results_;
-        }
-
-        void clearCompletedResults() {
-            std::lock_guard<std::mutex> lock(results_mutex_);
-            size_t count = completed_results_.size();
-            completed_results_.clear();
-            std::cout << "Cleared " << count << " completed results" << std::endl;
-        }
-
-        // Callback setup
-        using TaskCompletedCallback = std::function<void(const TaskInfo&, const ProcessingResult&)>;
-        using TaskFailedCallback = std::function<void(const TaskInfo&, const std::string&)>;
-
-        void setTaskCompletedCallback(TaskCompletedCallback callback) {
-            task_completed_callback_ = callback;
-        }
-
-        void setTaskFailedCallback(TaskFailedCallback callback) {
-            task_failed_callback_ = callback;
-        }
-
-    private:
-		/**
-	    * @brief Internal task failure handling with retry logic (no callback invocation)
-	    * This function performs all failure handling logic but doesn't invoke
-	    * callbacks. Instead, it returns information needed to invoke the callback
-	    * after locks are released.
-	    *
-	    * IMPORTANT: Caller must hold tasks_mutex_ and slaves_mutex_ before calling.
-        */
-        PendingFailCallback failTaskInternalNoCallback(uint32_t task_id, const std::string& error_message) {
-            PendingFailCallback result;
-            result.should_invoke = false;
-            result.error_message = error_message;
-
-            auto task_it = tasks_.find(task_id);
-            if (task_it == tasks_.end()) {
-                return result;
-            }
-
-            TaskInfo& task_info = task_it->second;
-            task_info.retry_count++;
-
-            /// Update slave statistics
-            if (!task_info.assigned_slave.empty()) {
-                auto slave_it = slaves_.find(task_info.assigned_slave);
-                if (slave_it != slaves_.end()) {
-                    slave_it->second.is_busy = false;
-                    slave_it->second.current_task_id.clear();
-                    slave_it->second.failed_tasks++;
-
-                    auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now() - task_info.assigned_time).count() / 1000.0;
-
-                    updateSlaveStatistics(task_info.assigned_slave, false, processing_time);
-                }
-            }
-
-            /// Check retry logic
-            if (task_info.retry_count < task_info.max_retries) {
-                task_info.status = TaskStatus::PENDING;
-                task_info.assigned_slave.clear();
-                std::cout << "Task " << task_id << " failed, retrying..." << std::endl;
-            }
-            else {
-                task_info.status = TaskStatus::FAILED;
-                std::cout << "Task " << task_id << " failed permanently." << std::endl;
-
-                /// Prepare callback info for deferred invocation
-                if (task_failed_callback_) {
-                    result.should_invoke = true;
-                    result.task_info = task_info;
-                }
-            }
-
-            return result;
-        }
-
-        /**
-         * @brief Internal task failure handling with retry logic
-         */
-        void failTaskInternal(uint32_t task_id, const std::string& error_message) {
-            auto task_it = tasks_.find(task_id);
-            if (task_it == tasks_.end()) {
-                return;
-            }
-
-            TaskInfo& task_info = task_it->second;
-            task_info.retry_count++;
-
-            if (!task_info.assigned_slave.empty()) {
-                auto slave_it = slaves_.find(task_info.assigned_slave);
-                if (slave_it != slaves_.end()) {
-                    slave_it->second.is_busy = false;
-                    slave_it->second.current_task_id.clear();
-                    slave_it->second.failed_tasks++;
-
-                    auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now() - task_info.assigned_time).count() / 1000.0;
-
-                    updateSlaveStatistics(task_info.assigned_slave, false, processing_time);
-                }
-            }
-
-            if (task_info.retry_count < task_info.max_retries) {
-                task_info.status = TaskStatus::PENDING;
-                task_info.assigned_slave.clear();
-                std::cout << "Task " << task_id << " failed, retrying..." << std::endl;
-            }
-            else {
-                task_info.status = TaskStatus::FAILED;
-                if (task_failed_callback_) {
-                    task_failed_callback_(task_info, error_message);
-                }
-                std::cout << "Task " << task_id << " failed permanently." << std::endl;
-            }
-        }
-
-        // Simple round-robin slave selection
-        std::string selectSlaveForTask() {
-            std::vector<std::string> available_slaves;
-            for (auto& [slave_id, slave_info] : slaves_) {
-                if (slave_info.is_active && !slave_info.is_busy) {
-                    available_slaves.push_back(slave_id);
-                }
-            }
-
-            if (available_slaves.empty()) {
-                return "";
-            }
-
-            std::string selected = available_slaves[current_slave_index_ % available_slaves.size()];
-            current_slave_index_++;
-
-            return selected;
-        }
-
-        void updateSlaveStatistics(const std::string& slave_id, bool success, double processing_time) {
-            auto slave_it = slaves_.find(slave_id);
-            if (slave_it != slaves_.end()) {
-                SlaveWorkerInfo& slave_info = slave_it->second;
-
-                // Update average processing time (exponential moving average)
-                uint32_t total_tasks = slave_info.completed_tasks + slave_info.failed_tasks;
-                if (total_tasks > 0) {
-                    slave_info.avg_processing_time =
-                        (slave_info.avg_processing_time * (total_tasks - 1) + processing_time) / total_tasks;
-                }
-                else {
-                    slave_info.avg_processing_time = processing_time;
-                }
-            }
-        }
-
-        // Member variables
-        std::map<uint32_t, TaskInfo> tasks_;
-        std::map<std::string, SlaveWorkerInfo> slaves_;
-        std::vector<ProcessingResult> completed_results_;
-        std::vector<BimPcResult> bimpc_results_;
-
-        mutable std::mutex tasks_mutex_;
-        mutable std::mutex slaves_mutex_;
-        mutable std::mutex results_mutex_;
-
-        std::atomic<uint32_t> next_task_id_;
-        uint32_t task_timeout_seconds_;
-        size_t current_slave_index_;  // For round-robin
-
-        TaskCompletedCallback task_completed_callback_;
-        TaskFailedCallback task_failed_callback_;
-    };
-
-    /**
-    * @brief Thread-safe statistics tracker
-    */
-    class ProcessingStats {
-    public:
-        ProcessingStats()
-            : processed_count_(0)
-            , failed_count_(0)
-            , total_time_(0.0)
-        {
-        }
-
-        void recordSuccess(double processing_time) {
-            std::lock_guard<std::mutex> lock(mutex_);
-            processed_count_++;
-            total_time_ += processing_time;
-        }
-
-        void recordFailure() {
-            std::lock_guard<std::mutex> lock(mutex_);
-            failed_count_++;
-        }
-
-        uint32_t getProcessedCount() const {
-            std::lock_guard<std::mutex> lock(mutex_);
-            return processed_count_;
-        }
-
-        uint32_t getFailedCount() const {
-            std::lock_guard<std::mutex> lock(mutex_);
-            return failed_count_;
-        }
-
-        double getAverageProcessingTime() const {
-            std::lock_guard<std::mutex> lock(mutex_);
-            return processed_count_ > 0 ? total_time_ / processed_count_ : 0.0;
-        }
-
-    private:
-        mutable std::mutex mutex_;
-        uint32_t processed_count_;
-        uint32_t failed_count_;
-        double total_time_;
-    };
-
-    /**
      * @brief Task Processor class for individual workers (Slave nodes)
      * Fixed 2 task types: CONVERT_PTS and BIM_DISTANCE_CALCULATION
      */
@@ -877,7 +78,7 @@ namespace DPApp {
         ~TaskProcessor() {
             std::cout << "TaskProcessor destroyed" << std::endl;
         }
-        
+
         // Task processing - handles both supported task types internally
         ProcessingResult processTask(const ProcessingTask& task, const PointCloudChunk& chunk);
 
@@ -1209,7 +410,7 @@ namespace DPApp {
             result.success = false;
             result.error_message = "Processing error: " + std::string(e.what());
             stats_.recordFailure();
-            return result; 
+            return result;
             /// Considering the current control flow, returning here is safe
             /// because recordFailure() has already been called
             /// preventing duplicated failure recording downstream.
@@ -1233,15 +434,15 @@ namespace DPApp {
     }
 
     std::vector<TaskType> TaskProcessor::getSupportedTaskTypes() const {
-        return { 
-            TaskType::CONVERT_PTS, 
+        return {
+            TaskType::CONVERT_PTS,
             TaskType::BIM_DISTANCE_CALCULATION
         };
     }
 
     bool TaskProcessor::supportsTaskType(const TaskType task_type) const {
-        return task_type == TaskType::CONVERT_PTS || 
-               task_type == TaskType::BIM_DISTANCE_CALCULATION;
+        return task_type == TaskType::CONVERT_PTS ||
+            task_type == TaskType::BIM_DISTANCE_CALCULATION;
     }
 
     namespace util {
@@ -1347,7 +548,7 @@ namespace DPApp {
             std::string output_file_name = dataset_name + ".nodes2"; // binary file name
             auto full_path = output_path / output_file_name;
             output_file_name = full_path.string();
-            
+
             float global_bbox_min[3] = { (std::numeric_limits<float>::max)(), (std::numeric_limits<float>::max)(), (std::numeric_limits<float>::max)() }; // 최대값으로 초기화
             float global_bbox_max[3] = { std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest() }; // 최소값으로 초기화
 
@@ -1398,7 +599,7 @@ namespace DPApp {
                 }
 
                 auto& bim_info = singleFile;
-                
+
                 // bim_id, node_name 설정
                 int bim_id = idx;
                 std::string node_name;
@@ -1497,7 +698,7 @@ namespace DPApp {
             return true;
         }
 
-       std::vector<std::string> split(const std::string& str, const std::string& delims = "\t, ") {
+        std::vector<std::string> split(const std::string& str, const std::string& delims = "\t, ") {
             std::vector<std::string> tokens;
             size_t start = str.find_first_not_of(delims), end = 0;
 
@@ -1630,17 +831,15 @@ namespace DPApp {
 
                     numPts += static_cast<unsigned long long>(idx);
                     result_point_cloud_file.write(reinterpret_cast<const char*>(buffer.data()), 12 * CHUNK_POINTS);
-                    
-					auto curr_t = std::chrono::system_clock::now();
-					if ((curr_t - prev_t) > std::chrono::seconds(2)) {
-						std::cout << "Processing " << numPts << " points.\n";
-						prev_t = curr_t;
-					}
 
-					idx = 0;
-				}
+                    auto curr_t = std::chrono::system_clock::now();
+                    if ((curr_t - prev_t) > std::chrono::seconds(2)) {
+                        std::cout << "Processing " << numPts << " points.\n";
+                        prev_t = curr_t;
+                    }
 
-                
+                    idx = 0;
+                }
             }
 
             /// Process remaining data
@@ -1690,7 +889,7 @@ namespace DPApp {
             auto start_t = std::chrono::system_clock::now();
 
             las::LASToolsReader lasReader;
-            
+
             if (!lasReader.open(input_file_path)) {
                 std::cerr << "Failed to open input file: " << input_file_path << std::endl;
                 return false;
@@ -1722,7 +921,7 @@ namespace DPApp {
             }
 
             /// Write offset
-            if(is_offset_applied)
+            if (is_offset_applied)
                 result_point_cloud_file.write(reinterpret_cast<const char*>(offset), sizeof(float) * 3);
             else {
                 float zeroOffset[3] = { 0.f, 0.f, 0.f };
@@ -1778,7 +977,7 @@ namespace DPApp {
                     }
 
                 }
-                
+
                 numPts += static_cast<unsigned long long>(end - start);
                 result_point_cloud_file.write(reinterpret_cast<const char*>(buffer.data()), 12 * (end - start));
 
@@ -1804,7 +1003,7 @@ namespace DPApp {
         }
     }
 
-	namespace mesh {
+    namespace mesh {
         /// Extract node name from a full path
         void extractNodeInfo(const std::filesystem::path& file_path,
             std::string& nodeName,
@@ -1925,7 +1124,7 @@ namespace DPApp {
         bool loadGltf(const std::string& bim_folder, std::vector<BimMeshInfo>& bimData)
         {
             std::filesystem::path input_path(bim_folder);
-            
+
             // 경로 검증
             if (!std::filesystem::exists(input_path)) {
                 std::cout << "input_folder '" << bim_folder << "' does not exist" << std::endl;
@@ -2410,7 +1609,7 @@ namespace DPApp {
                                     v2.x + u * edge1.x + v * edge2.x,
                                     v2.y + u * edge1.y + v * edge2.y,
                                     v2.z + u * edge1.z + v * edge2.z
-                             );
+                                );
                             }
                         }
                     }
@@ -2450,7 +1649,7 @@ namespace DPApp {
 
                 /// Build KD-tree
                 std::shared_ptr<tree::PointCloud3DAdaptor> adaptor;
-                
+
                 if (!buildKdtree3D(points, adaptor, tree, 20)) {
                     std::cerr << "Failed in building kd-tree\n";
                     return false;
@@ -2468,13 +1667,13 @@ namespace DPApp {
         }
 
         bool loadInputData(const std::string& file_path, const std::string& bim_folder) {
-            
+
             std::shared_ptr<tree::KDTree3D> tree;
 
             if (!loadLasFile(file_path, tree)) {
                 return false;
             }
-                        
+
             std::vector<BimMeshInfo> bimData;
             if (!loadGltf(bim_folder, bimData)) {
                 return false;
@@ -2487,7 +1686,7 @@ namespace DPApp {
 
         */
 
-	}/// namespace mesh
+    }/// namespace mesh
 
     namespace mesh2 {
         /// Vertex3D: 3D vertex data

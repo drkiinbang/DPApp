@@ -1,7 +1,7 @@
 /**
  * @file MasterApplication_CLI.cpp
  * @brief Command Line Interface implementation
- * 
+ *
  * This file contains:
  * - Command line parsing
  * - Console command processing
@@ -10,10 +10,11 @@
  */
 
 #include "MasterApplication.h"
+#include "../include/TaskManagerTypes.h"  // TaskManager.h 대신 경량 헤더 사용
 
-/// =========================================
-/// Command Line Parsing
-/// =========================================
+ /// =========================================
+ /// Command Line Parsing
+ /// =========================================
 
 void MasterApplication::parseCommandLine(int argc, char* argv[]) {
     for (int i = 1; i < argc; ++i) {
