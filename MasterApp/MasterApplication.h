@@ -22,7 +22,8 @@
 
 #include "../include/PointCloudTypes.h"
 #include "../include/NetworkManager.h"
-#include "../include/TaskManagerTypes.h"  // TaskManager 클래스 선언 (경량 헤더, header-only 라이브러리 없음)
+#include "../include/TaskManagerTypes.h"  // TaskManager class declaration
+#include "../include/TestTask.h"          // Test Task processing
 #include "RestApiServer.h"
 #include "../include/RuntimeConfig.h"
 #include "../include/Logger.h"
@@ -90,6 +91,15 @@ private:
     std::thread status_thread_;
     std::thread timeout_thread_;
 
+    /// =========================================
+    /// Test Task Management
+    /// =========================================
+
+    std::vector<TestChunk> test_chunks_;           // 테스트 청크 저장
+    std::vector<TestResult> test_results_;         // 테스트 결과 저장
+    std::mutex test_mutex_;                        // 테스트 데이터 동기화
+    uint32_t next_test_chunk_id_ = 0;              // 전역 고유 청크 ID 카운터
+
 public:
     MasterApplication();
     ~MasterApplication();
@@ -145,6 +155,20 @@ public:
     void printResults();
     void saveResults(const std::string& filename);
     void clearCompletedTasks();
+
+    /// =========================================
+    /// Test Commands (MasterApplication_CLI.cpp)
+    /// =========================================
+
+    void runTestCommand(const std::string& args);
+    void runTestEcho(uint32_t count, uint32_t base_time_ms = 10000);
+    void runTestCompute(uint32_t count, uint32_t base_time_ms = 10000);
+    void runTestDelay(uint32_t count, uint32_t extra_delay_ms, uint32_t base_time_ms = 10000);
+    void runTestFail(uint32_t count, uint32_t fail_count, uint32_t base_time_ms = 10000);
+    void printTestStatus();
+    void printTestHelp();
+    void handleTestResult(const TestResult& result);
+    void createTestTasks(TaskType test_type, const std::vector<TestChunk>& chunks);
 
     /// =========================================
     /// REST API Functions (MasterApplication_REST.cpp)

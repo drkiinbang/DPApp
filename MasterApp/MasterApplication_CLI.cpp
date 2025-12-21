@@ -10,7 +10,6 @@
  */
 
 #include "MasterApplication.h"
-#include "../include/TaskManagerTypes.h"  // TaskManager.h 대신 경량 헤더 사용
 
  /// =========================================
  /// Command Line Parsing
@@ -77,7 +76,17 @@ void MasterApplication::printHelp() {
     ILOG << "shutdown [slave_id]            - Shutdown specific slave or all";
     ILOG << "start-slaves [threads]         - Start slaves on all agents";
     ILOG << "stop-slaves                    - Stop slaves on all agents";
+    ILOG << "";
+    ILOG << "=== Test Commands ===";
+    ILOG << "test echo <count> [time_ms]    - Run TEST_ECHO tasks";
+    ILOG << "test compute <count> [time_ms] - Run TEST_COMPUTE tasks";
+    ILOG << "test delay <count> <extra_ms> [time_ms] - Run TEST_DELAY tasks";
+    ILOG << "test fail <count> <fail_n> [time_ms]    - Run TEST_FAIL tasks";
+    ILOG << "test status                    - Show test results summary";
+    ILOG << "test help                      - Show test command help";
+    ILOG << "";
     ILOG << "help                           - Show this help";
+    ILOG << "quit                           - Shutdown server";
     ILOG << "quit                           - Stop and exit";
     ILOG << "=====================================";
     ILOG << "";
@@ -210,6 +219,11 @@ void MasterApplication::processCommand(const std::string& command) {
     else if (cmd == "stop-slaves") {
         int stopped = stopSlavesOnAllAgents(false);
         ILOG << "Stopped slaves on " << stopped << " agents";
+    }
+    else if (cmd == "test") {
+        std::string rest_of_line;
+        std::getline(iss, rest_of_line);
+        runTestCommand(rest_of_line);
     }
     else if (cmd == "help") {
         printHelp();
@@ -405,4 +419,265 @@ void MasterApplication::clearCompletedTasks() {
 
     task_manager_->clearCompletedResults();
     ILOG << "Completed tasks cleared";
+}
+
+/// =========================================
+/// Test Commands Implementation
+/// =========================================
+
+void MasterApplication::runTestCommand(const std::string& args) {
+    std::istringstream iss(args);
+    std::string sub_cmd;
+    iss >> sub_cmd;
+
+    if (sub_cmd.empty() || sub_cmd == "help") {
+        printTestHelp();
+    }
+    else if (sub_cmd == "status") {
+        printTestStatus();
+    }
+    else if (sub_cmd == "echo") {
+        uint32_t count = 1;
+        uint32_t time_ms = 10000;
+        iss >> count;
+        if (iss >> time_ms) {}  // optional
+        runTestEcho(count, time_ms);
+    }
+    else if (sub_cmd == "compute") {
+        uint32_t count = 1;
+        uint32_t time_ms = 10000;
+        iss >> count;
+        if (iss >> time_ms) {}  // optional
+        runTestCompute(count, time_ms);
+    }
+    else if (sub_cmd == "delay") {
+        uint32_t count = 1;
+        uint32_t extra_ms = 5000;
+        uint32_t time_ms = 10000;
+        iss >> count >> extra_ms;
+        if (iss >> time_ms) {}  // optional
+        runTestDelay(count, extra_ms, time_ms);
+    }
+    else if (sub_cmd == "fail") {
+        uint32_t count = 1;
+        uint32_t fail_n = 2;
+        uint32_t time_ms = 10000;
+        iss >> count >> fail_n;
+        if (iss >> time_ms) {}  // optional
+        runTestFail(count, fail_n, time_ms);
+    }
+    else {
+        WLOG << "Unknown test command: " << sub_cmd;
+        printTestHelp();
+    }
+}
+
+void MasterApplication::printTestHelp() {
+    ILOG << "";
+    ILOG << "=== Test Commands ===";
+    ILOG << "test echo <count> [time_ms]";
+    ILOG << "    - Run TEST_ECHO tasks (data round-trip)";
+    ILOG << "    - count: number of tasks (default: 1)";
+    ILOG << "    - time_ms: processing time per task (default: 10000ms)";
+    ILOG << "";
+    ILOG << "test compute <count> [time_ms]";
+    ILOG << "    - Run TEST_COMPUTE tasks (square calculation)";
+    ILOG << "    - Results are verified for correctness";
+    ILOG << "";
+    ILOG << "test delay <count> <extra_ms> [time_ms]";
+    ILOG << "    - Run TEST_DELAY tasks (timeout testing)";
+    ILOG << "    - extra_ms: additional delay on top of base time";
+    ILOG << "";
+    ILOG << "test fail <count> <fail_n> [time_ms]";
+    ILOG << "    - Run TEST_FAIL tasks (retry testing)";
+    ILOG << "    - fail_n: number of times to fail before success";
+    ILOG << "";
+    ILOG << "test status";
+    ILOG << "    - Show test results summary";
+    ILOG << "";
+    ILOG << "Examples:";
+    ILOG << "  test echo 5           - 5 echo tasks, 10s each";
+    ILOG << "  test compute 10 15000 - 10 compute tasks, 15s each";
+    ILOG << "  test delay 3 20000    - 3 delay tasks with 20s extra delay";
+    ILOG << "  test fail 2 3         - 2 tasks that fail 3 times then succeed";
+    ILOG << "";
+}
+
+void MasterApplication::runTestEcho(uint32_t count, uint32_t base_time_ms) {
+    ILOG << "Starting TEST_ECHO: " << count << " tasks, " << base_time_ms << "ms each";
+
+    // TaskManager 초기화 (아직 없으면)
+    if (!task_manager_) {
+        if (!initializeTaskManager(TaskType::TEST_ECHO)) {
+            ELOG << "Failed to initialize TaskManager for TEST_ECHO";
+            return;
+        }
+    }
+
+    // 테스트 청크 생성
+    std::vector<TestChunk> chunks;
+    for (uint32_t i = 0; i < count; ++i) {
+        TestChunk chunk = TestChunk::generate(i, 100, base_time_ms);
+        // TEST_ECHO: expected_output은 input과 동일해야 함
+        chunk.expected_output = chunk.input_numbers;
+        chunks.push_back(chunk);
+    }
+
+    createTestTasks(TaskType::TEST_ECHO, chunks);
+
+    ILOG << "Created " << count << " TEST_ECHO tasks";
+}
+
+void MasterApplication::runTestCompute(uint32_t count, uint32_t base_time_ms) {
+    ILOG << "Starting TEST_COMPUTE: " << count << " tasks, " << base_time_ms << "ms each";
+
+    if (!task_manager_) {
+        if (!initializeTaskManager(TaskType::TEST_COMPUTE)) {
+            ELOG << "Failed to initialize TaskManager for TEST_COMPUTE";
+            return;
+        }
+    }
+
+    std::vector<TestChunk> chunks;
+    for (uint32_t i = 0; i < count; ++i) {
+        TestChunk chunk = TestChunk::generate(i, 100, base_time_ms);
+        chunks.push_back(chunk);
+    }
+
+    createTestTasks(TaskType::TEST_COMPUTE, chunks);
+
+    ILOG << "Created " << count << " TEST_COMPUTE tasks";
+}
+
+void MasterApplication::runTestDelay(uint32_t count, uint32_t extra_delay_ms, uint32_t base_time_ms) {
+    ILOG << "Starting TEST_DELAY: " << count << " tasks, base=" << base_time_ms
+        << "ms, extra=" << extra_delay_ms << "ms";
+
+    if (!task_manager_) {
+        if (!initializeTaskManager(TaskType::TEST_DELAY)) {
+            ELOG << "Failed to initialize TaskManager for TEST_DELAY";
+            return;
+        }
+    }
+
+    std::vector<TestChunk> chunks;
+    for (uint32_t i = 0; i < count; ++i) {
+        TestChunk chunk = TestChunk::generate(i, 100, base_time_ms);
+        chunk.extra_delay_ms = extra_delay_ms;
+        chunks.push_back(chunk);
+    }
+
+    createTestTasks(TaskType::TEST_DELAY, chunks);
+
+    ILOG << "Created " << count << " TEST_DELAY tasks (total time: "
+        << (base_time_ms + extra_delay_ms) << "ms each)";
+}
+
+void MasterApplication::runTestFail(uint32_t count, uint32_t fail_count, uint32_t base_time_ms) {
+    ILOG << "Starting TEST_FAIL: " << count << " tasks, fail " << fail_count
+        << " times before success, " << base_time_ms << "ms each";
+
+    if (!task_manager_) {
+        if (!initializeTaskManager(TaskType::TEST_FAIL)) {
+            ELOG << "Failed to initialize TaskManager for TEST_FAIL";
+            return;
+        }
+    }
+
+    std::vector<TestChunk> chunks;
+    for (uint32_t i = 0; i < count; ++i) {
+        TestChunk chunk = TestChunk::generate(i, 100, base_time_ms);
+        chunk.fail_count = fail_count;
+        chunks.push_back(chunk);
+    }
+
+    createTestTasks(TaskType::TEST_FAIL, chunks);
+
+    ILOG << "Created " << count << " TEST_FAIL tasks";
+}
+
+void MasterApplication::createTestTasks(TaskType test_type, const std::vector<TestChunk>& chunks) {
+    if (!task_manager_) {
+        ELOG << "TaskManager not initialized";
+        return;
+    }
+
+    // TaskManager에 Task 추가
+    for (auto chunk : chunks) {  // 복사본 사용 (chunk_id 수정 위해)
+        // 전역 고유 chunk_id 할당
+        {
+            std::lock_guard<std::mutex> lock(test_mutex_);
+            chunk.chunk_id = next_test_chunk_id_++;
+            test_chunks_.push_back(chunk);  // 수정된 chunk_id로 저장
+        }
+
+        auto pc_chunk = std::make_shared<PointCloudChunk>();
+        pc_chunk->chunk_id = chunk.chunk_id;
+        // points는 비워둠 - 실제 데이터는 TestChunk에서 전송
+
+        uint32_t task_id = task_manager_->addTask(pc_chunk);
+
+        // Task 타입을 테스트 타입으로 변경
+        TaskInfo* task_info = task_manager_->getTaskById(task_id);
+        if (task_info) {
+            task_info->task_type = test_type;
+        }
+
+        ILOG << "Created test task " << task_id << " (type: " << taskStr(test_type)
+            << ", chunk: " << chunk.chunk_id << ")";
+    }
+}
+
+void MasterApplication::printTestStatus() {
+    std::lock_guard<std::mutex> lock(test_mutex_);
+
+    ILOG << "";
+    ILOG << "=== Test Status ===";
+    ILOG << "Test chunks created: " << test_chunks_.size();
+    ILOG << "Test results received: " << test_results_.size();
+
+    if (test_results_.empty()) {
+        ILOG << "No test results yet";
+        ILOG << "===================";
+        return;
+    }
+
+    uint32_t success_count = 0;
+    uint32_t fail_count = 0;
+    uint32_t verified_count = 0;
+    double total_time = 0;
+
+    for (const auto& result : test_results_) {
+        if (result.success) {
+            success_count++;
+            total_time += result.processing_time_ms;
+
+            // 검증
+            for (const auto& chunk : test_chunks_) {
+                if (chunk.chunk_id == result.chunk_id) {
+                    TestResult mutable_result = result;
+                    if (TestProcessors::verifyResult(chunk, mutable_result)) {
+                        verified_count++;
+                    }
+                    break;
+                }
+            }
+        }
+        else {
+            fail_count++;
+        }
+    }
+
+    ILOG << "";
+    ILOG << "Results:";
+    ILOG << "  Success: " << success_count << "/" << test_results_.size();
+    ILOG << "  Failed:  " << fail_count;
+    ILOG << "  Verified: " << verified_count << "/" << success_count;
+
+    if (success_count > 0) {
+        ILOG << "  Avg time: " << (total_time / success_count) << "ms";
+    }
+
+    ILOG << "===================";
+    ILOG << "";
 }

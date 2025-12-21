@@ -11,7 +11,7 @@
  */
 
 #include "MasterApplication.h"
-#include "../include/TaskManager.h"  // 전체 구현 필요 (loadGltf, loadLasFile 등)
+#include "../include/TaskManager.h"
 
  /// =========================================
  /// Global variable (for signal handler)
@@ -481,10 +481,32 @@ void MasterApplication::handleTaskResult(const NetworkMessage& message, const st
             return;
         }
 
-        uint8_t is_bimpc_result = message.data[0];
+        uint8_t result_type = message.data[0];
         std::vector<uint8_t> result_data(message.data.begin() + 1, message.data.end());
 
-        if (is_bimpc_result) {
+        // result_type: 0 = ProcessingResult, 1 = BimPcResult, 2 = TestResult
+        if (result_type == 2) {
+            // 테스트 결과 처리
+            TestResult result = TestResult::deserialize(result_data);
+            handleTestResult(result);
+
+            // TaskManager 상태 업데이트
+            if (task_manager_) {
+                ProcessingResult simple_result;
+                simple_result.task_id = result.task_id;
+                simple_result.chunk_id = result.chunk_id;
+                simple_result.success = result.success;
+                simple_result.error_message = result.error_message;
+                task_manager_->completeTask(result.task_id, simple_result);
+            }
+
+            ILOG << "TestResult received for task " << result.task_id
+                << " from " << client_id
+                << " (success: " << (result.success ? "Yes" : "No")
+                << ", time: " << result.processing_time_ms << "ms)";
+        }
+        else if (result_type == 1) {
+            // BimPc 결과 처리
             BimPcResult result = NetworkUtils::deserializeBimPcResult(result_data);
             if (task_manager_) {
                 task_manager_->addBimPcResult(result);
@@ -500,6 +522,7 @@ void MasterApplication::handleTaskResult(const NetworkMessage& message, const st
                 << " from " << client_id;
         }
         else {
+            // 일반 결과 처리
             ProcessingResult result = NetworkUtils::deserializeResult(result_data);
             if (task_manager_) {
                 task_manager_->completeTask(result.task_id, result);
@@ -509,6 +532,35 @@ void MasterApplication::handleTaskResult(const NetworkMessage& message, const st
     catch (const std::exception& e) {
         ELOG << "Error processing task result from " << client_id
             << ": " << e.what();
+    }
+}
+
+/// =========================================
+/// Test Result Handling
+/// =========================================
+
+void MasterApplication::handleTestResult(const TestResult& result) {
+    std::lock_guard<std::mutex> lock(test_mutex_);
+
+    // 결과 저장
+    test_results_.push_back(result);
+
+    // 해당 청크 찾아서 검증
+    for (auto& chunk : test_chunks_) {
+        if (chunk.chunk_id == result.chunk_id) {
+            TestResult mutable_result = result;
+            bool verified = TestProcessors::verifyResult(chunk, mutable_result);
+
+            if (verified) {
+                ILOG << "[TEST] Task " << result.task_id << " VERIFIED - all "
+                    << result.output_numbers.size() << " results correct";
+            }
+            else if (result.success) {
+                WLOG << "[TEST] Task " << result.task_id << " MISMATCH - "
+                    << mutable_result.mismatch_count << " errors found";
+            }
+            break;
+        }
     }
 }
 
@@ -575,10 +627,29 @@ void MasterApplication::sendAssignedTasks() {
         auto task_data = NetworkUtils::serializeTask(task);
         std::vector<uint8_t> chunk_data;
 
+        // 테스트 Task 타입인지 확인
+        bool is_test_task = (task_info.task_type == TaskType::TEST_ECHO ||
+            task_info.task_type == TaskType::TEST_COMPUTE ||
+            task_info.task_type == TaskType::TEST_DELAY ||
+            task_info.task_type == TaskType::TEST_FAIL);
+
         bool is_bimpc_task = (task_info.task_type == TaskType::BIM_PC2_DIST &&
             task_info.bimpc_chunk_data != nullptr);
 
-        if (is_bimpc_task) {
+        if (is_test_task) {
+            // 테스트 청크 데이터 직렬화
+            std::lock_guard<std::mutex> lock(test_mutex_);
+            for (const auto& test_chunk : test_chunks_) {
+                if (test_chunk.chunk_id == task_info.chunk_id) {
+                    chunk_data = test_chunk.serialize();
+                    ILOG << "Task " << task_info.task_id << " has TestChunk data ("
+                        << test_chunk.input_numbers.size() << " numbers, "
+                        << "base_time: " << test_chunk.base_processing_time_ms << "ms)";
+                    break;
+                }
+            }
+        }
+        else if (is_bimpc_task) {
             chunk_data = NetworkUtils::serializeBimPcChunk(*task_info.bimpc_chunk_data);
             ILOG << "Task " << task_info.task_id << " has BimPcChunk data ("
                 << task_info.bimpc_chunk_data->points.size() << " points, "
