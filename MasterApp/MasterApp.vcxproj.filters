@@ -35,12 +35,6 @@
     <ClInclude Include="..\include\TaskManager.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="RESTApiServer.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MiniJson.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="..\include\Logger.h">
       <Filter>Header Files</Filter>
     </ClInclude>

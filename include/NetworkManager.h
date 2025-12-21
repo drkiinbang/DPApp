@@ -33,7 +33,7 @@
 
 namespace DPApp {
 
-    // 메시지 타입 정의
+    /// Message types
     enum class MessageType : uint8_t {
         HANDSHAKE = 0x01,
         TASK_ASSIGNMENT = 0x02,
@@ -42,7 +42,9 @@ namespace DPApp {
         SLAVE_REGISTER = 0x05,
         SLAVE_UNREGISTER = 0x06,
         ERROR_MESSAGE = 0x07,
-        SHUTDOWN = 0x08
+        SHUTDOWN = 0x08,
+        PAUSE = 0x09,      /// Pause slave processing
+        RESUME = 0x0A      /// Resume slave processing
     };
 
     // 네트워크 메시지 헤더

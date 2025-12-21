@@ -110,7 +110,7 @@
       <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/utf-8 /bigobj %(AdditionalOptions)</AdditionalOptions>
       <AdditionalIncludeDirectories>../vendors/;../vendors/Eigen3/;../include/;../vendors/LAStools/include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
@@ -129,7 +129,7 @@
       <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/utf-8 /bigobj %(AdditionalOptions)</AdditionalOptions>
       <AdditionalIncludeDirectories>../vendors/;../vendors/Eigen3/;../include/;../vendors/LAStools/include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
@@ -158,8 +158,6 @@
     <ClInclude Include="..\include\RuntimeConfig.h" />
     <ClInclude Include="..\include\TaskManager.h" />
     <ClInclude Include="..\include\ThreadPool.h" />
-    <ClInclude Include="MiniJson.h" />
-    <ClInclude Include="RESTApiServer.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\BimImport\BimImport.vcxproj">

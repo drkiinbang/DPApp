@@ -1,10 +1,18 @@
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+
 #include <iostream>
 #include <string>
 #include <thread>
 #include <chrono>
-#include <signal.h>
 #include <sstream>
 #include <iomanip>
+#include <fstream>
+#include <algorithm>
+#include <cstdint>
 
 #include "../include/PointCloudTypes.h"
 #include "../include/NetworkManager.h"
@@ -108,6 +116,21 @@ private:
     uint32_t max_points_per_chunk_ = 10000;
     bool daemon_mode_ = false;
 
+    /// =========================================
+    /// Agent Management
+    /// =========================================
+
+    struct AgentInfo {
+        std::string agent_id;
+        std::string host;
+        uint16_t port = 8092;
+        bool online = false;
+    };
+
+    std::vector<AgentInfo> agents_;
+    std::mutex agents_mutex_;
+    std::string master_external_ip_ = "127.0.0.1";
+
     std::thread task_assignment_thread_;
     std::thread status_thread_;
     std::thread timeout_thread_;
@@ -124,11 +147,7 @@ public:
     bool initialize(int argc, char* argv[]) {
         std::time_t t = std::time(nullptr);
         std::tm tm{};
-#ifdef _WIN32
         localtime_s(&tm, &t);
-#else
-        localtime_r(&t, &tm);
-#endif
         char logFilename[512];
         std::strftime(logFilename, sizeof(logFilename), "MasterApp_%Y-%m-%d_%H-%M-%S.log", &tm);
         DPApp::Logger::initialize(logFilename);
@@ -146,6 +165,10 @@ public:
             });
 
         setupRestApiRoutes();
+
+        /// Load agents configuration
+        loadAgentsFromConfig("agents_config.json");
+
         return true;
     }
 
@@ -475,6 +498,11 @@ private:
                     max_points_per_chunk_ = std::stoul(argv[++i]);
                 }
             }
+            else if (arg == "--external-ip") {
+                if (i + 1 < argc) {
+                    master_external_ip_ = argv[++i];
+                }
+            }
             else if (arg == "-h" || arg == "--help") {
                 printUsage();
                 exit(0);
@@ -522,22 +550,26 @@ private:
         ILOG << "  --api-port <port>        REST API port (default: 8081)";
         ILOG << "  -d, --daemon             Run in daemon mode";
         ILOG << "  -c, --chunk-size <size>  Max points per chunk (default: 10000)";
+        ILOG << "  --external-ip <ip>       External IP for slaves to connect";
         ILOG << "  -h, --help               Show this help message";
     }
 
     void printHelp() {
         ILOG << "";
         ILOG << "=== DPApp Master Console Commands ===";
-        ILOG << "bimpc <mesh_folder> <pc_file>  - Process BIM mesh + PointCloud";  // ¡Ú Ãß°¡
+        ILOG << "bimpc <mesh_folder> <pc_file>  - Process BIM mesh + PointCloud";
         ILOG << "load <file> <task_type>        - Load file and create tasks";
         ILOG << "status                         - Show system status";
         ILOG << "slaves                         - List connected slaves";
+        ILOG << "agents                         - List registered agents";
         ILOG << "tasks                          - List all tasks";
         ILOG << "progress                       - Show overall progress";
         ILOG << "results                        - Show completed results count";
         ILOG << "save <file>                    - Save merged results to file";
         ILOG << "clear                          - Clear all completed tasks";
         ILOG << "shutdown [slave_id]            - Shutdown specific slave or all";
+        ILOG << "start-slaves [threads]         - Start slaves on all agents";
+        ILOG << "stop-slaves                    - Stop slaves on all agents";
         ILOG << "help                           - Show this help";
         ILOG << "quit                           - Stop and exit";
         ILOG << "=====================================";
@@ -648,6 +680,25 @@ private:
             else {
                 shutdownSlave(slave_id);
             }
+        }
+        else if (cmd == "agents") {
+            printAgentStatus();
+        }
+        else if (cmd == "start-slaves") {
+            uint32_t threads = 4;
+            std::string threads_str;
+            if (iss >> threads_str) {
+                try {
+                    threads = static_cast<uint32_t>(std::stoul(threads_str));
+                }
+                catch (...) {}
+            }
+            int started = startSlavesOnAllAgents(threads);
+            ILOG << "Started slaves on " << started << " agents";
+        }
+        else if (cmd == "stop-slaves") {
+            int stopped = stopSlavesOnAllAgents(false);
+            ILOG << "Stopped slaves on " << stopped << " agents";
         }
         else if (cmd == "help") {
             printHelp();
@@ -886,6 +937,7 @@ private:
         ILOG << "Server running: " << (server_->isRunning() ? "Yes" : "No");
         ILOG << "Server port: " << server_port_;
         ILOG << "Connected slaves: " << server_->getClientCount();
+        ILOG << "Registered agents: " << agents_.size();
         if (task_manager_) {
             ILOG << "Current task type: " << taskStr(task_manager_->getCurrentTaskType());
         }
@@ -914,6 +966,20 @@ private:
             ILOG << "  Completed tasks: " << slave.completed_tasks;
             ILOG << "  Failed tasks: " << slave.failed_tasks;
             ILOG << "  Avg processing time: " << slave.avg_processing_time << "s";
+        }
+        ILOG << "==================";
+    }
+
+    void printAgentStatus() {
+        std::lock_guard<std::mutex> lock(agents_mutex_);
+
+        ILOG << "=== Agent Status ===";
+        ILOG << "Total agents: " << agents_.size();
+
+        for (const auto& agent : agents_) {
+            ILOG << "Agent: " << agent.agent_id;
+            ILOG << "  Host: " << agent.host << ":" << agent.port;
+            ILOG << "  Online: " << (agent.online ? "Yes" : "No");
         }
         ILOG << "==================";
     }
@@ -1067,6 +1133,54 @@ private:
             response.body = R"({"success": true, "status": "healthy", "timestamp": ")" + getCurrentTimestamp() + "\"}";
             return response;
             });
+
+        /// =========================================
+        /// Agent Management Endpoints
+        /// =========================================
+
+        api_server_->GET("/api/agents", [this](const HttpRequest& req) {
+            return handleGetAgents(req);
+            });
+
+        api_server_->POST("/api/agents", [this](const HttpRequest& req) {
+            return handleAddAgent(req);
+            });
+
+        api_server_->DEL("/api/agents/{id}", [this](const HttpRequest& req) {
+            return handleRemoveAgent(req);
+            });
+
+        api_server_->POST("/api/agents/{id}/test", [this](const HttpRequest& req) {
+            return handleTestAgent(req);
+            });
+
+        api_server_->POST("/api/agents/start-slaves", [this](const HttpRequest& req) {
+            return handleStartSlavesOnAgents(req);
+            });
+
+        api_server_->POST("/api/agents/stop-slaves", [this](const HttpRequest& req) {
+            return handleStopSlavesOnAgents(req);
+            });
+
+        /// =========================================
+        /// Slave Pause/Resume Endpoints
+        /// =========================================
+
+        api_server_->POST("/api/slaves/{id}/pause", [this](const HttpRequest& req) {
+            return handlePauseSlave(req);
+            });
+
+        api_server_->POST("/api/slaves/{id}/resume", [this](const HttpRequest& req) {
+            return handleResumeSlave(req);
+            });
+
+        api_server_->POST("/api/slaves/pause", [this](const HttpRequest& req) {
+            return handlePauseAllSlaves(req);
+            });
+
+        api_server_->POST("/api/slaves/resume", [this](const HttpRequest& req) {
+            return handleResumeAllSlaves(req);
+            });
     }
 
     HttpResponse handleGetStatus(const HttpRequest& req) {
@@ -1078,6 +1192,7 @@ private:
         json << "    \"server_port\": " << server_port_ << ",\n";
         json << "    \"api_port\": " << api_port_ << ",\n";
         json << "    \"connected_slaves\": " << server_->getClientCount() << ",\n";
+        json << "    \"registered_agents\": " << agents_.size() << ",\n";
 
         if (task_manager_) {
             json << "    \"current_task_type\": \"" << taskStr(task_manager_->getCurrentTaskType()) << "\",\n";
@@ -1548,20 +1663,530 @@ private:
         return response;
     }
 
+    /// =========================================
+    /// HTTP Client for Agent Communication
+    /// =========================================
+
+    struct HttpClientResponse {
+        bool success = false;
+        int status_code = 0;
+        std::string body;
+    };
+
+    HttpClientResponse httpPost(const std::string& host, uint16_t port,
+        const std::string& path, const std::string& body_content) {
+        HttpClientResponse result;
+
+        WSADATA wsaData;
+        if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+            ELOG << "WSAStartup failed";
+            return result;
+        }
+
+        SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (sock == INVALID_SOCKET) {
+            ELOG << "Failed to create socket";
+            WSACleanup();
+            return result;
+        }
+
+        DWORD timeout = 10000;
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
+        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout));
+
+        sockaddr_in server;
+        ZeroMemory(&server, sizeof(server));
+        server.sin_family = AF_INET;
+        server.sin_port = htons(port);
+        inet_pton(AF_INET, host.c_str(), &server.sin_addr);
+
+        if (connect(sock, (sockaddr*)&server, sizeof(server)) == SOCKET_ERROR) {
+            ELOG << "Failed to connect to " << host << ":" << port;
+            closesocket(sock);
+            WSACleanup();
+            return result;
+        }
+
+        std::ostringstream request;
+        request << "POST " << path << " HTTP/1.1\r\n";
+        request << "Host: " << host << ":" << port << "\r\n";
+        request << "Content-Type: application/json\r\n";
+        request << "Content-Length: " << body_content.length() << "\r\n";
+        request << "Connection: close\r\n";
+        request << "\r\n";
+        request << body_content;
+
+        std::string req_str = request.str();
+        if (send(sock, req_str.c_str(), static_cast<int>(req_str.length()), 0) == SOCKET_ERROR) {
+            closesocket(sock);
+            WSACleanup();
+            return result;
+        }
+
+        std::string response_data;
+        char buffer[4096];
+        int bytes_received;
+
+        while ((bytes_received = recv(sock, buffer, sizeof(buffer) - 1, 0)) > 0) {
+            buffer[bytes_received] = '\0';
+            response_data += buffer;
+        }
+
+        closesocket(sock);
+        WSACleanup();
+
+        if (!response_data.empty()) {
+            size_t status_pos = response_data.find(" ");
+            if (status_pos != std::string::npos) {
+                try {
+                    result.status_code = std::stoi(response_data.substr(status_pos + 1, 3));
+                }
+                catch (...) {}
+            }
+
+            size_t body_pos = response_data.find("\r\n\r\n");
+            if (body_pos != std::string::npos) {
+                result.body = response_data.substr(body_pos + 4);
+            }
+
+            result.success = (result.status_code >= 200 && result.status_code < 300);
+        }
+
+        return result;
+    }
+
+    HttpClientResponse httpGet(const std::string& host, uint16_t port, const std::string& path) {
+        HttpClientResponse result;
+
+        WSADATA wsaData;
+        if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+            return result;
+        }
+
+        SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (sock == INVALID_SOCKET) {
+            WSACleanup();
+            return result;
+        }
+
+        DWORD timeout = 10000;
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
+
+        sockaddr_in server;
+        ZeroMemory(&server, sizeof(server));
+        server.sin_family = AF_INET;
+        server.sin_port = htons(port);
+        inet_pton(AF_INET, host.c_str(), &server.sin_addr);
+
+        if (connect(sock, (sockaddr*)&server, sizeof(server)) == SOCKET_ERROR) {
+            closesocket(sock);
+            WSACleanup();
+            return result;
+        }
+
+        std::ostringstream request;
+        request << "GET " << path << " HTTP/1.1\r\n";
+        request << "Host: " << host << ":" << port << "\r\n";
+        request << "Connection: close\r\n";
+        request << "\r\n";
+
+        std::string req_str = request.str();
+        send(sock, req_str.c_str(), static_cast<int>(req_str.length()), 0);
+
+        std::string response_data;
+        char buffer[4096];
+        int bytes_received;
+
+        while ((bytes_received = recv(sock, buffer, sizeof(buffer) - 1, 0)) > 0) {
+            buffer[bytes_received] = '\0';
+            response_data += buffer;
+        }
+
+        closesocket(sock);
+        WSACleanup();
+
+        if (!response_data.empty()) {
+            size_t status_pos = response_data.find(" ");
+            if (status_pos != std::string::npos) {
+                try {
+                    result.status_code = std::stoi(response_data.substr(status_pos + 1, 3));
+                }
+                catch (...) {}
+            }
+
+            size_t body_pos = response_data.find("\r\n\r\n");
+            if (body_pos != std::string::npos) {
+                result.body = response_data.substr(body_pos + 4);
+            }
+
+            result.success = (result.status_code >= 200 && result.status_code < 300);
+        }
+
+        return result;
+    }
+
+    /// =========================================
+    /// Agent Management Functions
+    /// =========================================
+    bool loadAgentsFromConfig(const std::string& config_path) {
+        std::ifstream file(config_path);
+        if (!file.is_open()) {
+            WLOG << "Agents config file not found: " << config_path;
+            return false;
+        }
+
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+
+        /// Use extended parser (supports arrays and nested objects)
+        auto parsed = MiniJson::parse_object_ex(buffer.str());
+        if (!parsed) {
+            ELOG << "Invalid JSON in agents config";
+            return false;
+        }
+
+        /// Get master_external_ip
+        if (auto v = MiniJson::get_ex<std::string>(*parsed, "master_external_ip")) {
+            master_external_ip_ = *v;
+        }
+
+        /// Get agents array
+        auto agents_arr = MiniJson::get_array(*parsed, "agents");
+        if (!agents_arr) {
+            WLOG << "Missing 'agents' array in config";
+            return false;
+        }
+
+        std::lock_guard<std::mutex> lock(agents_mutex_);
+        agents_.clear();
+
+        for (const auto& agent_val : *agents_arr) {
+            if (!agent_val.is_object()) continue;
+
+            const JsonObjectEx& obj = agent_val.as_object();
+
+            AgentInfo agent;
+            if (auto v = MiniJson::get_ex<std::string>(obj, "agent_id")) agent.agent_id = *v;
+            if (auto v = MiniJson::get_ex<std::string>(obj, "host")) agent.host = *v;
+            if (auto v = MiniJson::get_ex<double>(obj, "port")) agent.port = static_cast<uint16_t>(*v);
+
+            if (!agent.host.empty()) {
+                if (agent.agent_id.empty()) {
+                    agent.agent_id = agent.host + ":" + std::to_string(agent.port);
+                }
+                agent.online = false;
+                agents_.push_back(agent);
+                ILOG << "Loaded agent: " << agent.agent_id
+                    << " (" << agent.host << ":" << agent.port << ")";
+            }
+        }
+
+        ILOG << "Loaded " << agents_.size() << " agents from config";
+        return true;
+    }
+
+    bool isAgentOnline(const std::string& host, uint16_t port) {
+        auto response = httpGet(host, port, "/api/health");
+        return response.success;
+    }
+
+    bool startSlaveOnAgent(const std::string& host, uint16_t port, uint32_t threads = 4) {
+        std::ostringstream body;
+        body << "{\n";
+        body << "  \"master_address\": \"" << master_external_ip_ << "\",\n";
+        body << "  \"master_port\": " << server_port_ << ",\n";
+        body << "  \"threads\": " << threads << "\n";
+        body << "}";
+
+        auto response = httpPost(host, port, "/api/slaves/start", body.str());
+
+        if (response.success) {
+            ILOG << "Started slave on agent " << host << ":" << port;
+            return true;
+        }
+        else {
+            ELOG << "Failed to start slave on agent " << host << ":" << port;
+            return false;
+        }
+    }
+
+    bool stopSlavesOnAgent(const std::string& host, uint16_t port, bool force = false) {
+        std::string body = force ? R"({"force": true})" : R"({})";
+        auto response = httpPost(host, port, "/api/slaves/stop-all", body);
+
+        if (response.success) {
+            ILOG << "Stopped slaves on agent " << host << ":" << port;
+            return true;
+        }
+        else {
+            ELOG << "Failed to stop slaves on agent " << host << ":" << port;
+            return false;
+        }
+    }
+
+    int startSlavesOnAllAgents(uint32_t threads = 4) {
+        std::lock_guard<std::mutex> lock(agents_mutex_);
+
+        int started = 0;
+        for (auto& agent : agents_) {
+            if (startSlaveOnAgent(agent.host, agent.port, threads)) {
+                agent.online = true;
+                started++;
+            }
+        }
+        return started;
+    }
+
+    int stopSlavesOnAllAgents(bool force = false) {
+        std::lock_guard<std::mutex> lock(agents_mutex_);
+
+        int stopped = 0;
+        for (auto& agent : agents_) {
+            if (stopSlavesOnAgent(agent.host, agent.port, force)) {
+                stopped++;
+            }
+        }
+        return stopped;
+    }
+
+    /// =========================================
+    /// Agent REST API Handlers
+    /// =========================================
+
+    HttpResponse handleGetAgents(const HttpRequest& req) {
+        std::lock_guard<std::mutex> lock(agents_mutex_);
+
+        std::ostringstream json;
+        json << "{\n  \"success\": true,\n  \"data\": {\n";
+        json << "    \"count\": " << agents_.size() << ",\n";
+        json << "    \"agents\": [\n";
+
+        for (size_t i = 0; i < agents_.size(); ++i) {
+            const auto& a = agents_[i];
+            json << "      {";
+            json << "\"agent_id\": \"" << a.agent_id << "\", ";
+            json << "\"host\": \"" << a.host << "\", ";
+            json << "\"port\": " << a.port << ", ";
+            json << "\"online\": " << (a.online ? "true" : "false");
+            json << "}" << (i + 1 < agents_.size() ? "," : "") << "\n";
+        }
+
+        json << "    ]\n  }\n}";
+
+        HttpResponse response;
+        response.body = json.str();
+        return response;
+    }
+
+    HttpResponse handleAddAgent(const HttpRequest& req) {
+        auto parsed = MiniJson::parse_object(req.body);
+        if (!parsed) {
+            return createErrorResponse(400, "Invalid JSON");
+        }
+
+        AgentInfo agent;
+        if (auto v = MiniJson::get<std::string>(*parsed, "agent_id")) agent.agent_id = *v;
+        if (auto v = MiniJson::get<std::string>(*parsed, "host")) agent.host = *v;
+        if (auto v = MiniJson::get<double>(*parsed, "port")) agent.port = static_cast<uint16_t>(*v);
+
+        if (agent.host.empty()) {
+            return createErrorResponse(400, "Missing 'host'");
+        }
+
+        if (agent.agent_id.empty()) {
+            agent.agent_id = agent.host + ":" + std::to_string(agent.port);
+        }
+
+        agent.online = isAgentOnline(agent.host, agent.port);
+
+        {
+            std::lock_guard<std::mutex> lock(agents_mutex_);
+            agents_.push_back(agent);
+        }
+
+        std::ostringstream json;
+        json << "{\n  \"success\": true,\n";
+        json << "  \"message\": \"Agent added\",\n";
+        json << "  \"data\": {\n";
+        json << "    \"agent_id\": \"" << agent.agent_id << "\",\n";
+        json << "    \"online\": " << (agent.online ? "true" : "false") << "\n";
+        json << "  }\n}";
+
+        HttpResponse response;
+        response.body = json.str();
+        return response;
+    }
+
+    HttpResponse handleRemoveAgent(const HttpRequest& req) {
+        std::string agent_id = req.path_params.at("id");
+
+        {
+            std::lock_guard<std::mutex> lock(agents_mutex_);
+            auto it = std::find_if(agents_.begin(), agents_.end(),
+                [&agent_id](const AgentInfo& a) { return a.agent_id == agent_id; });
+
+            if (it == agents_.end()) {
+                return createErrorResponse(404, "Agent not found");
+            }
+
+            agents_.erase(it);
+        }
+
+        HttpResponse response;
+        response.body = R"({"success": true, "message": "Agent removed"})";
+        return response;
+    }
+
+    HttpResponse handleTestAgent(const HttpRequest& req) {
+        std::string agent_id = req.path_params.at("id");
+
+        std::lock_guard<std::mutex> lock(agents_mutex_);
+        auto it = std::find_if(agents_.begin(), agents_.end(),
+            [&agent_id](const AgentInfo& a) { return a.agent_id == agent_id; });
+
+        if (it == agents_.end()) {
+            return createErrorResponse(404, "Agent not found");
+        }
+
+        bool online = isAgentOnline(it->host, it->port);
+        it->online = online;
+
+        std::ostringstream json;
+        json << "{\n  \"success\": true,\n";
+        json << "  \"data\": {\n";
+        json << "    \"agent_id\": \"" << it->agent_id << "\",\n";
+        json << "    \"online\": " << (online ? "true" : "false") << "\n";
+        json << "  }\n}";
+
+        HttpResponse response;
+        response.body = json.str();
+        return response;
+    }
+
+    HttpResponse handleStartSlavesOnAgents(const HttpRequest& req) {
+        uint32_t threads = 4;
+
+        auto parsed = MiniJson::parse_object(req.body);
+        if (parsed) {
+            if (auto v = MiniJson::get<double>(*parsed, "threads")) {
+                threads = static_cast<uint32_t>(*v);
+            }
+        }
+
+        int started = startSlavesOnAllAgents(threads);
+
+        std::ostringstream json;
+        json << "{\n  \"success\": true,\n";
+        json << "  \"message\": \"Start command sent to agents\",\n";
+        json << "  \"data\": { \"started_count\": " << started << " }\n";
+        json << "}";
+
+        HttpResponse response;
+        response.body = json.str();
+        return response;
+    }
+
+    HttpResponse handleStopSlavesOnAgents(const HttpRequest& req) {
+        bool force = false;
+
+        auto parsed = MiniJson::parse_object(req.body);
+        if (parsed) {
+            if (auto v = MiniJson::get<bool>(*parsed, "force")) {
+                force = *v;
+            }
+        }
+
+        int stopped = stopSlavesOnAllAgents(force);
+
+        std::ostringstream json;
+        json << "{\n  \"success\": true,\n";
+        json << "  \"message\": \"Stop command sent to agents\",\n";
+        json << "  \"data\": { \"stopped_count\": " << stopped << " }\n";
+        json << "}";
+
+        HttpResponse response;
+        response.body = json.str();
+        return response;
+    }
+
+    /// =========================================
+    /// Slave Pause/Resume REST Handlers
+    /// =========================================
+
+    HttpResponse handlePauseSlave(const HttpRequest& req) {
+        std::string slave_id = req.path_params.at("id");
+
+        NetworkMessage msg(MessageType::PAUSE, {});
+
+        if (server_->sendMessage(slave_id, msg)) {
+            HttpResponse response;
+            response.body = R"({"success": true, "message": "Pause command sent"})";
+            return response;
+        }
+
+        return createErrorResponse(500, "Failed to send pause command");
+    }
+
+    HttpResponse handleResumeSlave(const HttpRequest& req) {
+        std::string slave_id = req.path_params.at("id");
+
+        NetworkMessage msg(MessageType::RESUME, {});
+
+        if (server_->sendMessage(slave_id, msg)) {
+            HttpResponse response;
+            response.body = R"({"success": true, "message": "Resume command sent"})";
+            return response;
+        }
+
+        return createErrorResponse(500, "Failed to send resume command");
+    }
+
+    HttpResponse handlePauseAllSlaves(const HttpRequest& req) {
+        auto clients = server_->getConnectedClients();
+        NetworkMessage msg(MessageType::PAUSE, {});
+
+        int count = 0;
+        for (const auto& client_id : clients) {
+            if (server_->sendMessage(client_id, msg)) count++;
+        }
+
+        std::ostringstream json;
+        json << "{\n  \"success\": true,\n";
+        json << "  \"data\": { \"paused_count\": " << count << " }\n";
+        json << "}";
+
+        HttpResponse response;
+        response.body = json.str();
+        return response;
+    }
+
+    HttpResponse handleResumeAllSlaves(const HttpRequest& req) {
+        auto clients = server_->getConnectedClients();
+        NetworkMessage msg(MessageType::RESUME, {});
+
+        int count = 0;
+        for (const auto& client_id : clients) {
+            if (server_->sendMessage(client_id, msg)) count++;
+        }
+
+        std::ostringstream json;
+        json << "{\n  \"success\": true,\n";
+        json << "  \"data\": { \"resumed_count\": " << count << " }\n";
+        json << "}";
+
+        HttpResponse response;
+        response.body = json.str();
+        return response;
+    }
+
     std::string getCurrentTimestamp() {
         auto now = std::chrono::system_clock::now();
         std::time_t tt = std::chrono::system_clock::to_time_t(now);
 
         std::tm tm_utc{};
-#ifdef _WIN32
         if (gmtime_s(&tm_utc, &tt) != 0) {
             return "";
         }
-#else
-        if (gmtime_r(&tt, &tm_utc) == nullptr) {
-            return "";
-        }
-#endif
 
         std::ostringstream oss;
         oss << std::put_time(&tm_utc, "%Y-%m-%dT%H:%M:%SZ");
@@ -1569,21 +2194,29 @@ private:
     }
 };
 
-// Global variable (for signal handler)
+/// Global variable (for signal handler)
 static MasterApplication* g_app = nullptr;
 
-void signalHandler(int signal) {
-    ILOG << "";
-    ILOG << "Received signal " << signal << ", shutting down...";
-    if (g_app) {
-        g_app->stop();
+/// Windows console control handler
+static BOOL WINAPI ConsoleHandler(DWORD signal) {
+    if (signal == CTRL_C_EVENT || signal == CTRL_BREAK_EVENT) {
+        ILOG << "";
+        ILOG << "Ctrl+C received, shutting down...";
+        if (g_app) {
+            g_app->stop();
+        }
+        return TRUE;
     }
-    //exit(0);
+    return FALSE;
 }
 
+/// ============================================
+/// Main Entry Point
+/// ============================================
+
 int main(int argc, char* argv[]) {
-    signal(SIGINT, signalHandler);
-    signal(SIGTERM, signalHandler);
+    /// Setup Windows console control handler
+    SetConsoleCtrlHandler(ConsoleHandler, TRUE);
 
     MasterApplication app;
     g_app = &app;

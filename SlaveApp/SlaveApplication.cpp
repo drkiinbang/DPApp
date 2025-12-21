@@ -214,6 +214,34 @@ public:
         }
     }
 
+    /// Handle pause command from master
+    void handlePauseCommand() {
+        ILOG << "Pause command received from master";
+        paused_ = true;
+    }
+
+    /// Handle resume command from master
+    void handleResumeCommand() {
+        ILOG << "Resume command received from master";
+        paused_ = false;
+        pause_cv_.notify_all();
+    }
+
+    /// Wait if paused (call before processing each task)
+    void waitIfPaused() {
+        std::unique_lock<std::mutex> lock(pause_mutex_);
+
+        while (paused_ && running_ && !shutdown_requested_) {
+            ILOG << "Processing paused, waiting for resume...";
+            pause_cv_.wait_for(lock, std::chrono::seconds(1));
+        }
+    }
+
+    /// Check if currently paused
+    bool isPaused() const {
+        return paused_.load();
+    }
+
     void run() {
         if (!start()) {
             return;
@@ -271,6 +299,9 @@ public:
 private:
     std::atomic<bool> shutdown_requested_{ false };
     std::atomic<bool> force_exit_{ false };
+    std::atomic<bool> paused_{ false };
+    std::condition_variable pause_cv_;
+    std::mutex pause_mutex_;
 
     struct TaskQueueItem {
         ProcessingTask task;
@@ -422,6 +453,14 @@ private:
 
             break;
 
+        case MessageType::PAUSE:
+            handlePauseCommand();
+            break;
+
+        case MessageType::RESUME:
+            handleResumeCommand();
+            break;
+
         default:
             WLOG << "Unknown message type from master: " << static_cast<int>(message.header.type);
             break;
@@ -534,7 +573,14 @@ private:
     void processingLoop(size_t thread_id) {
         ILOG << "Processing thread " << thread_id << " started";
 
-        while (running_) {
+        while (running_ && !shutdown_requested_) {
+            /// Check pause state before getting next task
+            waitIfPaused();
+
+            if (!running_ || shutdown_requested_) {
+                break;
+            }
+
             TaskQueueItem item;
 
             /// Get task from queqe
