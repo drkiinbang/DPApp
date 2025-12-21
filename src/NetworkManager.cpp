@@ -990,12 +990,41 @@ namespace DPApp {
     }
 
     void NetworkClient::disconnect() {
-        if (!connected_) return;
+        if (!connected_ && !shutdown_requested_) return;
         shutdown_requested_ = true;
         connected_ = false;
+
+        // 먼저 소켓을 닫아서 블록된 recv/send 해제
         cleanupSocket();
-        if (client_thread_.joinable()) client_thread_.join();
-        if (heartbeat_thread_.joinable()) heartbeat_thread_.join();
+
+        // client_thread 종료 대기 (타임아웃 적용)
+        if (client_thread_.joinable()) {
+            for (int i = 0; i < 30; ++i) {  // 최대 3초 대기
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            try {
+                if (client_thread_.joinable()) {
+                    client_thread_.detach();  // 타임아웃 후 detach
+                    WLOG << "Client thread detached after timeout";
+                }
+            }
+            catch (...) {}
+        }
+
+        // heartbeat_thread 종료 대기 (타임아웃 적용)
+        if (heartbeat_thread_.joinable()) {
+            for (int i = 0; i < 20; ++i) {  // 최대 2초 대기
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            try {
+                if (heartbeat_thread_.joinable()) {
+                    heartbeat_thread_.detach();
+                    WLOG << "Heartbeat thread detached after timeout";
+                }
+            }
+            catch (...) {}
+        }
+
         if (connection_callback_) connection_callback_(slave_id_, false);
         ILOG << "Disconnected from server";
     }

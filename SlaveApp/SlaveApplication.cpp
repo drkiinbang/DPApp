@@ -123,6 +123,7 @@ public:
         }
 
         // Processing threads shutdown (with timeout)
+        ILOG << "Waiting for processing threads...";
         auto thread_shutdown_start = std::chrono::steady_clock::now();
         const auto max_wait_time = std::chrono::seconds(5);  // Max 5 seconds wait
 
@@ -138,6 +139,7 @@ public:
 
                     try {
                         thread.join();
+                        ILOG << "Processing thread joined successfully";
                     }
                     catch (const std::exception& e) {
                         WLOG << "Error joining processing thread: " << e.what();
@@ -152,23 +154,39 @@ public:
         }
         processing_thread_pool_.clear();
 
-        // Status thread shutdown
+        // Status thread shutdown (with timeout)
+        ILOG << "Waiting for status thread...";
         if (status_thread_.joinable()) {
+            // 최대 3초 대기 후 detach
+            bool joined = false;
+            for (int i = 0; i < 30 && !joined; ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                // status_thread는 running_ 체크하므로 곧 종료될 것
+                // 하지만 sleep 중일 수 있으므로 타임아웃 필요
+            }
+
             try {
-                status_thread_.join();
+                // 타임아웃 후에도 joinable이면 detach
+                if (status_thread_.joinable()) {
+                    WLOG << "Status thread join timeout, detaching...";
+                    status_thread_.detach();
+                }
             }
             catch (const std::exception& e) {
-                WLOG << "Error joining status thread: " << e.what();
-                status_thread_.detach();
+                WLOG << "Error with status thread: " << e.what();
             }
         }
 
         // Close stdin for input thread
+        ILOG << "Closing stdin for input thread...";
 #ifdef _WIN32
         try {
-            if (_fileno(stdin) != -1) {
-                _close(_fileno(stdin));
+            // Windows에서 stdin의 대기 중인 I/O만 취소 (파일 닫지 않음)
+            HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
+            if (hStdin != INVALID_HANDLE_VALUE && hStdin != NULL) {
+                CancelIoEx(hStdin, NULL);  // 대기 중인 I/O 취소
             }
+            // _close()는 호출하지 않음 - assertion 발생 원인
         }
         catch (...) {
             // Already closed or error, ignore
@@ -184,23 +202,24 @@ public:
         }
 #endif
 
+        // Input thread shutdown (with timeout)
+        ILOG << "Waiting for input thread...";
         if (input_thread_.joinable()) {
-            try {
-                input_thread_.join();
+            // 최대 2초 대기
+            bool joined = false;
+            auto input_start = std::chrono::steady_clock::now();
+            while (!joined && std::chrono::steady_clock::now() - input_start < std::chrono::seconds(2)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
-            catch (const std::exception& e) {
-                WLOG << "Error joining input thread: " << e.what();
-                input_thread_.detach();
-            }
-        }
 
-        // Disconnect network client
-        if (client_) {
             try {
-                client_->disconnect();
+                if (input_thread_.joinable()) {
+                    WLOG << "Input thread join timeout, detaching...";
+                    input_thread_.detach();
+                }
             }
             catch (const std::exception& e) {
-                WLOG << "Error disconnecting client: " << e.what();
+                WLOG << "Error with input thread: " << e.what();
             }
         }
 
