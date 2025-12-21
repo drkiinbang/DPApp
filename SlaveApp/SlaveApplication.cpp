@@ -18,6 +18,7 @@
 #include "../include/PointCloudTypes.h"
 #include "../include/NetworkManager.h"
 #include "../include/TaskManager.h"
+#include "../include/TestTask.h"  // 테스트 Task 처리용
 #include "../include/Logger.h"
 #include "../include/RuntimeConfig.h"
 
@@ -214,34 +215,6 @@ public:
         }
     }
 
-    /// Handle pause command from master
-    void handlePauseCommand() {
-        ILOG << "Pause command received from master";
-        paused_ = true;
-    }
-
-    /// Handle resume command from master
-    void handleResumeCommand() {
-        ILOG << "Resume command received from master";
-        paused_ = false;
-        pause_cv_.notify_all();
-    }
-
-    /// Wait if paused (call before processing each task)
-    void waitIfPaused() {
-        std::unique_lock<std::mutex> lock(pause_mutex_);
-
-        while (paused_ && running_ && !shutdown_requested_) {
-            ILOG << "Processing paused, waiting for resume...";
-            pause_cv_.wait_for(lock, std::chrono::seconds(1));
-        }
-    }
-
-    /// Check if currently paused
-    bool isPaused() const {
-        return paused_.load();
-    }
-
     void run() {
         if (!start()) {
             return;
@@ -299,22 +272,24 @@ public:
 private:
     std::atomic<bool> shutdown_requested_{ false };
     std::atomic<bool> force_exit_{ false };
-    std::atomic<bool> paused_{ false };
-    std::condition_variable pause_cv_;
-    std::mutex pause_mutex_;
 
     struct TaskQueueItem {
         ProcessingTask task;
         PointCloudChunk chunk;
         BimPcChunk bimpc_chunk;
+        TestChunk test_chunk;  // 테스트용 청크
         bool is_bimpc;
+        bool is_test;  // 테스트 Task 여부
 
-        TaskQueueItem() : is_bimpc(false) {}
+        TaskQueueItem() : is_bimpc(false), is_test(false) {}
         TaskQueueItem(const ProcessingTask& t, const PointCloudChunk& c)
-            : task(t), chunk(c), is_bimpc(false) {
+            : task(t), chunk(c), is_bimpc(false), is_test(false) {
         }
         TaskQueueItem(const ProcessingTask& t, const BimPcChunk& bc)
-            : task(t), bimpc_chunk(bc), is_bimpc(true) {
+            : task(t), bimpc_chunk(bc), is_bimpc(true), is_test(false) {
+        }
+        TaskQueueItem(const ProcessingTask& t, const TestChunk& tc)
+            : task(t), test_chunk(tc), is_bimpc(false), is_test(true) {
         }
     };
 
@@ -453,14 +428,6 @@ private:
 
             break;
 
-        case MessageType::PAUSE:
-            handlePauseCommand();
-            break;
-
-        case MessageType::RESUME:
-            handleResumeCommand();
-            break;
-
         default:
             WLOG << "Unknown message type from master: " << static_cast<int>(message.header.type);
             break;
@@ -515,8 +482,29 @@ private:
                 << ", is_bimpc: " << (is_bimpc_flag ? "Yes" : "No")
                 << ", chunk_data_size: " << chunk_data_size << " bytes)";
 
-            /// 5. Deserialize Chunk and add to the queue
-            if (is_bimpc_flag && chunk_data_size > 0) {
+            /// 5. 테스트 Task 타입인지 확인
+            bool is_test_task = (task.task_type == TaskType::TEST_ECHO ||
+                task.task_type == TaskType::TEST_COMPUTE ||
+                task.task_type == TaskType::TEST_DELAY ||
+                task.task_type == TaskType::TEST_FAIL);
+
+            if (is_test_task && chunk_data_size > 0) {
+                /// Handle TestChunk
+                std::vector<uint8_t> chunk_buffer(data + offset, data + offset + chunk_data_size);
+                TestChunk test_chunk = TestChunk::deserialize(chunk_buffer);
+
+                ILOG << "Task " << task.task_id << " is TEST task ("
+                    << taskStr(task.task_type) << ", "
+                    << test_chunk.input_numbers.size() << " numbers, "
+                    << "base_time: " << test_chunk.base_processing_time_ms << "ms)";
+
+                {
+                    std::lock_guard<std::mutex> lock(task_queue_mutex_);
+                    task_queue_.push(TaskQueueItem(task, test_chunk));
+                }
+                task_queue_cv_.notify_one();
+            }
+            else if (is_bimpc_flag && chunk_data_size > 0) {
                 /// Handle BimPcChunk
                 std::vector<uint8_t> chunk_buffer(data + offset, data + offset + chunk_data_size);
                 BimPcChunk bimpc_chunk = NetworkUtils::deserializeBimPcChunk(chunk_buffer);
@@ -546,12 +534,21 @@ private:
                 task_queue_cv_.notify_one();
             }
             else {
-                /// Handle case with no chunk data
-                ILOG << "Task " << task.task_id << " has no chunk data";
-
-                {
-                    std::lock_guard<std::mutex> lock(task_queue_mutex_);
-                    task_queue_.push(TaskQueueItem(task, PointCloudChunk()));
+                /// Handle case with no chunk data (빈 테스트 Task 포함)
+                if (is_test_task) {
+                    ILOG << "Task " << task.task_id << " is TEST task with default data";
+                    TestChunk test_chunk = TestChunk::generate(task.chunk_id, 100, 10000);
+                    {
+                        std::lock_guard<std::mutex> lock(task_queue_mutex_);
+                        task_queue_.push(TaskQueueItem(task, test_chunk));
+                    }
+                }
+                else {
+                    ILOG << "Task " << task.task_id << " has no chunk data";
+                    {
+                        std::lock_guard<std::mutex> lock(task_queue_mutex_);
+                        task_queue_.push(TaskQueueItem(task, PointCloudChunk()));
+                    }
                 }
                 task_queue_cv_.notify_one();
             }
@@ -573,14 +570,7 @@ private:
     void processingLoop(size_t thread_id) {
         ILOG << "Processing thread " << thread_id << " started";
 
-        while (running_ && !shutdown_requested_) {
-            /// Check pause state before getting next task
-            waitIfPaused();
-
-            if (!running_ || shutdown_requested_) {
-                break;
-            }
-
+        while (running_) {
             TaskQueueItem item;
 
             /// Get task from queqe
@@ -600,12 +590,42 @@ private:
             }
 
             ILOG << "Thread " << thread_id << " processing task " << item.task.task_id
-                << " (is_bimpc: " << (item.is_bimpc ? "Yes" : "No") << ")";
+                << " (is_bimpc: " << (item.is_bimpc ? "Yes" : "No")
+                << ", is_test: " << (item.is_test ? "Yes" : "No") << ")";
 
             auto start_time = std::chrono::steady_clock::now();
 
-            /// Handle branch processing between BimPcChunk and zPointCloudChunk
-            if (item.is_bimpc) {
+            /// 테스트 Task 처리
+            if (item.is_test) {
+                TestResult test_result;
+                try {
+                    test_result = processTestTask(item.task, item.test_chunk);
+                }
+                catch (const std::exception& e) {
+                    test_result.task_id = item.task.task_id;
+                    test_result.chunk_id = item.task.chunk_id;
+                    test_result.success = false;
+                    test_result.error_message = "Test processing exception: " + std::string(e.what());
+                }
+
+                auto end_time = std::chrono::steady_clock::now();
+                auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    end_time - start_time).count();
+
+                ILOG << "Thread " << thread_id << " completed TEST task " << item.task.task_id
+                    << " in " << processing_time << "ms (success: "
+                    << (test_result.success ? "Yes" : "No") << ")";
+
+                if (!test_result.success) {
+                    WLOG << "Test Task " << item.task.task_id << " failed: " << test_result.error_message;
+                }
+
+                /// Send Test result back to Master
+                sendTestResult(test_result);
+                updateStats(test_result.success, processing_time / 1000.0);
+            }
+            /// Handle branch processing between BimPcChunk and PointCloudChunk
+            else if (item.is_bimpc) {
                 /// Process BimPcChunk
                 BimPcResult result;
                 try {
@@ -711,6 +731,70 @@ private:
         }
         catch (const std::exception& e) {
             ELOG << "Error sending BimPcResult: " << e.what();
+        }
+    }
+
+    /// =========================================
+    /// 테스트 Task 처리 함수
+    /// =========================================
+
+    TestResult processTestTask(const ProcessingTask& task, TestChunk& chunk) {
+        TestResult result;
+        result.task_id = task.task_id;
+        result.chunk_id = chunk.chunk_id;
+
+        ILOG << "[TEST] Processing task " << task.task_id
+            << " (type: " << taskStr(task.task_type) << ")";
+
+        switch (task.task_type) {
+        case TaskType::TEST_ECHO:
+            result = TestProcessors::processEcho(task.task_id, chunk);
+            break;
+
+        case TaskType::TEST_COMPUTE:
+            result = TestProcessors::processCompute(task.task_id, chunk);
+            break;
+
+        case TaskType::TEST_DELAY:
+            result = TestProcessors::processDelay(task.task_id, chunk);
+            break;
+
+        case TaskType::TEST_FAIL:
+            result = TestProcessors::processFail(task.task_id, chunk);
+            break;
+
+        default:
+            result.success = false;
+            result.error_message = "Unknown test task type: " + std::string(taskStr(task.task_type));
+            break;
+        }
+
+        return result;
+    }
+
+    void sendTestResult(const TestResult& result) {
+        try {
+            /// TestResult를 직렬화
+            std::vector<uint8_t> result_data = result.serialize();
+
+            /// is_test flag (2) 추가하여 Master가 테스트 결과임을 인식
+            std::vector<uint8_t> message_data;
+            message_data.push_back(2);  /// is_test = true (0: normal, 1: bimpc, 2: test)
+            message_data.insert(message_data.end(), result_data.begin(), result_data.end());
+
+            NetworkMessage message(MessageType::TASK_RESULT, message_data);
+
+            if (client_->sendMessage(message)) {
+                ILOG << "TestResult " << result.task_id << " sent to master"
+                    << " (success: " << (result.success ? "Yes" : "No")
+                    << ", time: " << result.processing_time_ms << "ms)";
+            }
+            else {
+                ELOG << "Failed to send TestResult " << result.task_id << " to master";
+            }
+        }
+        catch (const std::exception& e) {
+            ELOG << "Error sending TestResult: " << e.what();
         }
     }
 
