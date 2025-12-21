@@ -143,6 +143,9 @@
     <ClCompile Include="..\include\bim\BimInfo.cpp" />
     <ClCompile Include="..\src\NetworkManager.cpp" />
     <ClCompile Include="MasterApplication.cpp" />
+    <ClCompile Include="MasterApplication_Agent.cpp" />
+    <ClCompile Include="MasterApplication_CLI.cpp" />
+    <ClCompile Include="MasterApplication_REST.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\include\bim\BimInfo.h" />
@@ -158,6 +161,7 @@
     <ClInclude Include="..\include\RuntimeConfig.h" />
     <ClInclude Include="..\include\TaskManager.h" />
     <ClInclude Include="..\include\ThreadPool.h" />
+    <ClInclude Include="MasterApplication.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\BimImport\BimImport.vcxproj">
