@@ -24,12 +24,19 @@
 #include <vector>
 #include <algorithm>
 #include <cstdint>
+#include <csignal>
 
 #include "Logger.h"
 #include "MiniJson.h"
 #include "RESTApiServer.h"
 
 using namespace DPApp;
+
+/// ============================================
+/// Global shutdown flag (must be declared before use)
+/// ============================================
+static std::atomic<bool> g_shutdown_requested{ false };
+static std::atomic<bool> g_shutdown_complete{ false };
 
 /// ============================================
 /// Master Process Status
@@ -56,6 +63,29 @@ inline const char* masterStatusStr(MasterStatus status) {
 }
 
 /// ============================================
+/// Helper function to wake up blocked accept()
+/// ============================================
+static void wakeUpServer(uint16_t port) {
+    /// Send dummy connection to wake up accept()
+    SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock == INVALID_SOCKET) return;
+
+    /// Set short timeout
+    DWORD timeout = 100;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout));
+
+    sockaddr_in addr = {};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+
+    /// Just connect and close - this wakes up accept()
+    connect(sock, (sockaddr*)&addr, sizeof(addr));
+    closesocket(sock);
+}
+
+/// ============================================
 /// LauncherService Class
 /// ============================================
 
@@ -64,7 +94,8 @@ public:
     LauncherService() = default;
 
     ~LauncherService() {
-        stop();
+        /// Destructor should not call stop() again if already stopped
+        /// The stop() is called explicitly from main()
     }
 
     /// Initialize launcher with command line arguments
@@ -133,19 +164,26 @@ public:
 
     /// Stop the launcher service
     void stop() {
-        if (!running_) return;
+        /// Prevent re-entry
+        bool expected = true;
+        if (!running_.compare_exchange_strong(expected, false)) {
+            return;
+        }
 
-        running_ = false;
+        ILOG << "Stopping launcher service...";
 
         /// Stop master if running
         stopMaster(false);
+
+        /// Wake up the server accept() before stopping
+        wakeUpServer(launcher_port_);
 
         /// Stop API server
         if (api_server_) {
             api_server_->stop();
         }
 
-        /// Wait for monitor thread
+        /// Wait for monitor thread with timeout
         if (monitor_thread_.joinable()) {
             monitor_thread_.join();
         }
@@ -157,10 +195,16 @@ public:
     void run() {
         ILOG << "Launcher service running. Press Ctrl+C to exit.";
 
-        while (running_) {
+        while (running_ && !g_shutdown_requested.load()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
+
+        /// Exit loop
+        running_ = false;
     }
+
+    /// Get launcher port
+    uint16_t getPort() const { return launcher_port_; }
 
 private:
     /// Print usage information
@@ -245,227 +289,211 @@ private:
     /// Master Process Management
     /// =========================================
 
-    /// Start master process using CreateProcess
+    /// Start master process
     bool startMaster() {
         std::lock_guard<std::mutex> lock(master_mutex_);
 
-        if (master_pid_ != 0 && isMasterRunning()) {
-            WLOG << "Master is already running (PID: " << master_pid_ << ")";
-            return false;
+        if (master_status_ == MasterStatus::RUNNING && isMasterRunning()) {
+            WLOG << "Master is already running with PID: " << master_pid_;
+            return true;
         }
+
+        master_status_ = MasterStatus::STARTING;
 
         /// Build command line
         std::ostringstream cmd;
         cmd << master_executable_;
-        cmd << " -p " << master_server_port_;
-        cmd << " -a " << master_api_port_;
-        cmd << " -d";  /// daemon mode
+        cmd << " --daemon";
+        cmd << " --port " << master_server_port_;
+        cmd << " --api-port " << master_api_port_;
 
         if (!master_external_ip_.empty()) {
             cmd << " --external-ip " << master_external_ip_;
         }
-
         if (!master_config_file_.empty()) {
-            cmd << " -c " << master_config_file_;
+            cmd << " --config " << master_config_file_;
         }
 
-        std::string command = cmd.str();
-        ILOG << "Starting master: " << command;
+        std::string cmdLine = cmd.str();
+        ILOG << "Starting master: " << cmdLine;
 
-        /// Setup startup info for CreateProcess
-        STARTUPINFOA si;
-        ZeroMemory(&si, sizeof(si));
-        si.cb = sizeof(si);
-        si.dwFlags = STARTF_USESHOWWINDOW;
-        si.wShowWindow = SW_HIDE;
+        /// Create process using Windows API
+        STARTUPINFOA si = { sizeof(si) };
+        PROCESS_INFORMATION pi = {};
 
-        PROCESS_INFORMATION pi;
-        ZeroMemory(&pi, sizeof(pi));
+        /// Convert to mutable char array for CreateProcessA
+        std::vector<char> cmdBuffer(cmdLine.begin(), cmdLine.end());
+        cmdBuffer.push_back('\0');
 
-        /// Create the master process
-        if (!CreateProcessA(
+        BOOL success = CreateProcessA(
             NULL,
-            const_cast<char*>(command.c_str()),
+            cmdBuffer.data(),
             NULL,
             NULL,
             FALSE,
-            CREATE_NEW_CONSOLE | DETACHED_PROCESS,
+            CREATE_NEW_CONSOLE,
             NULL,
             NULL,
             &si,
-            &pi)) {
+            &pi
+        );
+
+        if (!success) {
             DWORD error = GetLastError();
-            ELOG << "CreateProcess failed with error: " << error;
+            ELOG << "Failed to create master process. Error code: " << error;
             master_status_ = MasterStatus::FAILED;
             return false;
         }
 
-        /// Store process information
         master_pid_ = pi.dwProcessId;
         master_handle_ = pi.hProcess;
         CloseHandle(pi.hThread);
 
-        master_status_ = MasterStatus::STARTING;
         master_start_time_ = std::chrono::steady_clock::now();
 
-        ILOG << "Master process started (PID: " << master_pid_ << ")";
-        return true;
+        ILOG << "Master process started with PID: " << master_pid_;
+
+        /// Wait briefly and verify process is running
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+        if (isMasterRunning()) {
+            master_status_ = MasterStatus::RUNNING;
+            ILOG << "Master process verified running";
+            return true;
+        }
+        else {
+            ELOG << "Master process terminated immediately after start";
+            master_status_ = MasterStatus::FAILED;
+            master_pid_ = 0;
+            if (master_handle_ != NULL) {
+                CloseHandle(master_handle_);
+                master_handle_ = NULL;
+            }
+            return false;
+        }
     }
 
     /// Stop master process
-    bool stopMaster(bool force) {
+    bool stopMaster(bool force = false) {
         std::lock_guard<std::mutex> lock(master_mutex_);
 
         if (master_pid_ == 0) {
-            WLOG << "Master is not running";
+            ILOG << "No master process to stop";
+            master_status_ = MasterStatus::STOPPED;
             return true;
         }
 
-        ILOG << "Stopping master (PID: " << master_pid_ << ", force: " << force << ")";
         master_status_ = MasterStatus::STOPPING;
+        ILOG << "Stopping master process (PID: " << master_pid_ << ", force: " << force << ")";
 
-        bool result = false;
+        bool stopped = false;
 
-        if (master_handle_ != NULL) {
-            if (!force) {
-                /// Try graceful shutdown via REST API first
-                result = sendShutdownToMaster();
+        if (!force) {
+            /// Try graceful shutdown first via REST API
+            stopped = sendShutdownToMaster();
 
-                if (result) {
-                    /// Wait for process to exit gracefully
+            if (stopped) {
+                /// Wait for process to exit
+                if (master_handle_ != NULL) {
                     DWORD waitResult = WaitForSingleObject(master_handle_, 5000);
-                    if (waitResult != WAIT_OBJECT_0) {
-                        /// Process didn't exit, force terminate
-                        WLOG << "Graceful shutdown timeout, forcing termination";
-                        TerminateProcess(master_handle_, 1);
+                    if (waitResult == WAIT_OBJECT_0) {
+                        ILOG << "Master process exited gracefully";
+                        stopped = true;
+                    }
+                    else {
+                        WLOG << "Master did not exit gracefully within timeout";
+                        stopped = false;
                     }
                 }
-                else {
-                    /// REST API failed, force terminate
-                    TerminateProcess(master_handle_, 1);
-                }
             }
-            else {
-                /// Force terminate immediately
-                result = TerminateProcess(master_handle_, 1) != 0;
-            }
+        }
 
-            /// Wait for process to fully terminate
-            WaitForSingleObject(master_handle_, 3000);
+        /// Force terminate if graceful shutdown failed or force requested
+        if (!stopped || force) {
+            if (master_handle_ != NULL) {
+                ILOG << "Force terminating master process";
+                TerminateProcess(master_handle_, 1);
+                WaitForSingleObject(master_handle_, 3000);
+            }
+        }
+
+        /// Cleanup
+        if (master_handle_ != NULL) {
             CloseHandle(master_handle_);
             master_handle_ = NULL;
         }
-
         master_pid_ = 0;
         master_status_ = MasterStatus::STOPPED;
-        ILOG << "Master stopped";
 
-        return true;
-    }
-
-    /// Send shutdown command to master via REST API
-    bool sendShutdownToMaster() {
-        WSADATA wsaData;
-        if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-            ELOG << "WSAStartup failed";
-            return false;
-        }
-
-        SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (sock == INVALID_SOCKET) {
-            ELOG << "Failed to create socket";
-            WSACleanup();
-            return false;
-        }
-
-        /// Set socket timeout
-        DWORD timeout = 5000;
-        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
-        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout));
-
-        /// Connect to master REST API
-        sockaddr_in server;
-        ZeroMemory(&server, sizeof(server));
-        server.sin_family = AF_INET;
-        server.sin_port = htons(master_api_port_);
-        inet_pton(AF_INET, "127.0.0.1", &server.sin_addr);  /// <-- ¼öÁ¤µÊ
-
-        if (connect(sock, (sockaddr*)&server, sizeof(server)) == SOCKET_ERROR) {
-            ELOG << "Failed to connect to master REST API";
-            closesocket(sock);
-            WSACleanup();
-            return false;
-        }
-
-        /// Send HTTP POST request
-        std::string request =
-            "POST /api/shutdown HTTP/1.1\r\n"
-            "Host: localhost\r\n"
-            "Content-Length: 0\r\n"
-            "Connection: close\r\n"
-            "\r\n";
-
-        if (send(sock, request.c_str(), static_cast<int>(request.length()), 0) == SOCKET_ERROR) {
-            ELOG << "Failed to send shutdown request";
-            closesocket(sock);
-            WSACleanup();
-            return false;
-        }
-
-        /// Wait for response
-        char buffer[256];
-        recv(sock, buffer, sizeof(buffer), 0);
-
-        closesocket(sock);
-        WSACleanup();
-
-        ILOG << "Shutdown request sent to master";
+        ILOG << "Master process stopped";
         return true;
     }
 
     /// Check if master process is still running
     bool isMasterRunning() {
-        if (master_pid_ == 0) return false;
+        if (master_handle_ == NULL) return false;
 
-        if (master_handle_ != NULL) {
-            DWORD exitCode;
-            if (GetExitCodeProcess(master_handle_, &exitCode)) {
-                return exitCode == STILL_ACTIVE;
-            }
+        DWORD exitCode;
+        if (GetExitCodeProcess(master_handle_, &exitCode)) {
+            return (exitCode == STILL_ACTIVE);
         }
+        return false;
+    }
 
-        /// Fallback: check process by PID using OpenProcess
-        HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, master_pid_);
-        if (hProcess == NULL) {
+    /// Send shutdown command to master via REST API
+    bool sendShutdownToMaster() {
+        SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (sock == INVALID_SOCKET) {
+            WLOG << "Failed to create socket for master shutdown";
             return false;
         }
 
-        DWORD exitCode;
-        bool running = GetExitCodeProcess(hProcess, &exitCode) && exitCode == STILL_ACTIVE;
-        CloseHandle(hProcess);
-        return running;
+        /// Set timeout
+        DWORD timeout = 3000;
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
+        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout));
+
+        sockaddr_in addr = {};
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(master_api_port_);
+        inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+
+        if (connect(sock, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+            WLOG << "Failed to connect to master API for shutdown";
+            closesocket(sock);
+            return false;
+        }
+
+        /// Send shutdown request
+        std::string request =
+            "POST /api/shutdown HTTP/1.1\r\n"
+            "Host: 127.0.0.1\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+
+        send(sock, request.c_str(), static_cast<int>(request.length()), 0);
+
+        /// Receive response (brief)
+        char buffer[512];
+        recv(sock, buffer, sizeof(buffer) - 1, 0);
+
+        closesocket(sock);
+
+        ILOG << "Shutdown command sent to master";
+        return true;
     }
 
-    /// =========================================
-    /// Monitor Loop
-    /// =========================================
-
-    /// Background thread to monitor master process status
+    /// Monitor loop for checking master status
     void monitorLoop() {
-        while (running_) {
+        ILOG << "Monitor thread started";
+
+        while (running_ && !g_shutdown_requested.load()) {
             {
                 std::lock_guard<std::mutex> lock(master_mutex_);
 
-                if (master_pid_ != 0) {
-                    bool running = isMasterRunning();
-
-                    if (running && master_status_ == MasterStatus::STARTING) {
-                        /// Master has successfully started
-                        master_status_ = MasterStatus::RUNNING;
-                        ILOG << "Master is now running";
-                    }
-                    else if (!running && master_status_ == MasterStatus::RUNNING) {
-                        /// Master terminated unexpectedly
+                if (master_status_ == MasterStatus::RUNNING) {
+                    if (!isMasterRunning()) {
                         WLOG << "Master process terminated unexpectedly";
                         master_status_ = MasterStatus::STOPPED;
                         master_pid_ = 0;
@@ -477,16 +505,19 @@ private:
                 }
             }
 
-            /// Check every 5 seconds
-            std::this_thread::sleep_for(std::chrono::seconds(5));
+            /// Check every 5 seconds (but check shutdown flag more frequently)
+            for (int i = 0; i < 50 && running_ && !g_shutdown_requested.load(); ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
         }
+
+        ILOG << "Monitor thread exiting";
     }
 
     /// =========================================
     /// REST API Handlers
     /// =========================================
 
-    /// Handle health check request
     HttpResponse handleHealth(const HttpRequest& req) {
         HttpResponse response;
         response.status_code = 200;
@@ -494,7 +525,6 @@ private:
         return response;
     }
 
-    /// Handle status request
     HttpResponse handleGetStatus(const HttpRequest& req) {
         std::lock_guard<std::mutex> lock(master_mutex_);
 
@@ -523,9 +553,7 @@ private:
         return response;
     }
 
-    /// Handle master start request
     HttpResponse handleStartMaster(const HttpRequest& req) {
-        /// Parse optional parameters from request body
         auto parsed = MiniJson::parse_object(req.body);
         if (parsed) {
             if (auto v = MiniJson::get<double>(*parsed, "server_port"))
@@ -556,7 +584,6 @@ private:
         return createErrorResponse(500, "Failed to start master");
     }
 
-    /// Handle master stop request
     HttpResponse handleStopMaster(const HttpRequest& req) {
         bool force = false;
 
@@ -575,7 +602,6 @@ private:
         return createErrorResponse(500, "Failed to stop master");
     }
 
-    /// Handle master restart request
     HttpResponse handleRestartMaster(const HttpRequest& req) {
         bool force = false;
 
@@ -585,13 +611,9 @@ private:
                 force = *v;
         }
 
-        /// Stop master first
         stopMaster(force);
-
-        /// Wait a moment before restarting
         std::this_thread::sleep_for(std::chrono::seconds(1));
 
-        /// Start master again
         if (startMaster()) {
             std::ostringstream json;
             json << "{\n";
@@ -608,22 +630,15 @@ private:
         return createErrorResponse(500, "Failed to restart master");
     }
 
-    /// Handle launcher shutdown request
     HttpResponse handleShutdown(const HttpRequest& req) {
         ILOG << "Shutdown requested via API";
-
-        /// Schedule shutdown in separate thread to allow response to be sent
-        std::thread([this]() {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            running_ = false;
-            }).detach();
+        g_shutdown_requested = true;
 
         HttpResponse response;
         response.body = R"({"success": true, "message": "Launcher shutdown initiated"})";
         return response;
     }
 
-    /// Create error response with given status code and message
     HttpResponse createErrorResponse(int code, const std::string& message) {
         HttpResponse response;
         response.status_code = code;
@@ -677,10 +692,19 @@ static LauncherService* g_launcher = nullptr;
 /// Windows console control handler for Ctrl+C
 static BOOL WINAPI ConsoleHandler(DWORD signal) {
     if (signal == CTRL_C_EVENT || signal == CTRL_BREAK_EVENT) {
-        ILOG << "Ctrl+C received, shutting down...";
+        /// Set shutdown flag only - do NOT perform complex operations here
+        g_shutdown_requested = true;
+
+        /// Wake up the server to unblock accept()
         if (g_launcher) {
-            g_launcher->stop();
+            wakeUpServer(g_launcher->getPort());
         }
+
+        /// Wait for graceful shutdown to complete (max 5 seconds)
+        for (int i = 0; i < 50 && !g_shutdown_complete.load(); ++i) {
+            Sleep(100);
+        }
+
         return TRUE;
     }
     return FALSE;
@@ -691,6 +715,9 @@ static BOOL WINAPI ConsoleHandler(DWORD signal) {
 /// ============================================
 
 int main(int argc, char* argv[]) {
+    /// Disable abort message box in debug mode
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+
     LauncherService launcher;
     g_launcher = &launcher;
 
@@ -707,8 +734,18 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    /// Run main loop (blocking)
+    /// Run main loop (blocking until Ctrl+C or shutdown request)
     launcher.run();
+
+    /// Graceful shutdown
+    ILOG << "Initiating graceful shutdown...";
+    launcher.stop();
+
+    ILOG << "Launcher terminated successfully.";
+    Logger::shutdown();
+
+    /// Signal that shutdown is complete
+    g_shutdown_complete = true;
 
     return 0;
 }
