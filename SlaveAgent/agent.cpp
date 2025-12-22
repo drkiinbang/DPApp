@@ -9,6 +9,9 @@
 #define NOMINMAX
 #include <windows.h>
 #include <tlhelp32.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
 
 #include <iostream>
 #include <string>
@@ -20,12 +23,42 @@
 #include <fstream>
 #include <vector>
 #include <algorithm>
+#include <csignal>
 
 #include "Logger.h"
 #include "MiniJson.h"
 #include "RESTApiServer.h"
 
 using namespace DPApp;
+
+/// ============================================
+/// Global shutdown flags (must be declared before use)
+/// ============================================
+static std::atomic<bool> g_shutdown_requested{ false };
+static std::atomic<bool> g_shutdown_complete{ false };
+
+/// ============================================
+/// Helper function to wake up blocked accept()
+/// ============================================
+static void wakeUpServer(uint16_t port) {
+    /// Send dummy connection to wake up accept()
+    SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock == INVALID_SOCKET) return;
+
+    /// Set short timeout
+    DWORD timeout = 100;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout));
+
+    sockaddr_in addr = {};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+
+    /// Just connect and close - this wakes up accept()
+    connect(sock, (sockaddr*)&addr, sizeof(addr));
+    closesocket(sock);
+}
 
 /// ============================================
 /// Slave Process Information
@@ -57,7 +90,8 @@ public:
     SlaveAgent() = default;
 
     ~SlaveAgent() {
-        stop();
+        /// Destructor should not call stop() again if already stopped
+        /// The stop() is called explicitly from main()
     }
 
     /// Initialize agent with command line arguments
@@ -129,12 +163,19 @@ public:
 
     /// Stop the agent service
     void stop() {
-        if (!running_) return;
+        /// Prevent re-entry
+        bool expected = true;
+        if (!running_.compare_exchange_strong(expected, false)) {
+            return;
+        }
 
-        running_ = false;
+        ILOG << "Stopping SlaveAgent...";
 
         /// Stop all slaves
         stopAllSlaves(true);
+
+        /// Wake up the server accept() before stopping
+        wakeUpServer(agent_port_);
 
         /// Stop API server
         if (api_server_) {
@@ -153,10 +194,16 @@ public:
     void run() {
         ILOG << "SlaveAgent running. Press Ctrl+C to exit.";
 
-        while (running_) {
+        while (running_ && !g_shutdown_requested.load()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
+
+        /// Exit loop
+        running_ = false;
     }
+
+    /// Get agent port
+    uint16_t getPort() const { return agent_port_; }
 
 private:
     /// Print usage information
@@ -396,7 +443,9 @@ private:
     /// =========================================
 
     void monitorLoop() {
-        while (running_) {
+        ILOG << "Monitor thread started";
+
+        while (running_ && !g_shutdown_requested.load()) {
             /// Check slave status periodically
             {
                 std::lock_guard<std::mutex> lock(slaves_mutex_);
@@ -419,8 +468,13 @@ private:
                 }
             }
 
-            std::this_thread::sleep_for(std::chrono::seconds(5));
+            /// Check every 5 seconds (but check shutdown flag more frequently)
+            for (int i = 0; i < 50 && running_ && !g_shutdown_requested.load(); ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
         }
+
+        ILOG << "Monitor thread exiting";
     }
 
     /// =========================================
@@ -609,11 +663,8 @@ private:
     HttpResponse handleShutdown(const HttpRequest& req) {
         ILOG << "Shutdown requested via API";
 
-        /// Schedule shutdown
-        std::thread([this]() {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            running_ = false;
-            }).detach();
+        /// Set shutdown flag instead of using detached thread
+        g_shutdown_requested = true;
 
         HttpResponse response;
         response.body = R"({"success": true, "message": "Agent shutdown initiated"})";
@@ -665,12 +716,22 @@ private:
 
 static SlaveAgent* g_agent = nullptr;
 
+/// Windows console control handler for Ctrl+C
 static BOOL WINAPI ConsoleHandler(DWORD signal) {
     if (signal == CTRL_C_EVENT || signal == CTRL_BREAK_EVENT) {
-        ILOG << "Ctrl+C received, shutting down...";
+        /// Set shutdown flag only - do NOT perform complex operations here
+        g_shutdown_requested = true;
+
+        /// Wake up the server to unblock accept()
         if (g_agent) {
-            g_agent->stop();
+            wakeUpServer(g_agent->getPort());
         }
+
+        /// Wait for graceful shutdown to complete (max 5 seconds)
+        for (int i = 0; i < 50 && !g_shutdown_complete.load(); ++i) {
+            Sleep(100);
+        }
+
         return TRUE;
     }
     return FALSE;
@@ -681,6 +742,9 @@ static BOOL WINAPI ConsoleHandler(DWORD signal) {
 /// ============================================
 
 int main(int argc, char* argv[]) {
+    /// Disable abort message box in debug mode
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+
     SlaveAgent agent;
     g_agent = &agent;
 
@@ -695,7 +759,18 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    /// Run main loop (blocking until Ctrl+C or shutdown request)
     agent.run();
+
+    /// Graceful shutdown
+    ILOG << "Initiating graceful shutdown...";
+    agent.stop();
+
+    ILOG << "SlaveAgent terminated successfully.";
+    Logger::shutdown();
+
+    /// Signal that shutdown is complete
+    g_shutdown_complete = true;
 
     return 0;
 }
