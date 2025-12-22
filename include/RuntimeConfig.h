@@ -4,7 +4,7 @@
 #include <cstdlib>
 
 namespace DPApp {
-	/// 환경변수에서 정수 읽기 헬퍼
+	/// Helper to read integers from environment variables
 	inline int getenv_int(const char* name, int default_value) {
 		int value = default_value;
 
@@ -37,7 +37,7 @@ namespace DPApp {
 		return value;
 	};
 
-	/// 환경변수에서 문자열 읽기
+	/// Read strings from environment variables
 	inline std::string getenv_string(const char* name, const std::string& default_value) {
 		std::string value = default_value;
 #ifdef _WIN32
@@ -58,20 +58,20 @@ namespace DPApp {
 
 	struct RuntimeConfig {
 		/// Network/Server
-		int server_backlog = 16; // 소켓 listen backlog
-		int server_io_threads = 0; // 0이면 하드웨어 스레드 수 기반 자동 결정
+		int server_backlog = 16; /// socket listen backlog
+		int server_io_threads = 0; /// 0 means automatically determined based on hardware thread count
 
 		/// Heartbeat & Task
-		int heartbeat_timeout_seconds = 30; // 클라이언트 heartbeat 타임아웃
-		int task_timeout_seconds = 3000; // 작업 처리 타임아웃
+		int heartbeat_timeout_seconds = 30; /// client heartbeat timeout
+		int task_timeout_seconds = 3000; /// task processing timeout
 
 		/// REST API
-		int rest_threadpool_size = 8; // REST 요청 처리 풀 크기
-		int rest_socket_recv_timeout_ms = 10000; // 요청 수신 타임아웃 (밀리초)
+		int rest_threadpool_size = 8; /// REST request processing pool size
+		int rest_socket_recv_timeout_ms = 10000; /// request reception timeout (milliseconds)
 
 		std::string api_key = "";
 
-		/// 로깅 레벨 등 확장 가능
+		/// Logging level, etc. can be extended
 		static RuntimeConfig loadFromEnv() {
 			RuntimeConfig cfg;
 			cfg.server_backlog = getenv_int("DPAPP_SERVER_BACKLOG", cfg.server_backlog);

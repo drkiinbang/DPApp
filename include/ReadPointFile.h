@@ -40,7 +40,7 @@ namespace ptsfile {
             return pointCount;
         }
 
-        /// Count all ines
+        /// Count all lines
         pointCount = 1; /// The first line is already included.
         std::string line;
         while (std::getline(file, line)) {

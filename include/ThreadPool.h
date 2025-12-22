@@ -64,4 +64,4 @@ namespace DPApp {
 		std::condition_variable cv_;
 		std::atomic<bool> stopping_{ false };
 	};
-} // namespace DPApp
+} /// namespace DPApp

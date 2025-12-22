@@ -46,7 +46,8 @@ namespace cnvrt
         POINT_DOUBLE min_p, max_p;
     public:
         BOUNDING_BOX() : min_p(POINT_DOUBLE{ (std::numeric_limits<double>::max)(), (std::numeric_limits<double>::max)(), (std::numeric_limits<double>::max)() }),
-            max_p(POINT_DOUBLE{ -(std::numeric_limits<double>::max)(), -(std::numeric_limits<double>::max)(), -(std::numeric_limits<double>::max)() }) { }
+            max_p(POINT_DOUBLE{ -(std::numeric_limits<double>::max)(), -(std::numeric_limits<double>::max)(), -(std::numeric_limits<double>::max)() }) {
+        }
         void merge(const BOUNDING_BOX& bb)
         {
             min_p.x = (std::min)(min_p.x, bb.min_p.x);
@@ -58,13 +59,13 @@ namespace cnvrt
         }
         void merge_point(const POINT_DOUBLE& p)
         {
-						min_p.x = (std::min)(min_p.x, p.x);
-						min_p.y = (std::min)(min_p.y, p.y);
-						min_p.z = (std::min)(min_p.z, p.z);
-						max_p.x = (std::max)(max_p.x, p.x);
-						max_p.y = (std::max)(max_p.y, p.y);
-						max_p.z = (std::max)(max_p.z, p.z);
-				}
+            min_p.x = (std::min)(min_p.x, p.x);
+            min_p.y = (std::min)(min_p.y, p.y);
+            min_p.z = (std::min)(min_p.z, p.z);
+            max_p.x = (std::max)(max_p.x, p.x);
+            max_p.y = (std::max)(max_p.y, p.y);
+            max_p.z = (std::max)(max_p.z, p.z);
+        }
 
         void merge_points(const POINT_DOUBLE points[], const size_t count)
         {
@@ -92,10 +93,10 @@ namespace cnvrt
 
             min_p.x = x_center - max_span / 2;
             min_p.y = y_center - max_span / 2;
-            min_p.z = z_center - max_span / 2;
+            min_p.z = x_center - max_span / 2;
             max_p.x = x_center + max_span / 2;
             max_p.y = y_center + max_span / 2;
-            max_p.z = z_center + max_span / 2;
+            max_p.z = x_center + max_span / 2;
         }
 
         POINT_DOUBLE get_center()
