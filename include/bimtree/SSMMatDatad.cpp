@@ -1,5 +1,5 @@
 /*
-* Copyright(c) 2001-2019 KI IN Bang
+* Copyright(c) 2001-2025 KI IN Bang
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files(the "Software"), to deal
@@ -13,106 +13,98 @@
 
 * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
+* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 * SOFTWARE.
 */
 
-#pragma once
-
 #include "SSMMatDatad.h"
-
-#include <iostream>
+#include <algorithm> // for std::fill
 
 namespace math
 {
-	MatDatad::MatDatad()
+	MatDatad::MatDatad() : rows(0), cols(0)
 	{
-		this->size = 0;
-		resize(1, 1);
 	}
 
 	MatDatad::MatDatad(const unsigned int r, const unsigned int c)
 	{
-		this->size = 0;
 		resize(r, c);
 	}
 
 	MatDatad::MatDatad(const unsigned int r, const unsigned int c, const double val)
 	{
-		this->size = 0;
-		allocateMem(r, c);
-		initialize(val);
+		resize(r, c, val);
 	}
 
 	MatDatad::MatDatad(const MatDatad& copy)
+		: data(copy.data), rows(copy.rows), cols(copy.cols)
 	{
-		this->size = 0;
-		allocateMem(copy.getRows(), copy.getCols());
-
-		for (unsigned int i = 0; i < size; i++)
-		{
-			data[i] = copy.data[i];
-		}
 	}
 
-	MatDatad::~MatDatad() { del(); }
-
-	MatDatad MatDatad::operator = (const MatDatad& copy)
+	MatDatad::MatDatad(MatDatad&& other) noexcept
+		: data(std::move(other.data)), rows(other.rows), cols(other.cols)
 	{
-		del();
+		other.rows = 0;
+		other.cols = 0;
+	}
 
-		allocateMem(copy.getRows(), copy.getCols());
+	MatDatad::~MatDatad()
+	{
+		// No try-catch needed. std::vector handles destruction automatically.
+	}
 
-		for (unsigned int i = 0; i < size; i++)
-		{
-			data[i] = copy.getAccessData()[i];
-		}
+	MatDatad& MatDatad::operator=(const MatDatad& copy)
+	{
+		// Self-assignment check
+		if (this == &copy)
+			return *this;
+
+		this->data = copy.data; // std::vector deep copy
+		this->rows = copy.rows;
+		this->cols = copy.cols;
+
+		return *this;
+	}
+
+	MatDatad& MatDatad::operator=(MatDatad&& other) noexcept
+	{
+		// Self-assignment check
+		if (this == &other)
+			return *this;
+
+		this->data = std::move(other.data); // Move semantics
+		this->rows = other.rows;
+		this->cols = other.cols;
+
+		other.rows = 0;
+		other.cols = 0;
 
 		return *this;
 	}
 
 	void MatDatad::del()
 	{
-		try
-		{
-			if (size >= 1 && data != nullptr)
-			{
-				delete[] data;
-			}
-		}
-		catch (...)
-		{
-			throw std::runtime_error("Error in deleting memory in MatDatad");
-		}
-
+		data.clear();
+		data.shrink_to_fit();
 		rows = 0;
 		cols = 0;
-		size = 0;
-		data = nullptr;
 	}
 
-	/**get the number of rows*/
 	unsigned int MatDatad::getRows() const { return rows; }
 
-	/**get the number of cols*/
 	unsigned int MatDatad::getCols() const { return cols; }
 
-	/**get the size of data*/
-	unsigned int MatDatad::getSize() const { return size; }
+	unsigned int MatDatad::getSize() const { return static_cast<unsigned int>(data.size()); }
 
-	/**get the pointer of data*/
-	double* MatDatad::getDataHandle() const { return data; }
+	double* MatDatad::getDataHandle() { return data.data(); }
 
-	/**get the const pointer of data*/
-	const double* MatDatad::getAccessData() const { return data; }
+	const double* MatDatad::getAccessData() const { return data.data(); }
 
-	/**resize a matrix with a default value*/
 	void MatDatad::resize(const unsigned int r, const unsigned int c, double val)
 	{
-		del();
 		allocateMem(r, c);
 		initialize(val);
 	}
@@ -121,16 +113,12 @@ namespace math
 	{
 		rows = r;
 		cols = c;
-		size = rows * cols;
-
-		data = new double[size];
+		// Resize vector; new elements are default-initialized
+		data.resize(rows * cols);
 	}
 
 	void MatDatad::initialize(double val)
 	{
-		for (unsigned int i = 0; i < size; i++)
-		{
-			data[i] = val;
-		}
+		std::fill(data.begin(), data.end(), val);
 	}
 }

@@ -1,5 +1,5 @@
 /*
-* Copyright(c) 2001-2019 KI IN Bang
+* Copyright(c) 2001-2025 KI IN Bang
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files(the "Software"), to deal
@@ -13,7 +13,7 @@
 
 * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
+* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
@@ -22,59 +22,76 @@
 
 #pragma once
 
+#include <vector>
+#include <stdexcept>
+
 namespace math
 {
-	/**
-	*@class Matrix Data Class with double type data
-	*@brief data for Matrix
-	*/
+	/// @class MatDatad
+	/// @brief Data class for Matrix operations using double type with std::vector management.
 	class MatDatad
 	{
 	public:
+		/// Default constructor.
 		MatDatad();
 
+		/// Constructor with size.
 		MatDatad(const unsigned int r, const unsigned int c);
 
+		/// Constructor with size and initial value.
 		MatDatad(const unsigned int r, const unsigned int c, const double val);
 
+		/// Copy constructor.
 		MatDatad(const MatDatad& copy);
 
+		/// Move constructor.
+		MatDatad(MatDatad&& other) noexcept;
+
+		/// Destructor.
 		virtual ~MatDatad();
 
-		MatDatad operator = (const MatDatad& copy);
+		/// Copy assignment operator.
+		MatDatad& operator=(const MatDatad& copy);
 
+		/// Move assignment operator.
+		MatDatad& operator=(MatDatad&& other) noexcept;
+
+		/// Clear data and reset size.
 		void del();
 
-		/**get the number of rows*/
+		/// Get the number of rows.
 		unsigned int getRows() const;
 
-		/**get the number of cols*/
+		/// Get the number of columns.
 		unsigned int getCols() const;
 
-		/**get the size of data*/
+		/// Get the total size of data (rows * cols).
 		unsigned int getSize() const;
 
-		/**get the pointer of data*/
-		double* getDataHandle() const;
+		/// Get the pointer to the data (modifiable).
+		double* getDataHandle();
 
-		/**get the const pointer of data*/
+		/// Get the const pointer to the data (read-only).
 		const double* getAccessData() const;
 
-		/**resize a matrix with a default value*/
+		/// Resize the matrix.
 		void resize(const unsigned int r, const unsigned int c, double val = 0.0);
 
-	private:
+	protected:
+		/// Allocate memory (internal use, wraps vector resize).
 		void allocateMem(const unsigned int r, const unsigned int c);
 
+		/// Initialize data with a value.
 		void initialize(double val);
 
-	private:
-		double* data;
-		unsigned int rows;
-		unsigned int cols;
-		unsigned int size;
+	protected:
+		std::vector<double> data; /// Container for matrix elements.
+		unsigned int rows;        /// Number of rows.
+		unsigned int cols;        /// Number of columns.
 	};
 
+	/// @class Arrayd
+	/// @brief Helper class for 1D array (column vector).
 	class Arrayd : public MatDatad
 	{
 	public:
@@ -86,20 +103,27 @@ namespace math
 
 		Arrayd(const Arrayd& copy) : MatDatad(copy) {}
 
-		virtual ~Arrayd() {}
+		virtual ~Arrayd() = default;
 
-		Arrayd operator = (const Arrayd& copy)
+		Arrayd& operator=(const Arrayd& copy)
 		{
-			MatDatad::operator=(copy);
+			if (this != &copy) {
+				MatDatad::operator=(copy);
+			}
 			return *this;
 		}
 
-		double& operator [] (unsigned int idx) const
+		double& operator[](unsigned int idx)
 		{
-			return this->getDataHandle()[idx];
+			return data[idx];
 		}
 
-		/**resize a matrix with a default value*/
+		const double& operator[](unsigned int idx) const
+		{
+			return data[idx];
+		}
+
+		/// Resize the array with a default value.
 		void resize(const unsigned int r, double val = 0.0)
 		{
 			MatDatad::resize(r, 1, val);
