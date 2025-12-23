@@ -104,10 +104,6 @@ public:
         launcher_port_ = 8090;
         ///[ToDo] put exe file name into config
         std::string master_executable_ = "MasterApp.exe";
-
-#ifdef _DEBUG
-            master_executable_ = std::string("MasterAppd.exe");
-#endif
         master_server_port_ = 8080;
         master_api_port_ = 8081;
         config_file_ = "launcher_config.json";
@@ -130,6 +126,10 @@ public:
                 return false;
             }
         }
+
+#ifdef _DEBUG
+        master_executable_ = std::string("MasterAppd.exe");
+#endif
 
         /// Load configuration file if exists
         loadConfig();
