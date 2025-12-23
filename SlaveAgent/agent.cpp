@@ -319,7 +319,12 @@ private:
         ZeroMemory(&si, sizeof(si));
         si.cb = sizeof(si);
         si.dwFlags = STARTF_USESHOWWINDOW;
-        si.wShowWindow = SW_HIDE;
+#ifdef _DEBUG
+        si.wShowWindow = SW_SHOW;
+#elif
+        //si.wShowWindow = SW_HIDE;
+        si.wShowWindow = SW_SHOW;
+#endif
 
         PROCESS_INFORMATION pi;
         ZeroMemory(&pi, sizeof(pi));
