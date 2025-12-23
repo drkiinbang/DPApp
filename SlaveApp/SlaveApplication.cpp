@@ -326,14 +326,6 @@ private:
                     server_port_ = static_cast<uint16_t>(std::stoi(argv[++i]));
                 }
             }
-            else if (arg == "-t" || arg == "--threads") {
-                if (i + 1 < argc) {
-                    processing_threads_ = std::stoul(argv[++i]);
-                    if (processing_threads_ == 0) {
-                        processing_threads_ = 1;
-                    }
-                }
-            }
             else if (arg == "-h" || arg == "--help") {
                 printUsage();
                 exit(0);
@@ -346,7 +338,6 @@ private:
         ILOG << "Options:";
         ILOG << "  -s, --server <address>   Master server address (default: localhost)";
         ILOG << "  -p, --port <port>        Master server port (default: 8080)";
-        ILOG << "  -t, --threads <count>    Processing thread count (default: 1)";
         ILOG << "  -h, --help               Show this help message";
     }
 
@@ -855,7 +846,6 @@ private:
         ILOG << "Connected: " << (client_->isConnected() ? "Yes" : "No");
         ILOG << "Slave ID: " << client_->getSlaveId();
         ILOG << "Server: " << server_address_ << ":" << server_port_;
-        ILOG << "Processing threads: " << processing_threads_;
         ILOG << "Running: " << (running_ ? "Yes" : "No");
         ILOG << "====================";
     }
@@ -913,7 +903,7 @@ private:
     std::atomic<bool> running_;
     std::string server_address_ = "localhost";
     uint16_t server_port_;
-    size_t processing_threads_;
+    const size_t processing_threads_ = 1;
 
     // Task queue
     std::queue<TaskQueueItem> task_queue_;

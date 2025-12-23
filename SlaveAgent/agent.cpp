@@ -69,14 +69,13 @@ struct SlaveProcessInfo {
     HANDLE handle = NULL;
     std::string master_address;
     uint16_t master_port = 0;
-    uint32_t threads = 1;
     std::chrono::steady_clock::time_point start_time;
     bool running = false;
 
     SlaveProcessInfo() = default;
 
-    SlaveProcessInfo(DWORD p, HANDLE h, const std::string& addr, uint16_t port, uint32_t t)
-        : pid(p), handle(h), master_address(addr), master_port(port), threads(t),
+    SlaveProcessInfo(DWORD p, HANDLE h, const std::string& addr, uint16_t port)
+        : pid(p), handle(h), master_address(addr), master_port(port),
         start_time(std::chrono::steady_clock::now()), running(true) {
     }
 };
@@ -99,7 +98,7 @@ public:
         /// Default configuration
         agent_port_ = 8092;
         slave_executable_ = "SlaveApp.exe";
-        max_slaves_ = 8;
+        max_slaves_ = 4;
         config_file_ = "agent_config.json";
 
         /// Parse command line arguments
@@ -291,9 +290,8 @@ private:
     /// =========================================
 
     /// Start a new slave process
-    bool startSlave(const std::string& master_address,
-        uint16_t master_port,
-        uint32_t threads,
+    bool startSlave(const std::string& master_address, 
+        uint16_t master_port, 
         SlaveProcessInfo& out_info) {
         std::lock_guard<std::mutex> lock(slaves_mutex_);
 
@@ -309,7 +307,6 @@ private:
         cmd << slave_executable_;
         cmd << " -s " << master_address;
         cmd << " -p " << master_port;
-        cmd << " -t " << threads;
 
         std::string command = cmd.str();
         ILOG << "Starting slave: " << command;
@@ -350,7 +347,7 @@ private:
         }
 
         /// Store process info
-        SlaveProcessInfo info(pi.dwProcessId, pi.hProcess, master_address, master_port, threads);
+        SlaveProcessInfo info(pi.dwProcessId, pi.hProcess, master_address, master_port);
         slaves_.push_back(info);
 
         CloseHandle(pi.hThread);
@@ -543,7 +540,6 @@ private:
             json << "        \"pid\": " << s.pid << ",\n";
             json << "        \"master_address\": \"" << s.master_address << "\",\n";
             json << "        \"master_port\": " << s.master_port << ",\n";
-            json << "        \"threads\": " << s.threads << ",\n";
             json << "        \"running\": " << (s.running ? "true" : "false") << ",\n";
             json << "        \"uptime_seconds\": " << uptime << "\n";
             json << "      }" << (i + 1 < slaves_.size() ? "," : "") << "\n";
@@ -573,18 +569,14 @@ private:
 
         /// Get optional parameters with defaults
         uint16_t master_port = 8080;
-        uint32_t threads = 4;
 
         if (auto v = MiniJson::get<double>(*parsed, "master_port")) {
             master_port = static_cast<uint16_t>(*v);
         }
-        if (auto v = MiniJson::get<double>(*parsed, "threads")) {
-            threads = static_cast<uint32_t>(*v);
-        }
 
         /// Start slave
         SlaveProcessInfo info;
-        if (startSlave(*master_address, master_port, threads, info)) {
+        if (startSlave(*master_address, master_port, info)) {
             std::ostringstream json;
             json << "{\n";
             json << "  \"success\": true,\n";
@@ -593,7 +585,6 @@ private:
             json << "    \"pid\": " << info.pid << ",\n";
             json << "    \"master_address\": \"" << info.master_address << "\",\n";
             json << "    \"master_port\": " << info.master_port << ",\n";
-            json << "    \"threads\": " << info.threads << "\n";
             json << "  }\n";
             json << "}";
 
@@ -706,7 +697,7 @@ private:
 #else
     std::string slave_executable_ = "SlaveApp.exe";
 #endif
-    uint32_t max_slaves_ = 8;
+    uint32_t max_slaves_ = 4;
     std::string working_directory_;
     std::string config_file_ = "agent_config.json";
 
