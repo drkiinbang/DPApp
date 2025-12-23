@@ -129,7 +129,7 @@ bool MasterApplication::initialize(int argc, char* argv[]) {
     setupRestApiRoutes();
 
     /// Load agents configuration
-    loadAgentsFromConfig("agents_config.json");
+    loadAgentsFromConfig("master_config.json");
 
     return true;
 }

@@ -247,8 +247,6 @@ private:
             master_server_port_ = static_cast<uint16_t>(*v);
         if (auto v = MiniJson::get<double>(*parsed, "master_api_port"))
             master_api_port_ = static_cast<uint16_t>(*v);
-        if (auto v = MiniJson::get<std::string>(*parsed, "master_external_ip"))
-            master_external_ip_ = *v;
         if (auto v = MiniJson::get<std::string>(*parsed, "master_config_file"))
             master_config_file_ = *v;
 
@@ -312,9 +310,6 @@ private:
         cmd << " --port " << master_server_port_;
         cmd << " --api-port " << master_api_port_;
 
-        if (!master_external_ip_.empty()) {
-            cmd << " --external-ip " << master_external_ip_;
-        }
         if (!master_config_file_.empty()) {
             cmd << " --config " << master_config_file_;
         }
@@ -565,8 +560,6 @@ private:
                 master_server_port_ = static_cast<uint16_t>(*v);
             if (auto v = MiniJson::get<double>(*parsed, "api_port"))
                 master_api_port_ = static_cast<uint16_t>(*v);
-            if (auto v = MiniJson::get<std::string>(*parsed, "external_ip"))
-                master_external_ip_ = *v;
         }
 
         if (startMaster()) {
@@ -671,7 +664,6 @@ private:
     std::string master_executable_ = "MasterApp.exe";
     uint16_t master_server_port_ = 8080;
     uint16_t master_api_port_ = 8081;
-    std::string master_external_ip_;
     std::string master_config_file_;
     std::string config_file_ = "launcher_config.json";
 
