@@ -98,7 +98,7 @@ public:
     bool initialize(int argc, char* argv[]) {
         /// Default configuration
         agent_port_ = 8092;
-        slave_executable_ = "slave.exe";
+        slave_executable_ = "SlaveApp.exe";
         max_slaves_ = 8;
         config_file_ = "agent_config.json";
 
@@ -211,7 +211,7 @@ private:
         std::cout << "Usage: " << program << " [options]\n"
             << "Options:\n"
             << "  -p, --port <port>        Agent API port (default: 8092)\n"
-            << "  -s, --slave <path>       Slave executable path (default: slave.exe)\n"
+            << "  -s, --slave <path>       Slave executable path (default: SlaveApp.exe)\n"
             << "  -m, --max-slaves <num>   Maximum concurrent slaves (default: 8)\n"
             << "  -c, --config <file>      Configuration file (default: agent_config.json)\n"
             << "  -h, --help               Show this help message\n";
@@ -695,7 +695,12 @@ private:
 private:
     /// Configuration
     uint16_t agent_port_ = 8092;
-    std::string slave_executable_ = "slave.exe";
+    ///[ToDo] set exe file name in config
+#ifdef _DEBUG
+    std::string slave_executable_ = "SlaveAppd.exe";
+#else
+    std::string slave_executable_ = "SlaveApp.exe";
+#endif
     uint32_t max_slaves_ = 8;
     std::string working_directory_;
     std::string config_file_ = "agent_config.json";

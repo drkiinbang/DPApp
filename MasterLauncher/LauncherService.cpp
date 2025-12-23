@@ -102,7 +102,12 @@ public:
     bool initialize(int argc, char* argv[]) {
         /// Default configuration
         launcher_port_ = 8090;
-        master_executable_ = "master.exe";
+        ///[ToDo] put exe file name into config
+        std::string master_executable_ = "MasterApp.exe";
+
+#ifdef _DEBUG
+            master_executable_ = std::string("MasterAppd.exe");
+#endif
         master_server_port_ = 8080;
         master_api_port_ = 8081;
         config_file_ = "launcher_config.json";
@@ -212,7 +217,7 @@ private:
         std::cout << "Usage: " << program << " [options]\n"
             << "Options:\n"
             << "  -p, --port <port>      Launcher API port (default: 8090)\n"
-            << "  -m, --master <path>    Master executable path (default: master.exe)\n"
+            << "  -m, --master <path>    Master executable path (default: MasterApp.exe)\n"
             << "  -c, --config <file>    Configuration file (default: launcher_config.json)\n"
             << "  -h, --help             Show this help message\n";
     }
@@ -663,7 +668,7 @@ private:
 private:
     /// Configuration
     uint16_t launcher_port_ = 8090;
-    std::string master_executable_ = "master.exe";
+    std::string master_executable_ = "MasterApp.exe";
     uint16_t master_server_port_ = 8080;
     uint16_t master_api_port_ = 8081;
     std::string master_external_ip_;
