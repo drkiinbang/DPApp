@@ -27,6 +27,11 @@ namespace DPApp {
         TEST_COMPUTE = 11,   // 계산 검증 (제곱 연산)
         TEST_DELAY = 12,     // 의도적 지연 (타임아웃 테스트)
         TEST_FAIL = 13,      // 의도적 실패 (재시도 테스트)
+
+        // ICP 정합 타입
+        ICP_COARSE_ALIGNMENT = 20,  // Coarse alignment (Master에서 수행)
+        ICP_FINE_ALIGNMENT = 21,    // Fine alignment (Slave 분산 처리)
+        ICP_APPLY_TRANSFORM = 22,   // Transform 적용 (결과 저장)
     };
 
     /// Convert TaskType to string
@@ -39,6 +44,9 @@ namespace DPApp {
         case TaskType::TEST_COMPUTE: return "test_compute";
         case TaskType::TEST_DELAY: return "test_delay";
         case TaskType::TEST_FAIL: return "test_fail";
+        case TaskType::ICP_COARSE_ALIGNMENT: return "icp_coarse";
+        case TaskType::ICP_FINE_ALIGNMENT: return "icp_fine";
+        case TaskType::ICP_APPLY_TRANSFORM: return "icp_apply";
         default: return "unknown";
         }
     }
@@ -53,6 +61,10 @@ namespace DPApp {
         if (str == "test_compute") return TaskType::TEST_COMPUTE;
         if (str == "test_delay") return TaskType::TEST_DELAY;
         if (str == "test_fail") return TaskType::TEST_FAIL;
+        if (str == "icp_coarse") return TaskType::ICP_COARSE_ALIGNMENT;
+        if (str == "icp_fine") return TaskType::ICP_FINE_ALIGNMENT;
+        if (str == "icp_apply") return TaskType::ICP_APPLY_TRANSFORM;
+        if (str == "icp") return TaskType::ICP_FINE_ALIGNMENT;  // 기본값
         return TaskType::UNKNOWN;
     }
 

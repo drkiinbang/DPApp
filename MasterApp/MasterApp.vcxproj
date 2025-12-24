@@ -153,6 +153,7 @@
     <ClInclude Include="..\include\bim\gltf_mesh.h" />
     <ClInclude Include="..\include\BinaryReadWriter.hpp" />
     <ClInclude Include="..\include\DefinePointType.hpp" />
+    <ClInclude Include="..\include\IcpTypes.h" />
     <ClInclude Include="..\include\Logger.h" />
     <ClInclude Include="..\include\NetworkManager.h" />
     <ClInclude Include="..\include\Pc2Reader.hpp" />
