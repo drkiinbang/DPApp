@@ -1092,8 +1092,8 @@ int main(int argc, char* argv[]) {
     //return 0;  // 테스트만 실행하고 종료
 
     /// Phase 3 test
-    testIcpSerializationCompile();
-    return 0;
+    //testIcpSerializationCompile();
+    //return 0;
  
 #endif
 

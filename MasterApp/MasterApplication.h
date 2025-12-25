@@ -19,6 +19,7 @@
 #include <mutex>
 #include <vector>
 #include <memory>
+#include <map>
 
 #include "../include/PointCloudTypes.h"
 #include "../include/NetworkManager.h"
@@ -27,6 +28,10 @@
 #include "RestApiServer.h"
 #include "../include/RuntimeConfig.h"
 #include "../include/Logger.h"
+//#include "../include/IcpTypes.h"
+
+//#include "../LasImport/LasImport.h"  
+//#include "../BimImport/BimImport.h"
 
 using namespace DPApp;
 
@@ -99,6 +104,10 @@ private:
     std::vector<TestResult> test_results_;         // 테스트 결과 저장
     std::mutex test_mutex_;                        // 테스트 데이터 동기화
     uint32_t next_test_chunk_id_ = 0;              // 전역 고유 청크 ID 카운터
+    /// icp member variables
+    //std::map<std::string, std::shared_ptr<icp::IcpJob>> icp_jobs_;
+    //std::mutex icp_jobs_mutex_;
+    //uint32_t next_icp_task_id_ = 10000;
 
 public:
     MasterApplication();
@@ -175,7 +184,7 @@ public:
     /// =========================================
 
     void setupRestApiRoutes();
-
+        
     HttpResponse handleGetStatus(const HttpRequest& req);
     HttpResponse handleGetSlaves(const HttpRequest& req);
     HttpResponse handleGetSlave(const HttpRequest& req);
@@ -189,9 +198,20 @@ public:
     HttpResponse handleShutdownSlave(const HttpRequest& req);
     HttpResponse handleShutdownAllSlaves(const HttpRequest& req);
     HttpResponse handleShutdownServer(const HttpRequest& req);
-
     HttpResponse createErrorResponse(int status_code, const std::string& error);
     std::string getCurrentTimestamp();
+
+    /// icp
+    //void setupIcpApiRoutes();
+    //HttpResponse handleIcpStart(const HttpRequest& req);
+    //HttpResponse handleIcpJobs(const HttpRequest& req);
+    //HttpResponse handleIcpJobStatus(const HttpRequest& req);
+    //HttpResponse handleIcpJobResult(const HttpRequest& req);
+    //HttpResponse handleIcpJobCancel(const HttpRequest& req);
+    //HttpResponse handleIcpJobStats(const HttpRequest& req);
+    //void processIcpJob(std::shared_ptr<icp::IcpJob> job);
+    //std::string generateIcpJobId();
+    //void handleIcpResult(const icp::IcpResult& result, uint32_t task_id);
 
     /// =========================================
     /// Agent Functions (MasterApplication_Agent.cpp)

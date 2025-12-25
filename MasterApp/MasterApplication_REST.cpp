@@ -126,6 +126,9 @@ void MasterApplication::setupRestApiRoutes() {
     api_server_->POST("/api/slaves/resume", [this](const HttpRequest& req) {
         return handleResumeAllSlaves(req);
         });
+
+    /// ICP API Routes
+    //setupIcpApiRoutes();
 }
 
 /// =========================================
