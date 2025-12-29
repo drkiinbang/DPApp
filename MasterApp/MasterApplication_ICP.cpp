@@ -12,46 +12,51 @@
 #include "../include/MiniJson.h"
 #include "../include/bimtree/IcpCore.hpp"
 #include "../include/bimtree/IcpSerialization.hpp"
+#include "../include/bimtree/PseudoPointGenerator.hpp"
+
+/// Data loading from DLLs
+#include "../LasImport/LasImport.h"
+#include "../BimImport/BimImport.h"
 
 #include <chrono>
 #include <random>
 #include <sstream>
 #include <iomanip>
 
- /// =========================================
- /// ICP REST API Route Setup
- /// =========================================
+/// =========================================
+/// ICP REST API Route Setup
+/// =========================================
 
 void MasterApplication::setupIcpApiRoutes() {
     /// POST /api/icp/start - Start new ICP job
     api_server_->POST("/api/icp/start", [this](const HttpRequest& req) {
         return handleIcpStart(req);
-        });
+    });
 
     /// GET /api/icp/jobs - List all ICP jobs
     api_server_->GET("/api/icp/jobs", [this](const HttpRequest& req) {
         return handleIcpJobs(req);
-        });
+    });
 
     /// GET /api/icp/jobs/{id} - Get job status
     api_server_->GET("/api/icp/jobs/{id}", [this](const HttpRequest& req) {
         return handleIcpJobStatus(req);
-        });
+    });
 
     /// GET /api/icp/jobs/{id}/result - Get job result
     api_server_->GET("/api/icp/jobs/{id}/result", [this](const HttpRequest& req) {
         return handleIcpJobResult(req);
-        });
+    });
 
     /// POST /api/icp/jobs/{id}/cancel - Cancel job
     api_server_->POST("/api/icp/jobs/{id}/cancel", [this](const HttpRequest& req) {
         return handleIcpJobCancel(req);
-        });
+    });
 
     /// GET /api/icp/jobs/{id}/stats - Get job statistics
     api_server_->GET("/api/icp/jobs/{id}/stats", [this](const HttpRequest& req) {
         return handleIcpJobStats(req);
-        });
+    });
 
     ILOG << "[ICP] REST API routes registered";
 }
@@ -68,7 +73,7 @@ std::string MasterApplication::generateIcpJobId() {
 
     std::stringstream ss;
     ss << "icp_" << std::put_time(std::localtime(&time_t_now), "%Y%m%d_%H%M%S")
-        << "_" << std::setfill('0') << std::setw(3) << ms.count();
+       << "_" << std::setfill('0') << std::setw(3) << ms.count();
 
     return ss.str();
 }
@@ -105,13 +110,12 @@ HttpResponse MasterApplication::handleIcpStart(const HttpRequest& req) {
         job->bimFolderPath = bim_folder;
         job->status = icp::IcpJobStatus::PENDING;
 
-        /// Optional output path
+        /// Optional output path (not used for now, but kept for future)
         auto output_opt = MiniJson::get_ex<std::string>(json, "output_path");
         if (output_opt) {
             job->outputPath = *output_opt;
         }
         else {
-            /// Default output: input_icp_aligned.las
             size_t dot_pos = las_file.rfind('.');
             if (dot_pos != std::string::npos) {
                 job->outputPath = las_file.substr(0, dot_pos) + "_icp_aligned.las";
@@ -136,6 +140,23 @@ HttpResponse MasterApplication::handleIcpStart(const HttpRequest& req) {
 
             auto ds_ratio = MiniJson::get_ex<double>(cfg, "downsample_ratio");
             if (ds_ratio) job->config.downsampleRatio = static_cast<int>(*ds_ratio);
+
+            auto grid_size = MiniJson::get_ex<double>(cfg, "pseudo_point_grid_size");
+            if (grid_size) job->config.pseudoPointGridSize = static_cast<float>(*grid_size);
+        }
+
+        /// Optional LAS offset (dx, dy, dz)
+        auto offset_opt = MiniJson::get_object(json, "offset");
+        if (offset_opt) {
+            auto& off = *offset_opt;
+            auto dx = MiniJson::get_ex<double>(off, "dx");
+            if (dx) job->offsetX = static_cast<float>(*dx);
+
+            auto dy = MiniJson::get_ex<double>(off, "dy");
+            if (dy) job->offsetY = static_cast<float>(*dy);
+
+            auto dz = MiniJson::get_ex<double>(off, "dz");
+            if (dz) job->offsetZ = static_cast<float>(*dz);
         }
 
         /// Record start time
@@ -150,12 +171,12 @@ HttpResponse MasterApplication::handleIcpStart(const HttpRequest& req) {
         }
 
         ILOG << "[ICP] Job created: " << job->jobId
-            << " (LAS: " << las_file << ", BIM: " << bim_folder << ")";
+             << " (LAS: " << las_file << ", BIM: " << bim_folder << ")";
 
         /// Start processing in background thread
         std::thread([this, job]() {
             processIcpJob(job);
-            }).detach();
+        }).detach();
 
         /// Return response
         std::ostringstream oss;
@@ -295,8 +316,8 @@ HttpResponse MasterApplication::handleIcpJobResult(const HttpRequest& req) {
         }
 
         if (!job->isFinished()) {
-            return createErrorResponse(202, "Job not yet completed. Status: " +
-                std::string(icp::statusToString(job->status)));
+            return createErrorResponse(202, "Job not yet completed. Status: " + 
+                                       std::string(icp::statusToString(job->status)));
         }
 
         std::ostringstream oss;
@@ -441,49 +462,93 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
     ILOG << "[ICP] Starting job processing: " << job->jobId;
 
     try {
-        /// Phase 1: Loading Data
+        /// =============================================
+        /// Phase 1: Loading LAS Data
+        /// =============================================
         job->status = icp::IcpJobStatus::LOADING_DATA;
-        ILOG << "[ICP] Loading data...";
+        ILOG << "[ICP] Loading LAS file: " << job->lasFilePath;
 
-        /// Check cancellation
         if (job->cancelRequested.load()) {
             job->status = icp::IcpJobStatus::CANCELLED;
             ILOG << "[ICP] Job cancelled: " << job->jobId;
             return;
         }
 
-        /// TODO: Load LAS file using existing LaslibReader
-        /// std::vector<std::array<float, 3>> pointCloud = loadLasFile(job->lasFilePath);
-        /// job->totalPointCount = pointCloud.size();
+        /// Load LAS file
+        std::vector<chunkpc::PointCloudChunk> lasChunks;
+        const uint32_t maxPointsPerChunk = 100000;
 
-        /// TODO: Load GLTF/BIM mesh using existing BimInfo
-        /// BimInfo bimInfo;
-        /// bimInfo.load(job->bimFolderPath);
-        /// job->totalMeshTriangles = bimInfo.getTotalFaceCount();
+        if (!loadLasFile(job->lasFilePath, lasChunks, maxPointsPerChunk)) {
+            throw std::runtime_error("Failed to load LAS file: " + job->lasFilePath);
+        }
 
-        /// Placeholder: Simulate loading
-        job->totalPointCount = 100000;
-        job->totalMeshTriangles = 50000;
-        ILOG << "[ICP] Data loaded: " << job->totalPointCount << " points, "
-            << job->totalMeshTriangles << " triangles";
+        /// Convert to ICP format
+        std::vector<std::array<float, 3>> sourcePoints = icp::convertPointCloudToIcp(lasChunks);
+        job->totalPointCount = sourcePoints.size();
 
-        /// Phase 2: Generate Pseudo Points
-        job->status = icp::IcpJobStatus::GENERATING_PSEUDO;
-        ILOG << "[ICP] Generating pseudo points from mesh...";
+        ILOG << "[ICP] LAS loaded: " << job->totalPointCount << " points";
+
+        /// Apply offset to source points
+        if (job->offsetX != 0.0f || job->offsetY != 0.0f || job->offsetZ != 0.0f) {
+            ILOG << "[ICP] Applying offset: dx=" << job->offsetX
+                << ", dy=" << job->offsetY
+                << ", dz=" << job->offsetZ;
+
+            for (auto& pt : sourcePoints) {
+                pt[0] += job->offsetX;
+                pt[1] += job->offsetY;
+                pt[2] += job->offsetZ;
+            }
+        }
+
+        /// =============================================
+        /// Phase 2: Loading BIM/GLTF Data
+        /// =============================================
+        ILOG << "[ICP] Loading GLTF from: " << job->bimFolderPath;
 
         if (job->cancelRequested.load()) {
             job->status = icp::IcpJobStatus::CANCELLED;
             return;
         }
 
-        /// TODO: Use PseudoPtsInMesh.hpp to generate pseudo points
-        /// auto pseudoPoints = generateMeshPseudoPoints(bimInfo, job->config.pseudoPointGridSize);
-        /// job->totalPseudoPoints = pseudoPoints.size();
+        /// Load GLTF meshes
+        std::vector<chunkbim::MeshChunk> meshes;
+        if (!loadGltf(job->bimFolderPath, meshes)) {
+            throw std::runtime_error("Failed to load GLTF from: " + job->bimFolderPath);
+        }
 
-        job->totalPseudoPoints = 200000;
+        job->totalMeshTriangles = icp::countTotalTriangles(meshes);
+        ILOG << "[ICP] GLTF loaded: " << meshes.size() << " meshes, "
+            << job->totalMeshTriangles << " triangles";
+
+        /// =============================================
+        /// Phase 3: Generate Pseudo Points from Mesh
+        /// =============================================
+        job->status = icp::IcpJobStatus::GENERATING_PSEUDO;
+        ILOG << "[ICP] Generating pseudo points (grid size: " << job->config.pseudoPointGridSize << "m)...";
+
+        if (job->cancelRequested.load()) {
+            job->status = icp::IcpJobStatus::CANCELLED;
+            return;
+        }
+
+        std::vector<std::array<float, 3>> pseudoFacePoints;
+        std::vector<size_t> pseudoFaceIdx;
+        std::vector<std::array<float, 3>> facePts;
+        std::vector<std::array<float, 3>> targetNormals;
+        /// [ToDo] use directly meshes, instead of extraction
+        icp::generatePseudoPoints(meshes, job->config.pseudoPointGridSize, pseudoFacePoints, pseudoFaceIdx, facePts, targetNormals);
+
+        job->totalPseudoPoints = pseudoFacePoints.size();
         ILOG << "[ICP] Pseudo points generated: " << job->totalPseudoPoints;
 
-        /// Phase 3: Coarse Alignment (on Master)
+        if (pseudoFacePoints.empty()) {
+            throw std::runtime_error("No pseudo points generated from mesh");
+        }
+
+        /// =============================================
+        /// Phase 4: Coarse Alignment (on Master)
+        /// =============================================
         job->status = icp::IcpJobStatus::COARSE_ALIGNMENT;
         ILOG << "[ICP] Running coarse alignment...";
 
@@ -494,118 +559,125 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
             return;
         }
 
-        /// TODO: Run coarse ICP on downsampled data
-        /// auto downsampledSource = icp::downsampleUniform(pointCloud, job->config.downsampleRatio);
-        /// auto downsampledTarget = icp::downsampleUniform(pseudoPoints, job->config.downsampleRatio);
-        /// icp::IcpChunk coarseChunk;
-        /// coarseChunk.sourcePoints = downsampledSource;
-        /// coarseChunk.targetPoints = downsampledTarget;
-        /// std::atomic<bool> cancel{false};
-        /// auto coarseResult = icp::runIcp(coarseChunk, cancel);
-        /// job->coarseTransform = coarseResult.transform;
-        /// job->coarseRMSE = coarseResult.finalRMSE;
+        /// Downsample for coarse alignment: point cluod
+        int coarseDownsampleRatio = job->config.downsampleRatio * 2;  /// More aggressive for coarse
+        auto coarseSource = icp::downsampleUniform(sourcePoints, coarseDownsampleRatio);
 
-        /// Placeholder: Identity transform
-        job->coarseTransform = icp::Transform4x4::identity();
-        job->coarseRMSE = 0.5f;
-        job->coarseConverged = true;
+        /// Downsample for coarse alignment: BIM points
+        std::vector<size_t> coarseIdx;
+        std::vector<std::array<float, 3>> coarseTarget;
+        if (!icp::downsampleUniform(pseudoFacePoints, pseudoFaceIdx, coarseTarget, coarseIdx, coarseDownsampleRatio)) {
+            throw std::runtime_error("Error from downsampleUniform");
+        }
+
+        ILOG << "[ICP] Coarse alignment: " << coarseSource.size() << " vs " << coarseTarget.size() << " points";
+
+        /// Create coarse chunk
+        icp::IcpChunk coarseChunk;
+        coarseChunk.chunk_id = 0;
+        coarseChunk.sourcePoints = std::move(coarseSource);
+        coarseChunk.targetPoints = std::move(coarseTarget);
+        coarseChunk.faceIndices = std::move(coarseIdx);
+        coarseChunk.faceNormals = targetNormals;
+        coarseChunk.facePts = facePts;
+        coarseChunk.config = job->config;
+        coarseChunk.config.maxCorrespondenceDistance *= 2.0f;  /// Larger distance for coarse
+
+        /// Run coarse ICP
+        icp::IcpResult coarseResult = icp::runIcp(coarseChunk, job->cancelRequested);
+
+        job->coarseTransform = coarseResult.transform;
+        job->coarseRMSE = coarseResult.finalRMSE;
+        job->coarseConverged = coarseResult.converged;
 
         auto coarseEndTime = std::chrono::high_resolution_clock::now();
         job->coarseAlignmentTimeMs = std::chrono::duration<double, std::milli>(
             coarseEndTime - coarseStartTime).count();
 
-        ILOG << "[ICP] Coarse alignment completed: RMSE=" << job->coarseRMSE
-            << " in " << (job->coarseAlignmentTimeMs / 1000.0) << "s";
+        ILOG << "[ICP] Coarse alignment: RMSE=" << job->coarseRMSE
+            << ", converged=" << (job->coarseConverged ? "Yes" : "No")
+            << ", iterations=" << coarseResult.actualIterations
+            << ", time=" << (job->coarseAlignmentTimeMs / 1000.0) << "s";
 
-        /// Phase 4: Distribute to Slaves (Fine Alignment)
-        job->status = icp::IcpJobStatus::DISTRIBUTING;
-        ILOG << "[ICP] Distributing chunks to slaves...";
-
-        /// TODO: Create IcpChunks from spatial partitions
-        /// std::vector<icp::IcpChunk> chunks = createIcpChunks(pointCloud, pseudoPoints, job->coarseTransform);
-        /// job->totalChunks = chunks.size();
-
-        /// Placeholder: Simulate chunks
-        job->totalChunks = 10;
-        ILOG << "[ICP] Created " << job->totalChunks << " chunks";
-
-        /// Phase 5: Fine Alignment (on Slaves)
+        /// =============================================
+        /// Phase 5: Fine Alignment (Single Pass on Master)
+        /// =============================================
         job->status = icp::IcpJobStatus::FINE_ALIGNMENT;
+        ILOG << "[ICP] Running fine alignment...";
+
         auto fineStartTime = std::chrono::high_resolution_clock::now();
 
-        /// TODO: Send IcpChunks to slaves via TaskManager
-        /// for (auto& chunk : chunks) {
-        ///     sendIcpTaskToSlave(chunk, job->jobId);
-        /// }
-        /// 
-        /// Wait for all results...
-
-        /// Placeholder: Simulate completion
-        for (uint32_t i = 0; i < job->totalChunks; ++i) {
-            if (job->cancelRequested.load()) {
-                job->status = icp::IcpJobStatus::CANCELLED;
-                return;
-            }
-
-            /// Simulate chunk result
-            icp::IcpResult result;
-            result.chunk_id = i;
-            result.success = true;
-            result.converged = true;
-            result.finalRMSE = 0.01f + (i * 0.001f);
-            result.actualIterations = 10 + i;
-            result.transform = job->coarseTransform;
-
-            job->chunkResults.push_back(result);
-            job->completedChunks++;
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(100)); /// Simulate work
+        if (job->cancelRequested.load()) {
+            job->status = icp::IcpJobStatus::CANCELLED;
+            return;
         }
+
+        /// Apply coarse transform to source points
+        auto alignedSource = icp::transformPointCloudCopy(sourcePoints, job->coarseTransform);
+
+        /// Downsample for fine alignment (less aggressive): point cloud
+        auto fineSource = icp::downsampleUniform(alignedSource, job->config.downsampleRatio);
+
+        /// Downsample for fine alignment (less aggressive): BIM points
+        std::vector<size_t> fineIdx;
+        std::vector<std::array<float, 3>> fineTarget;
+        if (!icp::downsampleUniform(pseudoFacePoints, pseudoFaceIdx, fineTarget, fineIdx, job->config.downsampleRatio)) {
+            throw std::runtime_error("Error from downsampleUniform: fine");
+        }
+
+        ILOG << "[ICP] Fine alignment: " << fineSource.size() << " vs " << fineTarget.size() << " points";
+
+        /// Create fine chunk
+        icp::IcpChunk fineChunk;
+        fineChunk.chunk_id = 0;
+        fineChunk.sourcePoints = std::move(fineSource);
+        fineChunk.targetPoints = std::move(fineTarget);
+        fineChunk.faceIndices = std::move(fineIdx);
+        fineChunk.faceNormals = targetNormals;
+        fineChunk.facePts = facePts;
+        fineChunk.config = job->config;
+
+        /// Run fine ICP
+        icp::IcpResult fineResult = icp::runIcp(fineChunk, job->cancelRequested);
 
         auto fineEndTime = std::chrono::high_resolution_clock::now();
         job->fineAlignmentTimeMs = std::chrono::duration<double, std::milli>(
             fineEndTime - fineStartTime).count();
 
-        ILOG << "[ICP] Fine alignment completed in " << (job->fineAlignmentTimeMs / 1000.0) << "s";
+        /// Store result
+        job->chunkResults.push_back(fineResult);
+        job->completedChunks = 1;
+        job->totalChunks = 1;
 
+        ILOG << "[ICP] Fine alignment: RMSE=" << fineResult.finalRMSE
+             << ", converged=" << (fineResult.converged ? "Yes" : "No")
+             << ", iterations=" << fineResult.actualIterations
+             << ", time=" << (job->fineAlignmentTimeMs / 1000.0) << "s";
+
+        /// =============================================
         /// Phase 6: Aggregate Results
+        /// =============================================
         job->status = icp::IcpJobStatus::AGGREGATING;
         ILOG << "[ICP] Aggregating results...";
 
-        job->finalTransform = icp::aggregateResultsWeighted(job->chunkResults);
+        /// Combine coarse and fine transforms
+        job->finalTransform = fineResult.transform * job->coarseTransform;
+        job->finalRMSE = fineResult.finalRMSE;
 
-        /// Calculate final RMSE
-        float totalRMSE = 0.0f;
-        int validCount = 0;
-        for (const auto& r : job->chunkResults) {
-            if (r.success) {
-                totalRMSE += r.finalRMSE;
-                validCount++;
-            }
-        }
-        job->finalRMSE = (validCount > 0) ? (totalRMSE / validCount) : 0.0f;
+        ILOG << "[ICP] Final transform computed, RMSE: " << job->finalRMSE;
 
-        ILOG << "[ICP] Final RMSE: " << job->finalRMSE;
-
-        /// Phase 7: Apply Transform and Save
-        job->status = icp::IcpJobStatus::SAVING_RESULT;
-        ILOG << "[ICP] Saving aligned point cloud...";
-
-        /// TODO: Apply transform to point cloud and save
-        /// auto alignedPoints = icp::transformPointCloudCopy(pointCloud, job->finalTransform);
-        /// saveLasFile(job->outputPath, alignedPoints);
-
-        ILOG << "[ICP] Output saved to: " << job->outputPath;
-
-        /// Complete
+        /// =============================================
+        /// Phase 7: Complete (No file saving)
+        /// =============================================
         job->status = icp::IcpJobStatus::COMPLETED;
         job->endTimeMs = static_cast<double>(
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count());
 
         ILOG << "[ICP] Job completed: " << job->jobId
-            << " (RMSE: " << job->finalRMSE
-            << ", Time: " << job->getElapsedTimeSec() << "s)";
+             << " (Coarse RMSE: " << job->coarseRMSE
+             << ", Final RMSE: " << job->finalRMSE
+             << ", Time: " << job->getElapsedTimeSec() << "s)";
     }
     catch (const std::exception& e) {
         job->status = icp::IcpJobStatus::FAILED;
@@ -623,12 +695,10 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
 
 void MasterApplication::handleIcpResult(const icp::IcpResult& result, uint32_t task_id) {
     ILOG << "[ICP] Received result for task " << task_id
-        << " (chunk: " << result.chunk_id
-        << ", success: " << (result.success ? "Yes" : "No")
-        << ", RMSE: " << result.finalRMSE << ")";
+         << " (chunk: " << result.chunk_id
+         << ", success: " << (result.success ? "Yes" : "No")
+         << ", RMSE: " << result.finalRMSE << ")";
 
-    /// TODO: Find job by task_id and update chunk results
-    /// This requires mapping task_id -> job_id
-    /// 
-    /// For now, this is a placeholder
+    /// TODO: For distributed processing, map task_id -> job_id
+    /// and update the corresponding job's chunk results
 }

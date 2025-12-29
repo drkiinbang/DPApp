@@ -128,7 +128,7 @@ void MasterApplication::setupRestApiRoutes() {
         });
 
     /// ICP API Routes
-    //setupIcpApiRoutes();
+    setupIcpApiRoutes();
 }
 
 /// =========================================

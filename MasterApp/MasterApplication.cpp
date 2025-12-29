@@ -191,6 +191,7 @@ inline bool floatEquals(float a, float b, float epsilon = 1e-6f) {
     return std::abs(a - b) < epsilon;
 }
 
+/// [ToDo] 직렬화 테스트 더 이상 필요없으면 삭제
 /// Phase 3 직렬화 테스트
 void testIcpSerializationCompile() {
     std::cout << "=== Phase 3 Serialization Test ===" << std::endl;
@@ -220,7 +221,7 @@ void testIcpSerializationCompile() {
     {
         icp::IcpConfig original;
         original.maxIterations = 100;
-        original.convergenceThreshold = 1e-7f;
+        original.convergenceThreshold = 1e-6f;
         original.maxCorrespondenceDistance = 2.0f;
         original.downsampleRatio = 5;
         original.useNormalFiltering = true;
@@ -249,7 +250,8 @@ void testIcpSerializationCompile() {
         original.chunk_id = 42;
         original.sourcePoints = { {1.0f, 2.0f, 3.0f}, {4.0f, 5.0f, 6.0f} };
         original.targetPoints = { {7.0f, 8.0f, 9.0f}, {10.0f, 11.0f, 12.0f}, {13.0f, 14.0f, 15.0f} };
-        original.targetNormals = { {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f} };
+        original.faceIndices = { 0, 1, 2 };
+        original.faceNormals = { {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f} };
         original.initialTransform = icp::Transform4x4::translation(0.1f, 0.2f, 0.3f);
         original.config.maxIterations = 75;
         original.source_min_x = -1.0f; original.source_max_x = 10.0f;
@@ -262,7 +264,8 @@ void testIcpSerializationCompile() {
         bool match = (original.chunk_id == restored.chunk_id) &&
             (original.sourcePoints.size() == restored.sourcePoints.size()) &&
             (original.targetPoints.size() == restored.targetPoints.size()) &&
-            (original.targetNormals.size() == restored.targetNormals.size()) &&
+            (original.faceIndices.size() == restored.faceIndices.size()) &&
+            (original.faceNormals.size() == restored.faceNormals.size()) &&
             (original.config.maxIterations == restored.config.maxIterations) &&
             floatEquals(original.source_min_x, restored.source_min_x) &&
             floatEquals(original.source_max_x, restored.source_max_x);
@@ -380,7 +383,7 @@ namespace DPApp {
 
                 /// 1. Load mesh data
                 std::vector<chunkbim::MeshChunk> bimData;
-                auto retval = loadGltf(bim_folder, bimData, 0);
+                auto retval = loadGltf(bim_folder, bimData);
                 std::cout << "Loaded " << bimData.size() << " bim chunks" << std::endl;
 
                 if (bimData.empty()) {
@@ -418,7 +421,6 @@ namespace DPApp {
 
                     std::cout << "Created BimPcChunk " << bimpc_chunk->chunk_id
                         << " - points: " << bimpc_chunk->points.size()
-                        << ", vertices: " << bimpc_chunk->bim.vertices.size()
                         << ", faces: " << bimpc_chunk->bim.faces.size()
                         << std::endl;
                 }

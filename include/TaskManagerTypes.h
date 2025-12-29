@@ -186,7 +186,6 @@ namespace DPApp {
             std::cout << "Task added (BimPc): " << task_id
                 << " (" << taskStr(current_task_type_) << ")"
                 << " - points: " << bimpc_chunk->points.size()
-                << ", vertices: " << bimpc_chunk->bim.vertices.size()
                 << ", indices: " << bimpc_chunk->bim.faces.size() << " faces"
                 << std::endl;
 

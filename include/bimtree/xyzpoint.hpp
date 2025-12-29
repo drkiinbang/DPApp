@@ -47,9 +47,13 @@ namespace pctree
 		inline XYZPoint& operator/=(const float s) { for (int i = 0; i < 3; i++) xyz[i] /= s; return *this; }
 		inline XYZPoint normalize() 
 		{ 
-			float sum2 = getSquareSum();
-			if (sum2 > std::numeric_limits<float>::epsilon()) {
-				return XYZPoint(*this/static_cast<float>(sqrt(sum2))); 
+			double x = this->xyz[0];
+			double y = this->xyz[1];
+			double z = this->xyz[2];
+			double sum2 = x * x + y * y + z * z;
+			if (sum2 > std::numeric_limits<double>::epsilon()) {
+				double length = sqrt(sum2);
+				return XYZPoint(static_cast<float>(x/length), static_cast<float>(y / length), static_cast<float>(z / length));
 			}
 			else
 				return XYZPoint(*this);

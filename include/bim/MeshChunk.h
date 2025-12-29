@@ -11,23 +11,22 @@
 namespace chunkbim {
 	struct FaceVtx {
 		pctree::XYZPoint normal;
-		unsigned int idxVtx[3];
+        pctree::XYZPoint vertices[3];
 
 		FaceVtx() = default;
 		FaceVtx(
-			const size_t idx0,
-			const size_t idx1,
-			const size_t idx2,
+			const pctree::XYZPoint vertex0,
+			const pctree::XYZPoint vertex1,
+			const pctree::XYZPoint vertex2,
 			const pctree::XYZPoint& n)
 			: normal(n) {
-			idxVtx[0] = static_cast<unsigned int>(idx0);
-			idxVtx[1] = static_cast<unsigned int>(idx1);
-			idxVtx[2] = static_cast<unsigned int>(idx2);
+            vertices[0] = vertex0;
+            vertices[1] = vertex1;
+            vertices[2] = vertex2;
 		}
 	};
 
 	struct MeshChunk {
-		std::vector<pctree::XYZPoint> vertices;
 		std::vector<FaceVtx> faces;
 		std::string name;
 		int id;
@@ -37,24 +36,26 @@ namespace chunkbim {
         float max_x, max_y, max_z;
 
         void calculateBounds() {
-            if (vertices.empty()) {
+            if (faces.empty()) {
                 min_x = min_y = min_z = 0;
                 max_x = max_y = max_z = 0;
                 return;
             }
 
-            min_x = max_x = vertices[0][0];
-            min_y = max_y = vertices[0][1];
-            min_z = max_z = vertices[0][2];
+            /// Initialize with first vertex of first face
+            min_x = max_x = faces[0].vertices[0][0];
+            min_y = max_y = faces[0].vertices[0][1];
+            min_z = max_z = faces[0].vertices[0][2];
 
-            for (const auto& point : vertices) {
-                min_x = (std::min)(min_x, point[0]);
-                min_y = (std::min)(min_y, point[1]);
-                min_z = (std::min)(min_z, point[2]);
-
-                max_x = (std::max)(max_x, point[0]);
-                max_y = (std::max)(max_y, point[1]);
-                max_z = (std::max)(max_z, point[2]);
+            for (const auto& face : faces) {
+                for (int v = 0; v < 3; ++v) {
+                    min_x = (std::min)(min_x, face.vertices[v][0]);
+                    min_y = (std::min)(min_y, face.vertices[v][1]);
+                    min_z = (std::min)(min_z, face.vertices[v][2]);
+                    max_x = (std::max)(max_x, face.vertices[v][0]);
+                    max_y = (std::max)(max_y, face.vertices[v][1]);
+                    max_z = (std::max)(max_z, face.vertices[v][2]);
+                }
             }
         }
 	};

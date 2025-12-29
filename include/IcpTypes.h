@@ -210,9 +210,15 @@ namespace icp {
         /// Target points (pseudo-points from mesh) - [x, y, z]
         std::vector<std::array<float, 3>> targetPoints;
 
-        /// Target normals (optional, for normal filtering) - [nx, ny, nz]
-        std::vector<std::array<float, 3>> targetNormals;
+        /// Index indicating which face each point belongs to
+        std::vector<size_t> faceIndices;
 
+        /// Face normal vectors - [nx, ny, nz]
+        std::vector<std::array<float, 3>> faceNormals;
+
+        /// Face representative points (one vertex per face) - [x, y, z]
+        std::vector<std::array<float, 3>> facePts;
+        
         /// Initial transformation (from coarse alignment)
         Transform4x4 initialTransform;
 
@@ -271,7 +277,8 @@ namespace icp {
             return sizeof(IcpChunk) +
                 sourcePoints.size() * sizeof(std::array<float, 3>) +
                 targetPoints.size() * sizeof(std::array<float, 3>) +
-                targetNormals.size() * sizeof(std::array<float, 3>);
+                faceIndices.size() * sizeof(size_t) +
+                faceNormals.size() * sizeof(std::array<float, 3>);
         }
 
         /// Check if chunk has valid data for processing
@@ -395,6 +402,11 @@ namespace icp {
         /// Input file paths
         std::string lasFilePath;
         std::string bimFolderPath;
+
+        /// LAS offset (applied after loading)
+        float offsetX = 0.0f;
+        float offsetY = 0.0f;
+        float offsetZ = 0.0f;
 
         /// Output file path for aligned point cloud
         std::string outputPath;

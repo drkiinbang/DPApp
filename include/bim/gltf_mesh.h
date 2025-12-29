@@ -251,6 +251,10 @@ namespace chunkbim {
 
 	class GltfMesh {
 	public:
+///[ToDo] Delte following lines
+#ifdef _DEBUG
+		//std::fstream tempfile;
+#endif
 		const int defauMeshID = -1;
 
 		GltfMesh() = default;
@@ -415,10 +419,13 @@ namespace chunkbim {
 			return model.meshes.size();
 		}
 
-		bool importMeshData(const std::string& filename,
-			std::vector<MeshChunk>& meshChunks,
-			const int extractionOption = 0)
+		bool importMeshData(const std::string& filename, std::vector<MeshChunk>& meshChunks)
 		{
+///[ToDo] Delte following lines
+#ifdef _DEBUG
+			//this->tempfile.open("F:\\out.tmp", std::ios::out);
+#endif
+
 			tinygltf::Model model;
 			tinygltf::TinyGLTF loader;
 			std::string err, warn;
@@ -450,8 +457,31 @@ namespace chunkbim {
 				return false;
 			}
 
-			bool retval = false;
+			//bool retval = false;
+			//retval = ExtractAllMeshes(model, meshChunks);
 
+			/// Scene Graph 방식으로 추출 (수정)
+			if (model.scenes.empty()) {
+				return ExtractAllMeshes(model, meshChunks);  // fallback
+			}
+
+			int sceneIndex = model.defaultScene >= 0 ? model.defaultScene : 0;
+			const tinygltf::Scene& scene = model.scenes[sceneIndex];
+			Mat4 identity = Mat4Identity();
+
+			for (int nodeIndex : scene.nodes) {
+				if (nodeIndex >= 0 && nodeIndex < (int)model.nodes.size()) {
+					ExtractMeshFromNode(model, nodeIndex, identity, meshChunks);
+				}
+			}
+
+			///[ToDo] Delte following lines
+#ifdef _DEBUG
+			//this->tempfile.close();
+#endif
+
+			/// [ToDo] Not used; Delete later
+			/*
 			switch (extractionOption) {
 			case 0:
 				retval = ExtractAllMeshes(model, meshChunks);
@@ -476,8 +506,9 @@ namespace chunkbim {
 				retval = ExtractDefaultSceneNodes(model, meshChunks, sceneIndex);
 				break;
 			}
+			*/
 
-			return retval;
+			return !meshChunks.empty();
 		}
 
 	public:
@@ -528,15 +559,14 @@ namespace chunkbim {
 		void ExtractMeshPrimitive(
 			const tinygltf::Model& model,
 			const tinygltf::Primitive& primitive,
-			const Mat4& worldMatrix, // World Matrix
+			const Mat4& worldMatrix,
 			MeshChunk& currentChunk)
 		{
-			/// --- Find POSITION accessor
+			/// --- Find POSITION accessor ---
 			auto itPos = primitive.attributes.find("POSITION");
 			if (itPos == primitive.attributes.end())
 				return;
 
-			/// After POSITION Accessor, gettting BufferView and Buffer
 			const int posAccIdx = itPos->second;
 			if (posAccIdx < 0 || posAccIdx >= (int)model.accessors.size()) return;
 			const tinygltf::Accessor& posAcc = model.accessors[posAccIdx];
@@ -549,112 +579,95 @@ namespace chunkbim {
 			const unsigned char* posBase = posBuf.data.data() + posView.byteOffset + posAcc.byteOffset;
 			int posStride = posAcc.ByteStride(posView) ? posAcc.ByteStride(posView) : sizeof(float) * 3;
 
-			/// Ladmda func reading positions
-			auto readPosition = [&](size_t idx) -> pctree::XYZPoint {
-				const float* p = reinterpret_cast<const float*>(posBase + posStride * idx);
-				/// Vertexs in a local coordinate system
-				pctree::XYZPoint p0_local(p[0], p[1], p[2]);
-				/// Vertex in a world coordinate system (인자로 받은 WorldMatrix 사용)
-				pctree::XYZPoint p0 = TransformPoint(worldMatrix, p0_local);
-				return p0;
-				};
+			/// --- Index Handling ---
+			if (primitive.indices < 0) return;  /// Non-indexed mesh not supported here
 
-			/// Index Handling
-			/// idxBase, idxStride, idxType, indexCount
+			const int idxAccIdx = primitive.indices;
+			if (idxAccIdx < 0 || idxAccIdx >= (int)model.accessors.size()) return;
+			const tinygltf::Accessor& idxAcc = model.accessors[idxAccIdx];
 
-			const unsigned char* idxBase = nullptr;
-			int idxStride = 0;
-			int idxType = -1;
-			size_t vertexCount = posAcc.count;
-			size_t indexCount = vertexCount;
+			if (idxAcc.componentType != TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE &&
+				idxAcc.componentType != TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT &&
+				idxAcc.componentType != TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) return;
 
-			if (primitive.indices >= 0) {
-				const int idxAccIdx = primitive.indices;
-				if (idxAccIdx < 0 || idxAccIdx >= (int)model.accessors.size()) return;
-				const tinygltf::Accessor& idxAcc = model.accessors[idxAccIdx];
+			if (idxAcc.bufferView < 0 || idxAcc.bufferView >= (int)model.bufferViews.size()) return;
+			const tinygltf::BufferView& idxView = model.bufferViews[idxAcc.bufferView];
+			if (idxView.buffer < 0 || idxView.buffer >= (int)model.buffers.size()) return;
+			const tinygltf::Buffer& idxBuf = model.buffers[idxView.buffer];
 
-				if (idxAcc.componentType != TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE &&
-					idxAcc.componentType != TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT &&
-					idxAcc.componentType != TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) return;
+			const unsigned char* idxBase = idxBuf.data.data() + idxView.byteOffset + idxAcc.byteOffset;
+			int idxStride = idxAcc.ByteStride(idxView);
+			int idxType = idxAcc.componentType;
+			size_t indexCount = idxAcc.count;
 
-				if (idxAcc.bufferView < 0 || idxAcc.bufferView >= (int)model.bufferViews.size()) return;
-				const tinygltf::BufferView& idxView = model.bufferViews[idxAcc.bufferView];
-
-				if (idxView.buffer < 0 || idxView.buffer >= (int)model.buffers.size()) return;
-				const tinygltf::Buffer& idxBuf = model.buffers[idxView.buffer];
-
-				idxBase = idxBuf.data.data() + idxView.byteOffset + idxAcc.byteOffset;
-				idxStride = idxAcc.ByteStride(idxView);
-				idxType = idxAcc.componentType;
-				indexCount = idxAcc.count;
-
-				if (idxStride == 0) {
-					if (idxType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) idxStride = 2;
-					else if (idxType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) idxStride = 4;
-					else idxStride = 1;
-				}
+			if (idxStride == 0) {
+				if (idxType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) idxStride = 2;
+				else if (idxType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) idxStride = 4;
+				else idxStride = 1;
 			}
 
+			/// Lambda: Read index
 			auto readIndex = [&](size_t i) -> size_t {
-				if (!idxBase) return i; /// Non-indexed
 				const unsigned char* ptr = idxBase + idxStride * i;
-				if (idxType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) return (size_t)(*reinterpret_cast<const uint16_t*>(ptr));
-				if (idxType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) return (size_t)(*reinterpret_cast<const uint32_t*>(ptr));
+				if (idxType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT)
+					return (size_t)(*reinterpret_cast<const uint16_t*>(ptr));
+				if (idxType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT)
+					return (size_t)(*reinterpret_cast<const uint32_t*>(ptr));
 				return (size_t)(*reinterpret_cast<const uint8_t*>(ptr));
 				};
 
-			/// Traverse faces and extract vertices
-			std::unordered_map<size_t, unsigned int> globalToLocalVtxMap;
+			/// Lambda: Read position and transform to world coordinates
+			auto readPosition = [&](size_t idx) -> pctree::XYZPoint {
+				const float* p = reinterpret_cast<const float*>(posBase + posStride * idx);
+				pctree::XYZPoint p_local(p[0], p[1], p[2]);
+				return TransformPoint(worldMatrix, p_local);
+				};
+
+			/// --- Create triangles directly ---
 			for (size_t i = 0; i + 2 < indexCount; i += 3) {
-				unsigned int localIndices[3];
-				for (int k = 0; k < 3; ++k) {
-					size_t gltfIndex = readIndex(i + k);
-					if (gltfIndex >= posAcc.count) continue;
+				size_t idx0 = readIndex(i);
+				size_t idx1 = readIndex(i + 1);
+				size_t idx2 = readIndex(i + 2);
 
-					auto it = globalToLocalVtxMap.find(gltfIndex);
-					if (it != globalToLocalVtxMap.end()) {
-						localIndices[k] = it->second;
-					}
-					else {
-						pctree::XYZPoint pWorld = readPosition(gltfIndex);
-						currentChunk.vertices.push_back(pWorld);
+				if (idx0 >= posAcc.count || idx1 >= posAcc.count || idx2 >= posAcc.count)
+					continue;
 
-						unsigned int newIndex = (unsigned int)(currentChunk.vertices.size() - 1);
-						globalToLocalVtxMap[gltfIndex] = newIndex;
-						localIndices[k] = newIndex;
-					}
-				}
+				/// Read vertex positions directly
+				pctree::XYZPoint vtx0 = readPosition(idx0);
+				pctree::XYZPoint vtx1 = readPosition(idx1);
+				pctree::XYZPoint vtx2 = readPosition(idx2);
 
-				auto vtx0 = currentChunk.vertices[localIndices[0]];
-				auto vtx1 = currentChunk.vertices[localIndices[1]];
-				auto vtx2 = currentChunk.vertices[localIndices[2]];
+///[ToDo] Delte following lines
+#ifdef _DEBUG
+				//this->tempfile.precision(6);
+				//this->tempfile << vtx0[0] << "\t" << vtx0[1] << "\t" << vtx0[2] << "\n";
+				//this->tempfile << vtx1[0] << "\t" << vtx1[1] << "\t" << vtx1[2] << "\n";
+				//this->tempfile << vtx2[0] << "\t" << vtx2[1] << "\t" << vtx2[2] << "\n";
+#endif
+
+				/// Compute face normal (cross product)
 				pctree::XYZPoint u = vtx1 - vtx0;
 				pctree::XYZPoint v = vtx2 - vtx0;
+				pctree::XYZPoint faceNormal = u % v;
+				faceNormal = faceNormal.normalize();
 
-				auto faceNormal = u % v;
-				faceNormal.normalize();
-
-				currentChunk.faces.push_back(FaceVtx(localIndices[0], localIndices[1], localIndices[2], faceNormal));
+				/// Add face directly (no intermediate vertex storage)
+				currentChunk.faces.push_back(FaceVtx(vtx0, vtx1, vtx2, faceNormal));
 			}
 		}
 
-		bool ExtractDefaultSceneNodes(tinygltf::Model& model,
-			std::vector<MeshChunk>& meshChunks,
-			const int sceneIndex) {
-			tinygltf::TinyGLTF loader;
-			std::string err, warn;
+		inline pctree::XYZPoint TransformNormal(const Mat4& m, const pctree::XYZPoint& n) {
+			/// Extract 3x3 rotation part and apply
+			double nx = m.m[0] * n[0] + m.m[4] * n[1] + m.m[8] * n[2];
+			double ny = m.m[1] * n[0] + m.m[5] * n[1] + m.m[9] * n[2];
+			double nz = m.m[2] * n[0] + m.m[6] * n[1] + m.m[10] * n[2];
 
-			const tinygltf::Scene& scene = model.scenes[sceneIndex];
-			Mat4 identity = Mat4Identity();
-
-			/// Extract recursively geometry for root nodes
-			for (int nodeIndex : scene.nodes) {
-				if (nodeIndex >= 0 && nodeIndex < (int)model.nodes.size()) {
-					ExtractMeshFromNode(model, nodeIndex, identity, meshChunks);
-				}
+			/// Normalize
+			double len = std::sqrt(nx * nx + ny * ny + nz * nz);
+			if (len > 1e-10) {
+				return pctree::XYZPoint(nx / len, ny / len, nz / len);
 			}
-
-			return true;
+			return pctree::XYZPoint(0, 0, 1);  /// Fallback
 		}
 
 		void ExtractMeshFromNode(
@@ -666,9 +679,7 @@ namespace chunkbim {
 			const tinygltf::Node& node = model.nodes[nodeIndex];
 
 			/// ---1. Matrix calculation ---
-			/// Local matrix for the current node
 			Mat4 local = LocalMatrixFromNode(node);
-			/// Current node world: Parent world * local
 			Mat4 world = Mat4Multiply(parentWorld, local);
 
 			/// if Node has mesh data
@@ -679,6 +690,8 @@ namespace chunkbim {
 				MeshChunk& currentChunk = meshChunks.back();
 				currentChunk.name = mesh.name;
 				currentChunk.id = defauMeshID;
+
+				/// Extract id from extras
 				if (mesh.extras.IsObject()) {
 					const auto& extrasMap = mesh.extras.Get<tinygltf::Value::Object>();
 					auto itExtras = extrasMap.find("id");
@@ -693,30 +706,23 @@ namespace chunkbim {
 					}
 				}
 
-				/// Map for collecting global and local indices
-				/// Use hash map instead of vector for performance
-				std::unordered_map<size_t, unsigned int> globalToLocalVtxMap;
-
+				/// Process each primitive
 				for (const auto& primitive : mesh.primitives) {
-					/// Process only TRIANGLES
 					if (primitive.mode != TINYGLTF_MODE_TRIANGLES)
 						continue;
 
-					/// --- 2. Find POSITION accessor ---
+					/// --- Find POSITION accessor ---
 					auto itPos = primitive.attributes.find("POSITION");
 					if (itPos == primitive.attributes.end())
 						continue;
 
-					/// Position accesor
 					const int posAccIdx = itPos->second;
 					if (posAccIdx < 0 || posAccIdx >= (int)model.accessors.size())
 						continue;
 					const tinygltf::Accessor& posAcc = model.accessors[posAccIdx];
 
-					/// Check POSITION accessor type (VEC3 + FLOAT)
 					if (posAcc.type != TINYGLTF_TYPE_VEC3 || posAcc.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT)
 						continue;
-
 					if (posAcc.bufferView < 0 || posAcc.bufferView >= (int)model.bufferViews.size())
 						continue;
 					const tinygltf::BufferView& posView = model.bufferViews[posAcc.bufferView];
@@ -728,105 +734,172 @@ namespace chunkbim {
 					const unsigned char* posBase = posBuf.data.data() + posView.byteOffset + posAcc.byteOffset;
 					int posStride = posAcc.ByteStride(posView) ? posAcc.ByteStride(posView) : sizeof(float) * 3;
 
-					/// Ladmda func reading positions
-					auto readPosition = [&](size_t idx) -> pctree::XYZPoint {
-						const float* p = reinterpret_cast<const float*>(posBase + posStride * idx);
-						/// Vertexs in a local coordinate system
-						pctree::XYZPoint p0_local(p[0], p[1], p[2]);
-						/// Vertex in a world coordinate system
-						pctree::XYZPoint p0 = TransformPoint(world, p0_local);
-						return p0;
-						};
+					/// --- Find NORMAL accessor (optional) ---
+					const unsigned char* normalBase = nullptr;
+					int normalStride = 0;
+					bool hasNormals = false;
 
-					/// --- 3. Index Handling ---
-					/// idxBase: first index address
-					const unsigned char* idxBase = nullptr;
-					int idxStride = 0;
-					int idxType = -1;
-					size_t vertexCount = posAcc.count;
-					size_t indexCount = vertexCount; /// Default to non-indexed
+					auto itNormal = primitive.attributes.find("NORMAL");
+					if (itNormal != primitive.attributes.end()) {
+						const int normalAccIdx = itNormal->second;
+						if (normalAccIdx >= 0 && normalAccIdx < (int)model.accessors.size()) {
+							const tinygltf::Accessor& normalAcc = model.accessors[normalAccIdx];
 
-					if (primitive.indices >= 0) {
-						const int idxAccIdx = primitive.indices;
-						if (idxAccIdx < 0 || idxAccIdx >= (int)model.accessors.size())
-							continue;
-						const tinygltf::Accessor& idxAcc = model.accessors[idxAccIdx];
+							if (normalAcc.type == TINYGLTF_TYPE_VEC3 &&
+								normalAcc.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT &&
+								normalAcc.bufferView >= 0 &&
+								normalAcc.bufferView < (int)model.bufferViews.size()) {
 
-						if (idxAcc.componentType != TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE &&
-							idxAcc.componentType != TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT &&
-							idxAcc.componentType != TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT)
-							continue;
+								const tinygltf::BufferView& normalView = model.bufferViews[normalAcc.bufferView];
 
-						if (idxAcc.bufferView < 0 || idxAcc.bufferView >= (int)model.bufferViews.size())
-							continue;
-						const tinygltf::BufferView& idxView = model.bufferViews[idxAcc.bufferView];
-
-						if (idxView.buffer < 0 || idxView.buffer >= (int)model.buffers.size())
-							continue;
-						const tinygltf::Buffer& idxBuf = model.buffers[idxView.buffer];
-
-						idxBase = idxBuf.data.data() + idxView.byteOffset + idxAcc.byteOffset;
-						idxStride = idxAcc.ByteStride(idxView);
-						idxType = idxAcc.componentType;
-						indexCount = idxAcc.count;
-
-						if (idxStride == 0) {
-							if (idxType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) idxStride = 2;
-							else if (idxType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) idxStride = 4;
-							else idxStride = 1;
+								if (normalView.buffer >= 0 && normalView.buffer < (int)model.buffers.size()) {
+									const tinygltf::Buffer& normalBuf = model.buffers[normalView.buffer];
+									normalBase = normalBuf.data.data() + normalView.byteOffset + normalAcc.byteOffset;
+									normalStride = normalAcc.ByteStride(normalView) ? normalAcc.ByteStride(normalView) : sizeof(float) * 3;
+									hasNormals = true;
+								}
+							}
 						}
 					}
 
+					/// --- Index Handling ---
+					if (primitive.indices < 0)
+						continue;
+
+					const int idxAccIdx = primitive.indices;
+					if (idxAccIdx < 0 || idxAccIdx >= (int)model.accessors.size())
+						continue;
+					const tinygltf::Accessor& idxAcc = model.accessors[idxAccIdx];
+
+					if (idxAcc.componentType != TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE &&
+						idxAcc.componentType != TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT &&
+						idxAcc.componentType != TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT)
+						continue;
+
+					if (idxAcc.bufferView < 0 || idxAcc.bufferView >= (int)model.bufferViews.size())
+						continue;
+					const tinygltf::BufferView& idxView = model.bufferViews[idxAcc.bufferView];
+
+					if (idxView.buffer < 0 || idxView.buffer >= (int)model.buffers.size())
+						continue;
+					const tinygltf::Buffer& idxBuf = model.buffers[idxView.buffer];
+
+					const unsigned char* idxBase = idxBuf.data.data() + idxView.byteOffset + idxAcc.byteOffset;
+					int idxStride = idxAcc.ByteStride(idxView);
+					int idxType = idxAcc.componentType;
+					size_t indexCount = idxAcc.count;
+
+					if (idxStride == 0) {
+						if (idxType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) idxStride = 2;
+						else if (idxType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) idxStride = 4;
+						else idxStride = 1;
+					}
+
+					/// Lambda: Read index
 					auto readIndex = [&](size_t i) -> size_t {
-						if (!idxBase) return i; // Non-indexed
 						const unsigned char* ptr = idxBase + idxStride * i;
-						if (idxType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) return (size_t)(*reinterpret_cast<const uint16_t*>(ptr));
-						if (idxType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) return (size_t)(*reinterpret_cast<const uint32_t*>(ptr));
+						if (idxType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT)
+							return (size_t)(*reinterpret_cast<const uint16_t*>(ptr));
+						if (idxType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT)
+							return (size_t)(*reinterpret_cast<const uint32_t*>(ptr));
 						return (size_t)(*reinterpret_cast<const uint8_t*>(ptr));
 						};
 
-					/// --- 4. Traverse faces and extract vertices ---
-					for (size_t i = 0; i + 2 < indexCount; i += 3) {
-						unsigned int localIndices[3];
-						/// For 3 vertices of a triangle
-						for (int k = 0; k < 3; ++k) {
-							size_t gltfIndex = readIndex(i + k);
-							if (gltfIndex >= posAcc.count)
-								continue;
+					/// Lambda: Read position and transform to world coordinates
+					auto readPosition = [&](size_t idx) -> pctree::XYZPoint {
+						const float* p = reinterpret_cast<const float*>(posBase + posStride * idx);
+						pctree::XYZPoint p_local(p[0], p[1], p[2]);
+						return TransformPoint(world, p_local);
+						};
 
-							/// Duplicate check and insertion using a map
-							auto it = globalToLocalVtxMap.find(gltfIndex);
-							if (it != globalToLocalVtxMap.end()) {
-								/// If the vertex is already registered, reuse its index
-								localIndices[k] = it->second;
+					/// Lambda: Read normal and transform to world coordinates (rotation only)
+					auto readNormal = [&](size_t idx) -> pctree::XYZPoint {
+						const float* n = reinterpret_cast<const float*>(normalBase + normalStride * idx);
+						pctree::XYZPoint n_local(n[0], n[1], n[2]);
+						/// Transform normal (rotation only, no translation)
+						return TransformNormal(world, n_local);
+						};
+
+					/// --- Create triangles directly ---
+					for (size_t i = 0; i + 2 < indexCount; i += 3) {
+						size_t idx0 = readIndex(i);
+						size_t idx1 = readIndex(i + 1);
+						size_t idx2 = readIndex(i + 2);
+
+						if (idx0 >= posAcc.count || idx1 >= posAcc.count || idx2 >= posAcc.count)
+							continue;
+
+						/// Read vertex positions directly
+						pctree::XYZPoint vtx0 = readPosition(idx0);
+						pctree::XYZPoint vtx1 = readPosition(idx1);
+						pctree::XYZPoint vtx2 = readPosition(idx2);
+
+						double x0 = static_cast<double>(vtx0[0]);
+						double y0 = static_cast<double>(vtx0[1]);
+						double z0 = static_cast<double>(vtx0[2]);
+
+						double x1 = static_cast<double>(vtx1[0]);
+						double y1 = static_cast<double>(vtx1[1]);
+						double z1 = static_cast<double>(vtx1[2]);
+
+						double x2 = static_cast<double>(vtx2[0]);
+						double y2 = static_cast<double>(vtx2[1]);
+						double z2 = static_cast<double>(vtx2[2]);
+
+						double ux = x1 - x0, uy = y1 - y0, uz = z1 - z0;
+						double vx = x2 - x0, vy = y2 - y0, vz = z2 - z0;
+
+						double nx = uy * vz - uz * vy;
+						double ny = uz * vx - ux * vz;
+						double nz = ux * vy - uy * vx;
+
+						double lengthSq = nx * nx + ny * ny + nz * nz;
+						
+						pctree::XYZPoint faceNormal;
+						constexpr double EPSILON_SQ = 1e-12;
+						if (lengthSq > EPSILON_SQ) {
+							/// Normalize and convert to float
+							double invLen = 1.0 / std::sqrt(lengthSq);
+							faceNormal = pctree::XYZPoint(
+								static_cast<float>(nx * invLen),
+								static_cast<float>(ny * invLen),
+								static_cast<float>(nz * invLen)
+							);
+						}
+						else if (false) {
+						//else if (hasNormals) {
+							/// Degenerate triangle - fallback to mesh vertex normals
+							pctree::XYZPoint n0 = readNormal(idx0);
+							pctree::XYZPoint n1 = readNormal(idx1);
+							pctree::XYZPoint n2 = readNormal(idx2);
+
+							/// Average of vertex normals (double precision)
+							double avgX = (static_cast<double>(n0[0]) + n1[0] + n2[0]) / 3.0;
+							double avgY = (static_cast<double>(n0[1]) + n1[1] + n2[1]) / 3.0;
+							double avgZ = (static_cast<double>(n0[2]) + n1[2] + n2[2]) / 3.0;
+
+							double avgLengthSq = avgX * avgX + avgY * avgY + avgZ * avgZ;
+							if (avgLengthSq > EPSILON_SQ) {
+								double invLen = 1.0 / std::sqrt(avgLengthSq);
+								faceNormal = pctree::XYZPoint(
+									static_cast<float>(avgX * invLen),
+									static_cast<float>(avgY * invLen),
+									static_cast<float>(avgZ * invLen)
+								);
 							}
 							else {
-								/// Vertex normals are typically used for shading; computing the geometric face normal may be necessary
-								/// If the vertex is not registered, register it as a new one
-								pctree::XYZPoint pWorld = readPosition(gltfIndex);
-								/// add a vertex to chunk data
-								currentChunk.vertices.push_back(pWorld);
-
-								unsigned int newIndex = (unsigned int)(currentChunk.vertices.size() - 1);
-								globalToLocalVtxMap[gltfIndex] = newIndex; /// Map the global index to the new local index
-								localIndices[k] = newIndex;
+								/// Both methods failed - skip this face
+								continue;
 							}
 						}
+						else {
+							/// No mesh normals available - skip degenerate face
+							continue;
+						}
 
-						/// Compute surface normal (U = p1 - p0, V = p2 - p0)
-						auto vtx0 = currentChunk.vertices[localIndices[0]];
-						auto vtx1 = currentChunk.vertices[localIndices[1]];
-						auto vtx2 = currentChunk.vertices[localIndices[2]];
-						pctree::XYZPoint u = vtx1 - vtx0;
-						pctree::XYZPoint v = vtx2 - vtx0;
-
-						/// Cross Product
-						auto faceNormal = u % v;
-						faceNormal.normalize();
-
-						/// add a face to chunk data
-						currentChunk.faces.push_back(FaceVtx(localIndices[0], localIndices[1], localIndices[2], faceNormal));
-					} /// indexCount
+						/// Add face directly (no intermediate vertex storage)
+						currentChunk.faces.push_back(FaceVtx(vtx0, vtx1, vtx2, faceNormal));
+					}
 				}
 			}
 
@@ -836,6 +909,7 @@ namespace chunkbim {
 					ExtractMeshFromNode(model, child, world, meshChunks);
 				}
 			}
-		}
+		}		
 	};
+	
 }

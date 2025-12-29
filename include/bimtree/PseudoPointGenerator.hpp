@@ -45,26 +45,40 @@ namespace icp {
     }
 
     /// Generate pseudo points from a single MeshChunk
-    /// @param mesh Input mesh chunk
-    /// @param gridSize Approximate spacing between generated points
-    /// @param outPoints Output points
-    /// @param outNormals Output normals (one per point)
     inline void generatePseudoPointsFromMesh(
         const chunkbim::MeshChunk& mesh,
         float gridSize,
         std::vector<std::array<float, 3>>& outPoints,
+        std::vector<size_t>& faceIdx,
+        std::vector<std::array<float, 3>>& facePts,
         std::vector<std::array<float, 3>>& outNormals)
     {
-        if (mesh.vertices.empty() || mesh.faces.empty()) {
+        if (mesh.faces.empty())
             return;
-        }
 
         float gridSizeSquared = gridSize * gridSize;
 
-        for (const auto& face : mesh.faces) {
-            const auto& v0 = mesh.vertices[face.idxVtx[0]];
-            const auto& v1 = mesh.vertices[face.idxVtx[1]];
-            const auto& v2 = mesh.vertices[face.idxVtx[2]];
+        for (size_t f = 0; f < mesh.faces.size(); ++f) {
+            const auto& face = mesh.faces[f];
+            
+            std::array<float, 3> fPt;
+            fPt[0] = face.vertices[0][0];
+            fPt[1] = face.vertices[0][1];
+            fPt[2] = face.vertices[0][2];
+
+            facePts.push_back(fPt);
+            
+            /// Normal from face
+            std::array<float, 3> fNormal;
+            fNormal[0] = face.normal[0];
+            fNormal[1] = face.normal[1];
+            fNormal[2] = face.normal[2];
+
+            outNormals.push_back(fNormal);
+
+            const auto& v0 = face.vertices[0];
+            const auto& v1 = face.vertices[1];
+            const auto& v2 = face.vertices[2];
 
             /// Calculate triangle area
             float area = triangleArea(v0, v1, v2);
@@ -93,45 +107,45 @@ namespace icp {
                     point[1] = u * v0[1] + v * v1[1] + w * v2[1];
                     point[2] = u * v0[2] + v * v1[2] + w * v2[2];
 
-                    /// Normal from face
-                    std::array<float, 3> normal;
-                    normal[0] = face.normal[0];
-                    normal[1] = face.normal[1];
-                    normal[2] = face.normal[2];
-
                     outPoints.push_back(point);
-                    outNormals.push_back(normal);
+                    faceIdx.push_back(f);
                 }
             }
         }
     }
 
     /// Generate pseudo points from multiple MeshChunks
-    /// @param meshes Input mesh chunks (BIM data)
-    /// @param gridSize Approximate spacing between generated points (default 0.1m)
-    /// @param outPoints Output points
-    /// @param outNormals Output normals
     inline void generatePseudoPoints(
-        const std::vector<chunkbim::MeshChunk>& meshes,
+        const std::vector<chunkbim::MeshChunk>& chunks,
         float gridSize,
         std::vector<std::array<float, 3>>& outPoints,
+        std::vector<size_t>& faceIdx,
+        std::vector<std::array<float, 3>>& facePts,
         std::vector<std::array<float, 3>>& outNormals)
     {
         outPoints.clear();
+        faceIdx.clear();
+        facePts.clear();
         outNormals.clear();
 
         /// Estimate total points for reservation
         size_t totalFaces = 0;
-        for (const auto& mesh : meshes) {
-            totalFaces += mesh.faces.size();
+        for (const auto& chunk : chunks) {
+            totalFaces += chunk.faces.size();
         }
+
         outPoints.reserve(totalFaces * 4);  /// Rough estimate
-        outNormals.reserve(totalFaces * 4);
+        faceIdx.reserve(totalFaces * 4);  /// Rough estimate
+        facePts.reserve(totalFaces);
+        outNormals.reserve(totalFaces);
 
         /// Generate from each mesh
-        for (const auto& mesh : meshes) {
-            generatePseudoPointsFromMesh(mesh, gridSize, outPoints, outNormals);
+        for (const auto& chunk : chunks) {
+            generatePseudoPointsFromMesh(chunk, gridSize, outPoints, faceIdx, facePts, outNormals);
         }
+
+        outPoints.shrink_to_fit();
+        faceIdx.shrink_to_fit();
     }
 
     /// Convert PointCloudChunk to ICP format

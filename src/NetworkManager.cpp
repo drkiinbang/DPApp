@@ -1,4 +1,4 @@
-// inet_ntoa 경고 해결
+// inet_ntoa 경고 ?�결
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 
 #include "../include/NetworkManager.h"
@@ -390,33 +390,18 @@ namespace DPApp {
             writer.write(meshChunk.id);
             writer.writeString(meshChunk.name);
 
-            /// 2. Vertices (Batch Write)
-            uint32_t vertex_count = static_cast<uint32_t>(meshChunk.vertices.size());
-            writer.write(vertex_count);
-
-            if (vertex_count > 0) {
-                /// Flatten XYZPoint (non-POD due to internal vector) to raw floats
-                std::vector<float> raw_vertices;
-                raw_vertices.reserve(vertex_count * 3);
-                for (const auto& vtx : meshChunk.vertices) {
-                    raw_vertices.push_back(vtx.x());
-                    raw_vertices.push_back(vtx.y());
-                    raw_vertices.push_back(vtx.z());
-                }
-                writer.writeBytes(raw_vertices.data(), raw_vertices.size() * sizeof(float));
-            }
-
-            /// 3. Faces (Batch Write)
+            /// 2. Faces (Batch Write) - vertices[3] ?�용
             uint32_t face_count = static_cast<uint32_t>(meshChunk.faces.size());
             writer.write(face_count);
 
             if (face_count > 0) {
-                /// Separate normals and indices for efficient batch writing
+                /// Normals (3 floats per face)
                 std::vector<float> raw_normals;
-                std::vector<unsigned int> raw_indices;
-
                 raw_normals.reserve(face_count * 3);
-                raw_indices.reserve(face_count * 3);
+
+                /// Face vertices (9 floats per face: 3 vertices * 3 coords)
+                std::vector<float> raw_face_vertices;
+                raw_face_vertices.reserve(face_count * 9);
 
                 for (const auto& face : meshChunk.faces) {
                     /// Normals
@@ -424,17 +409,19 @@ namespace DPApp {
                     raw_normals.push_back(face.normal.y());
                     raw_normals.push_back(face.normal.z());
 
-                    /// Indices
-                    raw_indices.push_back(face.idxVtx[0]);
-                    raw_indices.push_back(face.idxVtx[1]);
-                    raw_indices.push_back(face.idxVtx[2]);
+                    /// Face vertices (3 vertices)
+                    for (int v = 0; v < 3; ++v) {
+                        raw_face_vertices.push_back(face.vertices[v].x());
+                        raw_face_vertices.push_back(face.vertices[v].y());
+                        raw_face_vertices.push_back(face.vertices[v].z());
+                    }
                 }
 
                 writer.writeBytes(raw_normals.data(), raw_normals.size() * sizeof(float));
-                writer.writeBytes(raw_indices.data(), raw_indices.size() * sizeof(unsigned int));
+                writer.writeBytes(raw_face_vertices.data(), raw_face_vertices.size() * sizeof(float));
             }
 
-            /// 4. Bounding box
+            /// 3. Bounding box
             writer.write(meshChunk.min_x); writer.write(meshChunk.min_y); writer.write(meshChunk.min_z);
             writer.write(meshChunk.max_x); writer.write(meshChunk.max_y); writer.write(meshChunk.max_z);
 
@@ -452,57 +439,41 @@ namespace DPApp {
             meshChunk.id = reader.read<int>();
             meshChunk.name = reader.readString();
 
-            /// 2. Vertices (Batch Read)
-            uint32_t vertex_count = reader.read<uint32_t>();
-
-            if (vertex_count > 0) {
-                meshChunk.vertices.resize(vertex_count);
-                size_t total_bytes = static_cast<size_t>(vertex_count) * 3 * sizeof(float);
-
-                /// Direct memory access
-                const uint8_t* raw_bytes = static_cast<const uint8_t*>(reader.readBytesRef(total_bytes));
-
-                for (uint32_t i = 0; i < vertex_count; ++i) {
-                    float x, y, z;
-                    std::memcpy(&x, raw_bytes + (i * 3 + 0) * sizeof(float), sizeof(float));
-                    std::memcpy(&y, raw_bytes + (i * 3 + 1) * sizeof(float), sizeof(float));
-                    std::memcpy(&z, raw_bytes + (i * 3 + 2) * sizeof(float), sizeof(float));
-                    meshChunk.vertices[i] = pctree::XYZPoint(x, y, z);
-                }
-            }
-
-            /// 3. Faces (Batch Read)
+            /// 2. Faces (Batch Read) - vertices[3] ?�용
             uint32_t face_count = reader.read<uint32_t>();
 
             if (face_count > 0) {
                 meshChunk.faces.resize(face_count);
 
-                /// Read Normals (Batch)
+                /// Read Normals (Batch): 3 floats per face
                 size_t normals_bytes = static_cast<size_t>(face_count) * 3 * sizeof(float);
                 const uint8_t* raw_normal_bytes = static_cast<const uint8_t*>(reader.readBytesRef(normals_bytes));
 
-                /// Read Indices (Batch)
-                size_t indices_bytes = static_cast<size_t>(face_count) * 3 * sizeof(unsigned int);
-                const uint8_t* raw_index_bytes = static_cast<const uint8_t*>(reader.readBytesRef(indices_bytes));
+                /// Read Face Vertices (Batch): 9 floats per face (3 vertices * 3 coords)
+                size_t face_vertices_bytes = static_cast<size_t>(face_count) * 9 * sizeof(float);
+                const uint8_t* raw_vtx_bytes = static_cast<const uint8_t*>(reader.readBytesRef(face_vertices_bytes));
 
                 for (uint32_t i = 0; i < face_count; ++i) {
+                    /// Normal
                     float nx, ny, nz;
                     std::memcpy(&nx, raw_normal_bytes + (i * 3 + 0) * sizeof(float), sizeof(float));
                     std::memcpy(&ny, raw_normal_bytes + (i * 3 + 1) * sizeof(float), sizeof(float));
                     std::memcpy(&nz, raw_normal_bytes + (i * 3 + 2) * sizeof(float), sizeof(float));
                     meshChunk.faces[i].normal = pctree::XYZPoint(nx, ny, nz);
 
-                    unsigned int idx0, idx1, idx2;
-                    std::memcpy(&idx0, raw_index_bytes + (i * 3 + 0) * sizeof(unsigned int), sizeof(unsigned int));
-                    std::memcpy(&idx1, raw_index_bytes + (i * 3 + 1) * sizeof(unsigned int), sizeof(unsigned int));
-                    std::memcpy(&idx2, raw_index_bytes + (i * 3 + 2) * sizeof(unsigned int), sizeof(unsigned int));
-                    meshChunk.faces[i].idxVtx[0] = idx0;
-                    meshChunk.faces[i].idxVtx[1] = idx1;
-                    meshChunk.faces[i].idxVtx[2] = idx2;
+                    /// Face vertices (3 vertices)
+                    for (int v = 0; v < 3; ++v) {
+                        float vx, vy, vz;
+                        size_t offset = (i * 9 + v * 3) * sizeof(float);
+                        std::memcpy(&vx, raw_vtx_bytes + offset + 0 * sizeof(float), sizeof(float));
+                        std::memcpy(&vy, raw_vtx_bytes + offset + 1 * sizeof(float), sizeof(float));
+                        std::memcpy(&vz, raw_vtx_bytes + offset + 2 * sizeof(float), sizeof(float));
+                        meshChunk.faces[i].vertices[v] = pctree::XYZPoint(vx, vy, vz);
+                    }
                 }
             }
 
-            /// 4. Bounding box
+            /// 3. Bounding box
             meshChunk.min_x = reader.read<float>(); meshChunk.min_y = reader.read<float>(); meshChunk.min_z = reader.read<float>();
             meshChunk.max_x = reader.read<float>(); meshChunk.max_y = reader.read<float>(); meshChunk.max_z = reader.read<float>();
 
@@ -994,26 +965,26 @@ namespace DPApp {
         shutdown_requested_ = true;
         connected_ = false;
 
-        // 먼저 소켓을 닫아서 블록된 recv/send 해제
+        // 먼�? ?�켓???�아??블록??recv/send ?�제
         cleanupSocket();
 
-        // client_thread 종료 대기 (타임아웃 적용)
+        // client_thread 종료 ?��?(?�?�아???�용)
         if (client_thread_.joinable()) {
-            for (int i = 0; i < 30; ++i) {  // 최대 3초 대기
+            for (int i = 0; i < 30; ++i) {  // 최�? 3�??��?
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
             try {
                 if (client_thread_.joinable()) {
-                    client_thread_.detach();  // 타임아웃 후 detach
+                    client_thread_.detach();  // ?�?�아????detach
                     WLOG << "Client thread detached after timeout";
                 }
             }
             catch (...) {}
         }
 
-        // heartbeat_thread 종료 대기 (타임아웃 적용)
+        // heartbeat_thread 종료 ?��?(?�?�아???�용)
         if (heartbeat_thread_.joinable()) {
-            for (int i = 0; i < 20; ++i) {  // 최대 2초 대기
+            for (int i = 0; i < 20; ++i) {  // 최�? 2�??��?
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
             try {

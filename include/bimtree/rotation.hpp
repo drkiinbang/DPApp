@@ -4,7 +4,82 @@
 
 namespace math
 {
-	bool getPlaneRotationMatrix(const pctree::XYZPoint& a, const pctree::XYZPoint& b, const pctree::XYZPoint& c, pctree::MatrixForMesh& R)
+	inline math::Matrixd getRMat(const double omega, const double phi, const double kappa)
+	{
+		math::Matrixd Rmatrix(3, 3);
+		Rmatrix(0, 0) = cos(phi) * cos(kappa);
+		Rmatrix(1, 0) = sin(omega) * sin(phi) * cos(kappa) + cos(omega) * sin(kappa);
+		Rmatrix(2, 0) = -cos(omega) * sin(phi) * cos(kappa) + sin(omega) * sin(kappa);
+
+		Rmatrix(0, 1) = -cos(phi) * sin(kappa);
+		Rmatrix(1, 1) = -sin(omega) * sin(phi) * sin(kappa) + cos(omega) * cos(kappa);
+		Rmatrix(2, 1) = cos(omega) * sin(phi) * sin(kappa) + sin(omega) * cos(kappa);
+
+		Rmatrix(0, 2) = sin(phi);
+		Rmatrix(1, 2) = -sin(omega) * cos(phi);
+		Rmatrix(2, 2) = cos(omega) * cos(phi);
+
+		return Rmatrix;
+	}
+
+	inline math::Matrixd getPartial_dRdO(double omega, double phi, double kappa)
+	{
+		math::Matrixd Rmatrix(3, 3);
+
+		Rmatrix(0, 0) = 0;
+		Rmatrix(0, 1) = 0;
+		Rmatrix(0, 2) = 0;
+
+		Rmatrix(1, 0) = cos(omega) * sin(phi) * cos(kappa) - sin(omega) * sin(kappa);
+		Rmatrix(1, 1) = -cos(omega) * sin(phi) * sin(kappa) - sin(omega) * cos(kappa);
+		Rmatrix(1, 2) = -cos(omega) * cos(phi);
+
+		Rmatrix(2, 0) = sin(omega) * sin(phi) * cos(kappa) + cos(omega) * sin(kappa);
+		Rmatrix(2, 1) = -sin(omega) * sin(phi) * sin(kappa) + cos(omega) * cos(kappa);
+		Rmatrix(2, 2) = -sin(omega) * cos(phi);
+
+		return Rmatrix;
+	}
+
+	inline math::Matrixd getPartial_dRdP(double omega, double phi, double kappa)
+	{
+		math::Matrixd Rmatrix(3, 3);
+
+		Rmatrix(0, 0) = -sin(phi) * cos(kappa);
+		Rmatrix(0, 1) = sin(phi) * sin(kappa);
+		Rmatrix(0, 2) = cos(phi);
+
+		Rmatrix(1, 0) = sin(omega) * cos(phi) * cos(kappa);
+		Rmatrix(1, 1) = -sin(omega) * cos(phi) * sin(kappa);
+		Rmatrix(1, 2) = sin(omega) * sin(phi);
+
+		Rmatrix(2, 0) = -cos(omega) * cos(phi) * cos(kappa);
+		Rmatrix(2, 1) = cos(omega) * cos(phi) * sin(kappa);
+		Rmatrix(2, 2) = -cos(omega) * sin(phi);
+
+		return Rmatrix;
+	}
+
+	inline math::Matrixd getPartial_dRdK(double omega, double phi, double kappa)
+	{
+		math::Matrixd Rmatrix(3, 3);
+
+		Rmatrix(0, 0) = -cos(phi) * sin(kappa);
+		Rmatrix(0, 1) = -cos(phi) * cos(kappa);
+		Rmatrix(0, 2) = 0.;
+
+		Rmatrix(1, 0) = -sin(omega) * sin(phi) * sin(kappa) + cos(omega) * cos(kappa);
+		Rmatrix(1, 1) = -sin(omega) * sin(phi) * cos(kappa) - cos(omega) * sin(kappa);
+		Rmatrix(1, 2) = 0.;
+
+		Rmatrix(2, 0) = cos(omega) * sin(phi) * sin(kappa) + sin(omega) * cos(kappa);
+		Rmatrix(2, 1) = cos(omega) * sin(phi) * cos(kappa) - sin(omega) * sin(kappa);
+		Rmatrix(2, 2) = 0.;
+
+		return Rmatrix;
+	}
+
+	inline bool getPlaneRotationMatrix(const pctree::XYZPoint& a, const pctree::XYZPoint& b, const pctree::XYZPoint& c, pctree::MatrixForMesh& R)
 	{
 		auto& v1 = a.xyz;
 		auto& v2 = b.xyz;

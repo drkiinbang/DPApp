@@ -132,21 +132,22 @@ namespace icp {
     /// Serialize IcpChunk to binary buffer
     inline std::vector<uint8_t> serializeIcpChunk(const IcpChunk& chunk) {
         std::vector<uint8_t> buffer;
-        
+
         /// Estimate total size for reservation
-        size_t estimatedSize = sizeof(uint32_t) * 4 +  // chunk_id + 3 counts
-                              chunk.sourcePoints.size() * sizeof(float) * 3 +
-                              chunk.targetPoints.size() * sizeof(float) * 3 +
-                              chunk.targetNormals.size() * sizeof(float) * 3 +
-                              sizeof(float) * 16 +     // transform
-                              64 +                     // config (overestimate)
-                              sizeof(float) * 12;      // bboxes
+        size_t estimatedSize = sizeof(uint32_t) * 5 +  // chunk_id + 4 counts
+            chunk.sourcePoints.size() * sizeof(float) * 3 +
+            chunk.targetPoints.size() * sizeof(float) * 3 +
+            chunk.faceIndices.size() * sizeof(uint64_t) +
+            chunk.faceNormals.size() * sizeof(float) * 3 +
+            sizeof(float) * 16 +     // transform
+            64 +                     // config (overestimate)
+            sizeof(float) * 12;      // bboxes
         buffer.reserve(estimatedSize);
-        
+
         /// 1. Chunk ID
         buffer.resize(sizeof(uint32_t));
         std::memcpy(buffer.data(), &chunk.chunk_id, sizeof(uint32_t));
-        
+
         /// 2. Source points
         uint32_t sourceCount = static_cast<uint32_t>(chunk.sourcePoints.size());
         size_t pos = buffer.size();
@@ -154,10 +155,10 @@ namespace icp {
         std::memcpy(buffer.data() + pos, &sourceCount, sizeof(uint32_t));
         pos += sizeof(uint32_t);
         if (sourceCount > 0) {
-            std::memcpy(buffer.data() + pos, chunk.sourcePoints.data(), 
-                       sourceCount * sizeof(float) * 3);
+            std::memcpy(buffer.data() + pos, chunk.sourcePoints.data(),
+                sourceCount * sizeof(float) * 3);
         }
-        
+
         /// 3. Target points
         uint32_t targetCount = static_cast<uint32_t>(chunk.targetPoints.size());
         pos = buffer.size();
@@ -165,28 +166,52 @@ namespace icp {
         std::memcpy(buffer.data() + pos, &targetCount, sizeof(uint32_t));
         pos += sizeof(uint32_t);
         if (targetCount > 0) {
-            std::memcpy(buffer.data() + pos, chunk.targetPoints.data(), 
-                       targetCount * sizeof(float) * 3);
+            std::memcpy(buffer.data() + pos, chunk.targetPoints.data(),
+                targetCount * sizeof(float) * 3);
         }
-        
-        /// 4. Target normals
-        uint32_t normalCount = static_cast<uint32_t>(chunk.targetNormals.size());
+
+        /// 4. Face indices (size_t ¡æ uint64_t for cross-platform)
+        uint32_t faceIdxCount = static_cast<uint32_t>(chunk.faceIndices.size());
         pos = buffer.size();
-        buffer.resize(pos + sizeof(uint32_t) + normalCount * sizeof(float) * 3);
-        std::memcpy(buffer.data() + pos, &normalCount, sizeof(uint32_t));
+        buffer.resize(pos + sizeof(uint32_t) + faceIdxCount * sizeof(uint64_t));
+        std::memcpy(buffer.data() + pos, &faceIdxCount, sizeof(uint32_t));
         pos += sizeof(uint32_t);
-        if (normalCount > 0) {
-            std::memcpy(buffer.data() + pos, chunk.targetNormals.data(), 
-                       normalCount * sizeof(float) * 3);
+        if (faceIdxCount > 0) {
+            for (uint32_t i = 0; i < faceIdxCount; ++i) {
+                uint64_t idx = static_cast<uint64_t>(chunk.faceIndices[i]);
+                std::memcpy(buffer.data() + pos + i * sizeof(uint64_t), &idx, sizeof(uint64_t));
+            }
         }
-        
-        /// 5. Initial transform
+
+        /// 5. Face normals (all normals from mesh faces)
+        uint32_t faceNormalCount = static_cast<uint32_t>(chunk.faceNormals.size());
+        pos = buffer.size();
+        buffer.resize(pos + sizeof(uint32_t) + faceNormalCount * sizeof(float) * 3);
+        std::memcpy(buffer.data() + pos, &faceNormalCount, sizeof(uint32_t));
+        pos += sizeof(uint32_t);
+        if (faceNormalCount > 0) {
+            std::memcpy(buffer.data() + pos, chunk.faceNormals.data(),
+                faceNormalCount * sizeof(float) * 3);
+        }
+
+        /// 6. Face points (one per face)
+        uint32_t facePtsCount = static_cast<uint32_t>(chunk.facePts.size());
+        pos = buffer.size();
+        buffer.resize(pos + sizeof(uint32_t) + facePtsCount * sizeof(float) * 3);
+        std::memcpy(buffer.data() + pos, &facePtsCount, sizeof(uint32_t));
+        pos += sizeof(uint32_t);
+        if (facePtsCount > 0) {
+            std::memcpy(buffer.data() + pos, chunk.facePts.data(),
+                facePtsCount * sizeof(float) * 3);
+        }
+
+        /// 7. Initial transform
         serializeTransform(chunk.initialTransform, buffer);
-        
-        /// 6. Config
+
+        /// 8. Config
         serializeConfig(chunk.config, buffer);
-        
-        /// 7. Bounding boxes (source: 6 floats, target: 6 floats)
+
+        /// 9. Bounding boxes
         pos = buffer.size();
         buffer.resize(pos + sizeof(float) * 12);
         float* bboxPtr = reinterpret_cast<float*>(buffer.data() + pos);
@@ -202,7 +227,7 @@ namespace icp {
         bboxPtr[9] = chunk.target_max_x;
         bboxPtr[10] = chunk.target_max_y;
         bboxPtr[11] = chunk.target_max_z;
-        
+
         return buffer;
     }
 
@@ -211,51 +236,76 @@ namespace icp {
         IcpChunk chunk;
         size_t offset = 0;
         const uint8_t* ptr = data.data();
-        
+
         /// 1. Chunk ID
         std::memcpy(&chunk.chunk_id, ptr + offset, sizeof(uint32_t));
         offset += sizeof(uint32_t);
-        
+
         /// 2. Source points
         uint32_t sourceCount;
         std::memcpy(&sourceCount, ptr + offset, sizeof(uint32_t));
         offset += sizeof(uint32_t);
         chunk.sourcePoints.resize(sourceCount);
         if (sourceCount > 0) {
-            std::memcpy(chunk.sourcePoints.data(), ptr + offset, 
-                       sourceCount * sizeof(float) * 3);
+            std::memcpy(chunk.sourcePoints.data(), ptr + offset,
+                sourceCount * sizeof(float) * 3);
             offset += sourceCount * sizeof(float) * 3;
         }
-        
+
         /// 3. Target points
         uint32_t targetCount;
         std::memcpy(&targetCount, ptr + offset, sizeof(uint32_t));
         offset += sizeof(uint32_t);
         chunk.targetPoints.resize(targetCount);
         if (targetCount > 0) {
-            std::memcpy(chunk.targetPoints.data(), ptr + offset, 
-                       targetCount * sizeof(float) * 3);
+            std::memcpy(chunk.targetPoints.data(), ptr + offset,
+                targetCount * sizeof(float) * 3);
             offset += targetCount * sizeof(float) * 3;
         }
-        
-        /// 4. Target normals
-        uint32_t normalCount;
-        std::memcpy(&normalCount, ptr + offset, sizeof(uint32_t));
+
+        /// 4. Face indices
+        uint32_t faceIdxCount;
+        std::memcpy(&faceIdxCount, ptr + offset, sizeof(uint32_t));
         offset += sizeof(uint32_t);
-        chunk.targetNormals.resize(normalCount);
-        if (normalCount > 0) {
-            std::memcpy(chunk.targetNormals.data(), ptr + offset, 
-                       normalCount * sizeof(float) * 3);
-            offset += normalCount * sizeof(float) * 3;
+        chunk.faceIndices.resize(faceIdxCount);
+        if (faceIdxCount > 0) {
+            for (uint32_t i = 0; i < faceIdxCount; ++i) {
+                uint64_t idx;
+                std::memcpy(&idx, ptr + offset + i * sizeof(uint64_t), sizeof(uint64_t));
+                chunk.faceIndices[i] = static_cast<size_t>(idx);
+            }
+            offset += faceIdxCount * sizeof(uint64_t);
         }
-        
-        /// 5. Initial transform
+
+        /// 5. Face normals
+        uint32_t faceNormalCount;
+        std::memcpy(&faceNormalCount, ptr + offset, sizeof(uint32_t));
+        offset += sizeof(uint32_t);
+        chunk.faceNormals.resize(faceNormalCount);
+        if (faceNormalCount > 0) {
+            std::memcpy(chunk.faceNormals.data(), ptr + offset,
+                faceNormalCount * sizeof(float) * 3);
+            offset += faceNormalCount * sizeof(float) * 3;
+        }
+
+        /// 6. Initial transform
         chunk.initialTransform = deserializeTransform(ptr, offset);
-        
-        /// 6. Config
+
+        /// 6. Face points
+        uint32_t facePtsCount;
+        std::memcpy(&facePtsCount, ptr + offset, sizeof(uint32_t));
+        offset += sizeof(uint32_t);
+        chunk.facePts.resize(facePtsCount);
+        if (facePtsCount > 0) {
+            std::memcpy(chunk.facePts.data(), ptr + offset,
+                facePtsCount * sizeof(float) * 3);
+            offset += facePtsCount * sizeof(float) * 3;
+        }
+
+        /// 8. Config
         chunk.config = deserializeConfig(ptr, offset);
-        
-        /// 7. Bounding boxes
+
+        /// 9. Bounding boxes
         const float* bboxPtr = reinterpret_cast<const float*>(ptr + offset);
         chunk.source_min_x = bboxPtr[0];
         chunk.source_min_y = bboxPtr[1];
@@ -269,7 +319,7 @@ namespace icp {
         chunk.target_max_x = bboxPtr[9];
         chunk.target_max_y = bboxPtr[10];
         chunk.target_max_z = bboxPtr[11];
-        
+
         return chunk;
     }
 
@@ -400,13 +450,14 @@ namespace icp {
 
     /// Get serialized size of IcpChunk (approximate)
     inline size_t getSerializedSize(const IcpChunk& chunk) {
-        return sizeof(uint32_t) * 4 +  // chunk_id + 3 counts
-               chunk.sourcePoints.size() * sizeof(float) * 3 +
-               chunk.targetPoints.size() * sizeof(float) * 3 +
-               chunk.targetNormals.size() * sizeof(float) * 3 +
-               sizeof(float) * 16 +    // transform
-               64 +                    // config
-               sizeof(float) * 12;     // bboxes
+        return sizeof(uint32_t) * 5 +  // chunk_id + 4 counts
+            chunk.sourcePoints.size() * sizeof(float) * 3 +
+            chunk.targetPoints.size() * sizeof(float) * 3 +
+            chunk.faceIndices.size() * sizeof(uint64_t) +
+            chunk.faceNormals.size() * sizeof(float) * 3 +
+            sizeof(float) * 16 +    // transform
+            64 +                    // config
+            sizeof(float) * 12;     // bboxes
     }
 
     /// Get serialized size of IcpResult (approximate)

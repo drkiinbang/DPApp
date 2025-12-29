@@ -140,14 +140,21 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\include\bimtree\SSMMatDatad.cpp" />
+    <ClCompile Include="..\include\bimtree\SsmMatrixd.cpp" />
     <ClCompile Include="..\include\bim\BimInfo.cpp" />
     <ClCompile Include="..\src\NetworkManager.cpp" />
     <ClCompile Include="MasterApplication.cpp" />
     <ClCompile Include="MasterApplication_Agent.cpp" />
     <ClCompile Include="MasterApplication_CLI.cpp" />
+    <ClCompile Include="MasterApplication_ICP.cpp" />
     <ClCompile Include="MasterApplication_REST.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\include\bimtree\IcpCore.hpp" />
+    <ClInclude Include="..\include\bimtree\rotation.hpp" />
+    <ClInclude Include="..\include\bimtree\SSMMatDatad.h" />
+    <ClInclude Include="..\include\bimtree\SSMMatrixd.h" />
     <ClInclude Include="..\include\bim\BimInfo.h" />
     <ClInclude Include="..\include\bim\BimMeshInfo.h" />
     <ClInclude Include="..\include\bim\gltf_mesh.h" />

@@ -28,10 +28,7 @@
 #include "RestApiServer.h"
 #include "../include/RuntimeConfig.h"
 #include "../include/Logger.h"
-//#include "../include/IcpTypes.h"
-
-//#include "../LasImport/LasImport.h"  
-//#include "../BimImport/BimImport.h"
+#include "../include/IcpTypes.h"
 
 using namespace DPApp;
 
@@ -105,9 +102,9 @@ private:
     std::mutex test_mutex_;                        // 테스트 데이터 동기화
     uint32_t next_test_chunk_id_ = 0;              // 전역 고유 청크 ID 카운터
     /// icp member variables
-    //std::map<std::string, std::shared_ptr<icp::IcpJob>> icp_jobs_;
-    //std::mutex icp_jobs_mutex_;
-    //uint32_t next_icp_task_id_ = 10000;
+    std::map<std::string, std::shared_ptr<icp::IcpJob>> icp_jobs_;
+    std::mutex icp_jobs_mutex_;
+    uint32_t next_icp_task_id_ = 10000;
 
 public:
     MasterApplication();
@@ -202,16 +199,16 @@ public:
     std::string getCurrentTimestamp();
 
     /// icp
-    //void setupIcpApiRoutes();
-    //HttpResponse handleIcpStart(const HttpRequest& req);
-    //HttpResponse handleIcpJobs(const HttpRequest& req);
-    //HttpResponse handleIcpJobStatus(const HttpRequest& req);
-    //HttpResponse handleIcpJobResult(const HttpRequest& req);
-    //HttpResponse handleIcpJobCancel(const HttpRequest& req);
-    //HttpResponse handleIcpJobStats(const HttpRequest& req);
-    //void processIcpJob(std::shared_ptr<icp::IcpJob> job);
-    //std::string generateIcpJobId();
-    //void handleIcpResult(const icp::IcpResult& result, uint32_t task_id);
+    void setupIcpApiRoutes();
+    HttpResponse handleIcpStart(const HttpRequest& req);
+    HttpResponse handleIcpJobs(const HttpRequest& req);
+    HttpResponse handleIcpJobStatus(const HttpRequest& req);
+    HttpResponse handleIcpJobResult(const HttpRequest& req);
+    HttpResponse handleIcpJobCancel(const HttpRequest& req);
+    HttpResponse handleIcpJobStats(const HttpRequest& req);
+    void processIcpJob(std::shared_ptr<icp::IcpJob> job);
+    std::string generateIcpJobId();
+    void handleIcpResult(const icp::IcpResult& result, uint32_t task_id);
 
     /// =========================================
     /// Agent Functions (MasterApplication_Agent.cpp)

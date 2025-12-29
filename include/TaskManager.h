@@ -2807,7 +2807,6 @@ namespace DPApp {
                 std::cout << "Task ID: " << task.task_id << std::endl;
                 std::cout << "Chunk ID: " << chunk.chunk_id << std::endl;
                 std::cout << "Points: " << chunk.points.size() << std::endl;
-                std::cout << "Mesh vertices: " << chunk.bim.vertices.size() / 3 << std::endl;
                 std::cout << "Mesh faces: " << chunk.bim.faces.size() << std::endl;
 
                 /// ========================================
