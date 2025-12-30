@@ -35,6 +35,9 @@
 #include "rotation.hpp"
 
 const double Rad2Sec = ((180.*3600.)/acos(-1.0));
+const double Rad2Deg = ((180.) / acos(-1.0));
+const double minParamSd = 1.0e-9;
+const double maxParamSd = 1.0e+9;
 
 namespace icp {
 
@@ -140,69 +143,6 @@ namespace icp {
         }
     }
 
-    /// Find correspondences with normal filtering
-    /// @param sourcePoints Source point cloud
-    /// @param targetTree KD-Tree built from target points
-    /// @param targetNormals Normals at target points
-    /// @param sourceNormals Normals at source points (can be empty)
-    /// @param maxDistanceSquared Maximum squared distance
-    /// @param maxAngleDeg Maximum angle between normals (degrees)
-    /// @param correspondences Output correspondences
-    inline void findCorrespondencesWithNormals(
-        const std::vector<std::array<float, 3>>& sourcePoints,
-        const KdTree3D& targetTree,
-        const std::vector<size_t>& faceIdx,
-        const std::vector<std::array<float, 3>>& allTargetNormals,
-        const std::vector<std::array<float, 3>>& sourceNormals,
-        float maxDistanceSquared,
-        float maxAngleDeg,
-        std::vector<Correspondence>& correspondences)
-    {
-        std::vector<std::array<float, 3>> targetNormals(faceIdx.size());
-        for (size_t i = 0; i < faceIdx.size(); ++i) {
-            targetNormals[i] = allTargetNormals[faceIdx[i]];
-        }
-
-        correspondences.clear();
-        correspondences.reserve(sourcePoints.size());
-
-        const float cosMaxAngle = std::cos(maxAngleDeg * 3.14159265f / 180.0f);
-        const bool hasSourceNormals = !sourceNormals.empty() &&
-            sourceNormals.size() == sourcePoints.size();
-
-        bool  NormalFilter = false;
-        if (!targetNormals.empty() && hasSourceNormals)
-            NormalFilter = true;
-
-        for (size_t i = 0; i < sourcePoints.size(); ++i) {
-            size_t resultIndex = 0;
-            float resultDistSq = 0.0f;
-
-            nanoflann::KNNResultSet<float> resultSet(1);
-            resultSet.init(&resultIndex, &resultDistSq);
-
-            targetTree.findNeighbors(resultSet, sourcePoints[i].data(),
-                nanoflann::SearchParams());
-
-            if (resultDistSq > maxDistanceSquared) continue;
-
-            /// Normal filtering (if normals available)
-            if (NormalFilter && resultIndex < targetNormals.size()) {
-                const auto& tn = targetNormals[resultIndex];
-                const auto& sn = sourceNormals[i];
-                /// Dot product of normals (absolute value for bidirectional)
-                float dot = std::abs(sn[0] * tn[0] + sn[1] * tn[1] + sn[2] * tn[2]);
-                if (dot < cosMaxAngle) continue;
-            }
-
-            Correspondence corr;
-            corr.sourceIdx = i;
-            corr.targetIdx = resultIndex;
-            corr.squaredDistance = resultDistSq;
-            correspondences.push_back(corr);
-        }
-    }
-
     inline bool pointPlaneDistanceAndProjection(
         const std::array<float, 3>& P,
         const std::array<float, 3>& Q,
@@ -272,6 +212,120 @@ namespace icp {
                 sourcePoints[i],           // P: source point
                 facePts[resultIndex],      // Q: point on face
                 targetNormals[resultIndex], // N: face normal
+                distance,
+                proj))
+                continue;
+
+            CorrespondenceFace corr;
+            corr.sourceIdx = i;
+            corr.facePt = proj;
+            corr.squaredDistance = static_cast<float>(distance * distance);
+            correspondences.push_back(corr);
+        }
+    }
+
+    /// Fastest version: Unit normal vector provided (|N| = 1)
+    inline bool pointTriangleDistanceAndProjectionUnitN(
+        const std::array<float, 3>& P,
+        const std::array<float, 3>& v0,
+        const std::array<float, 3>& v1,
+        const std::array<float, 3>& v2,
+        const std::array<float, 3>& N,  /// Must be unit vector
+        double& distance,
+        std::array<float, 3>& proj)
+    {
+        constexpr double EPSILON_SQ = 1e-12;
+        constexpr double EDGE_TOLERANCE = 1e-6;
+
+        /// Triangle edges
+        const double e0x = v1[0] - v0[0];
+        const double e0y = v1[1] - v0[1];
+        const double e0z = v1[2] - v0[2];
+
+        const double e1x = v2[0] - v0[0];
+        const double e1y = v2[1] - v0[1];
+        const double e1z = v2[2] - v0[2];
+
+        /// Dot products for barycentric
+        const double dot00 = e0x * e0x + e0y * e0y + e0z * e0z;
+        const double dot01 = e0x * e1x + e0y * e1y + e0z * e1z;
+        const double dot11 = e1x * e1x + e1y * e1y + e1z * e1z;
+
+        const double denom = dot00 * dot11 - dot01 * dot01;
+        if (denom < EPSILON_SQ)
+            return false;
+
+        /// P - v0
+        const double pvx = P[0] - v0[0];
+        const double pvy = P[1] - v0[1];
+        const double pvz = P[2] - v0[2];
+
+        const double dot02 = e0x * pvx + e0y * pvy + e0z * pvz;
+        const double dot12 = e1x * pvx + e1y * pvy + e1z * pvz;
+
+        /// Barycentric (early rejection)
+        const double invDenom = 1.0 / denom;
+        const double u = (dot11 * dot02 - dot01 * dot12) * invDenom;
+        if (u < -EDGE_TOLERANCE || u > 1.0 + EDGE_TOLERANCE)
+            return false;
+
+        const double v = (dot00 * dot12 - dot01 * dot02) * invDenom;
+        if (v < -EDGE_TOLERANCE || (u + v) > 1.0 + EDGE_TOLERANCE)
+            return false;
+
+        /// Distance = (P-v0)·N (no sqrt needed for unit normal)
+        distance = pvx * N[0] + pvy * N[1] + pvz * N[2];
+
+        /// Projection: P - N * distance
+        proj[0] = static_cast<float>(P[0] - N[0] * distance);
+        proj[1] = static_cast<float>(P[1] - N[1] * distance);
+        proj[2] = static_cast<float>(P[2] - N[2] * distance);
+
+        return true;
+    }
+
+    inline void findCorrespondencesWithNormals(
+        const std::vector<std::array<float, 3>>& sourcePoints,
+        const KdTree3D& targetTree,
+        const std::vector<size_t>& faceIdx,
+        const std::vector<std::array<float, 3>>& allTargetNormals,
+        const std::vector<std::array<std::array<float, 3>, 3>>& allFaceVtx,
+        float maxDistanceSquared,
+        float maxAngleDeg,
+        std::vector<CorrespondenceFace>& correspondences)
+    {
+        correspondences.clear();
+        correspondences.reserve(sourcePoints.size());
+
+        /// Build point-wise arrays from face indices
+        std::vector<std::array<float, 3>> targetNormals(faceIdx.size());
+        std::vector<std::array<std::array<float, 3>, 3>> faceVtx(faceIdx.size());
+        for (size_t i = 0; i < faceIdx.size(); ++i) {
+            targetNormals[i] = allTargetNormals[faceIdx[i]];
+            faceVtx[i] = allFaceVtx[faceIdx[i]];
+        }
+
+        for (size_t i = 0; i < sourcePoints.size(); ++i) {
+            size_t resultIndex = 0;
+            float resultDistSq = 0.0f;
+
+            nanoflann::KNNResultSet<float> resultSet(1);
+            resultSet.init(&resultIndex, &resultDistSq);
+            targetTree.findNeighbors(resultSet, sourcePoints[i].data(),
+                nanoflann::SearchParams());
+
+            if (resultDistSq > maxDistanceSquared) continue;
+
+            double distance;
+            std::array<float, 3> proj;
+
+            /// Point-to-Plane distance and projection
+            if (!pointTriangleDistanceAndProjectionUnitN(
+                sourcePoints[i],           /// P: source point
+                faceVtx[resultIndex][0],   /// V0 
+                faceVtx[resultIndex][1],   /// V1
+                faceVtx[resultIndex][2],   /// V2
+                targetNormals[resultIndex],/// N: face normal
                 distance,
                 proj))
                 continue;
@@ -789,20 +843,20 @@ namespace icp {
         GA(1, 0) = src[1];
         GA(2, 0) = src[2];
 
-        GB(0, 0) = src[0];
-        GB(1, 0) = src[1];
-        GB(2, 0) = src[2];
+        GB(0, 0) = tar[0];
+        GB(1, 0) = tar[1];
+        GB(2, 0) = tar[2];
 
-        auto R = math::getRMat(params[3], params[3], params[5]);
+        auto R = math::getRMat(params[3], params[4], params[5]);
         auto RGA = R % GA;
 
-        auto dRdO = math::getPartial_dRdO(params[3], params[3], params[5]);
+        auto dRdO = math::getPartial_dRdO(params[3], params[4], params[5]);
         auto Partial_O = dRdO% GA;
 
-        auto dRdP = math::getPartial_dRdP(params[3], params[3], params[5]);
+        auto dRdP = math::getPartial_dRdP(params[3], params[4], params[5]);
         auto Partial_P = dRdP % GA;
 
-        auto dRdK = math::getPartial_dRdK(params[3], params[3], params[5]);
+        auto dRdK = math::getPartial_dRdK(params[3], params[4], params[5]);
         auto Partial_K = dRdK % GA;
 
         math::Matrixd T(3, 1);
@@ -815,94 +869,208 @@ namespace icp {
         ai(0, 0) = 1;
         ai(0, 1) = 0;
         ai(0, 2) = 0;
-        ai(0, 3) = Partial_O(0, 0) / Rad2Sec;
-        ai(0, 4) = Partial_P(0, 0) / Rad2Sec;
-        ai(0, 5) = Partial_K(0, 0) / Rad2Sec;
+        ai(0, 3) = Partial_O(0, 0);
+        ai(0, 4) = Partial_P(0, 0);
+        ai(0, 5) = Partial_K(0, 0);
 
         ai(1, 0) = 0;
         ai(1, 1) = 1;
         ai(1, 2) = 0;
-        ai(1, 3) = Partial_O(1, 0) / Rad2Sec;
-        ai(1, 4) = Partial_P(1, 0) / Rad2Sec;
-        ai(1, 5) = Partial_K(1, 0) / Rad2Sec;
+        ai(1, 3) = Partial_O(1, 0);
+        ai(1, 4) = Partial_P(1, 0);
+        ai(1, 5) = Partial_K(1, 0);
 
         ai(2, 0) = 0;
         ai(2, 1) = 0;
         ai(2, 2) = 1;
-        ai(2, 3) = Partial_O(2, 0) / Rad2Sec;
-        ai(2, 4) = Partial_P(2, 0) / Rad2Sec;
-        ai(2, 5) = Partial_K(2, 0) / Rad2Sec;
+        ai(2, 3) = Partial_O(2, 0);
+        ai(2, 4) = Partial_P(2, 0);
+        ai(2, 5) = Partial_K(2, 0);
 
         yi = GB - RGA - T;
     }
 
-    /// [ToDo]
-    inline Transform4x4 estimateRigidTransformPointToPlane_NLLS(
+    /// [ToDo] under construction
+    /// add const double benchSd
+    /// add std::array<double, 3> xyzSd
+    struct RETVAL_NLLS {
+        std::array<double, 6> params;
+        math::Matrixd Correlation;
+        double var;
+        math::Matrixd varX;
+    };
+
+    inline RETVAL_NLLS estimateRigidTransformPointToPlane_NLLS(
         const std::vector<std::array<float, 3>>& sourcePoints,
         const std::vector<CorrespondenceFace>& correspondences,
         const std::vector<size_t>& faceIdx,
         const std::vector<std::array<float, 3>>& allFaceNormals,
-        const std::array<double, 6>& params0)
+        const std::array<double, 6>& params0,
+        const std::array<double, 6>& paramsSd)
     {
+        RETVAL_NLLS retval;
+        retval.params = params0;
+
         if (correspondences.size() < 6) {
-            return Transform4x4::identity();
+            retval.Correlation.resize(6, 6);
+            retval.Correlation.makeIdentityMat();
+            retval.var = 0.;
+            retval.varX.resize(6, 1, 0.0);
+            return retval;
         }
 
         const size_t n = correspondences.size();
 
         Eigen::MatrixXf A(n, 6);
         Eigen::VectorXf b(n);
-
-        auto params = params0;
-
+        
         math::Matrixd N(6, 6, 0.);
         math::Matrixd C(6, 1, 0.);
-        math::Matrixd ai(1, 6);
-        math::Matrixd yi(1, 1);
+        math::Matrixd ai(3, 6);
+        math::Matrixd yi(3, 1);
         const size_t numEqs = n;
-        double ytpy = 0.;
-
+        double etpe = 0.;
+        
         for (size_t i = 0; i < n; ++i) {
             const auto& corr = correspondences[i];
             const auto& s = sourcePoints[corr.sourceIdx];
             const auto& p = corr.facePt;
 
-            calDiscrepancy(s, p, params, ai, yi);
+            calDiscrepancy(s, p, retval.params, ai, yi);
 
             auto ait = ai.transpose();
             auto ci = ait % yi;
             auto ni = ait % ai;
 
-            ytpy += (yi.transpose() % yi)(0, 0);
+            etpe += (yi.transpose() % yi)(0, 0);
 
             N += ni;
             C += ci;
         }
 
+        for (size_t i = 0; i < 6; ++i) {            
+            if (paramsSd[i] <= minParamSd) {
+                for (size_t j = 0; j < 6; ++j) {
+                    if (i == j) {
+                        N(i, j) = 1.0;
+                    }
+                    else {
+                        N(i, j) = 0.0; N(j, i) = 0.0;
+                    }
+                }
+
+                C(i, 0) = 0.0;
+            }
+        }
+
         auto Ninv = N.inverse();
 
-        math:: Matrixd Correlation(6, 6, 0.0);
+        retval.Correlation.resize(6, 6, 0.0);
         for (unsigned int i = 0; i < 6; i++)
         {
             for (unsigned int j = 0; j < 6; j++)
             {
-                Correlation(i, j) = Ninv(i, j) / sqrt(Ninv(i, i)) / sqrt(Ninv(j, j));
+                retval.Correlation(i, j) = Ninv(i, j) / sqrt(Ninv(i, i)) / sqrt(Ninv(j, j));
             }
         }
 
         auto X = Ninv % C;
 
+#ifdef _DEBUG
+        std::cout << "[N mat]\n";
+        std::cout << math::matrixout(N) << "\n";
+        std::cout << "[C mat]\n";
+        std::cout << math::matrixout(C) << "\n";
+        std::cout << "[X mat]\n";
+        std::cout << math::matrixout(X) << "\n";
+#endif
+
         for (unsigned int i = 0; i < 6; i++) {
-            if (i > 2)
-                params[i] += X(i, 0) / Rad2Sec;
-            else
-                params[i] += X(i, 0);
+            if (paramsSd[i] > minParamSd) {
+                if (i > 2) retval.params[i] += X(i, 0);
+                else retval.params[i] += X(i, 0);
+            }
         }
 
-        auto new_S = sqrt(ytpy / (numEqs - 6));
+        retval.var = etpe / (numEqs - 6);
+        retval.varX = Ninv * retval.var;        
 
-        float tx = params[0], ty = params[1], tz = params[2];
-        float rx = params[3], ry = params[3], rz = params[5];
+        return retval;
+    }
+
+    /// [ToDo]
+    /// CorrespondenceFace, need it, all of them???
+    inline Transform4x4 runLSM(
+        const std::vector<std::array<float, 3>>& sourcePoints,
+        const std::vector<CorrespondenceFace>& correspondences,
+        const std::vector<size_t>& faceIdx,
+        const std::vector<std::array<float, 3>>& allFaceNormals,
+        const std::array<double, 6>& params0,
+        const double sdThr,
+        const unsigned int maxIter)
+    {
+        if (correspondences.size() < 6) {
+            return Transform4x4::identity();
+        }
+
+        std::array<double, 3> sumSrc = { 0., 0., 0. };
+        std::array<double, 3> sumTar = { 0., 0., 0. };
+
+        for (size_t i = 0; i < correspondences.size(); ++i) {
+            auto srcIdx = correspondences[i].sourceIdx;
+            for (size_t j = 0; j < 3; ++j) {
+                sumTar[j] += static_cast<double>(correspondences[i].facePt[j]);                
+                sumSrc[j] += static_cast<double>(sourcePoints[srcIdx][j]);                
+            }
+        }
+
+        std::array<double, 6> paramsSd;
+        paramsSd[0] = maxParamSd;
+        paramsSd[1] = maxParamSd;
+        paramsSd[2] = maxParamSd;
+        paramsSd[3] = maxParamSd;
+        paramsSd[4] = maxParamSd;
+        paramsSd[5] = maxParamSd;
+
+        RETVAL_NLLS retval;
+        retval.params = params0;
+        for (size_t i = 0; i < 3; ++i) {
+            retval.params[i] = (sumSrc[i] - sumTar[i]) / correspondences.size();
+        }
+
+        double preSd = 0.0;
+        bool continueIter = true;
+        unsigned int iter = 0;
+        do {
+            retval = estimateRigidTransformPointToPlane_NLLS(sourcePoints,
+                correspondences,
+                faceIdx,
+                allFaceNormals,
+                retval.params,
+                paramsSd);
+
+            ILOG << "[ICP] Iter " << (iter + 1) << ": T(" << retval.params[0] << ", " << retval.params[1] << ", " << retval.params[2] << ")" \
+            << " R(" << retval.params[3] * Rad2Deg << ", " << retval.params[4] * Rad2Deg << ", " << retval.params[5] * Rad2Deg << ")deg";
+
+            std::cout << "[Correlation]\n";
+            std::cout << math::matrixout(retval.Correlation);
+
+            std::cout << "[X_VarCov]\n";
+            std::cout << math::matrixout(retval.varX);
+            std::cout << "[X sd]\n";
+            for(unsigned int i = 0; i < 6; ++i)
+                std::cout << sqrt(retval.varX(i, 0)) << "\n";
+
+            if (fabs(preSd - sqrt(retval.var)) < sdThr) {
+                continueIter = false;
+            }
+
+            ++ iter;
+
+        } while (iter < maxIter && continueIter);
+
+        float tx = retval.params[0], ty = retval.params[1], tz = retval.params[2];
+        float rx = retval.params[3], ry = retval.params[4], rz = retval.params[5];
 
         float cx = std::cos(rx), sx_r = std::sin(rx);
         float cy = std::cos(ry), sy = std::sin(ry);
@@ -937,9 +1105,7 @@ namespace icp {
     /// @param chunk ICP chunk containing source/target points and config
     /// @param cancelRequested Atomic flag for cancellation check
     /// @return ICP result with transformation and statistics
-    inline IcpResult runIcp(
-        const IcpChunk& chunk,
-        std::atomic<bool>& cancelRequested)
+    inline IcpResult runIcp(const IcpChunk& chunk, std::atomic<bool>& cancelRequested)
     {
         IcpResult result;
         result.chunk_id = chunk.chunk_id;
@@ -1034,6 +1200,16 @@ namespace icp {
                 Transform4x4 deltaT = estimateRigidTransformPointToPlane(
                     transformedSource, correspondences,
                     chunk.faceIndices, chunk.faceNormals);
+#ifdef _DEBUG
+                /// [ToDo]: config
+                std::array<double, 6> params0 = {0., 0., 0., 0., 0., 0.};
+                double sdThr = 0.000001;
+                unsigned int maxIter = 50;
+                Transform4x4 deltaT2 = runLSM(
+                    transformedSource, correspondences,
+                    chunk.faceIndices, chunk.faceNormals,
+                    params0, sdThr, maxIter);
+#endif
 
 #ifdef _DEBUG
                 {

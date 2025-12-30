@@ -140,11 +140,17 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\include\bimtree\SSMMatDatad.cpp" />
+    <ClCompile Include="..\include\bimtree\SsmMatrixd.cpp" />
     <ClCompile Include="..\include\bim\BimInfo.cpp" />
     <ClCompile Include="..\src\NetworkManager.cpp" />
     <ClCompile Include="SlaveApplication.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\include\bimtree\rotation.hpp" />
+    <ClInclude Include="..\include\bimtree\SSMMatDatad.h" />
+    <ClInclude Include="..\include\bimtree\SSMMatrixd.h" />
+    <ClInclude Include="..\include\bimtree\xyzpoint.hpp" />
     <ClInclude Include="..\include\bim\BimInfo.h" />
     <ClInclude Include="..\include\Logger.h" />
     <ClInclude Include="..\include\NetworkManager.h" />

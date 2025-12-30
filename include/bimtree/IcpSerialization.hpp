@@ -1,4 +1,4 @@
-#pragma once
+ï»¿#pragma once
 
 /// ============================================================================
 /// IcpSerialization.hpp - ICP Data Serialization/Deserialization
@@ -170,7 +170,7 @@ namespace icp {
                 targetCount * sizeof(float) * 3);
         }
 
-        /// 4. Face indices (size_t ¡æ uint64_t for cross-platform)
+        /// 4. Face indices (size_t â†’ uint64_t for cross-platform)
         uint32_t faceIdxCount = static_cast<uint32_t>(chunk.faceIndices.size());
         pos = buffer.size();
         buffer.resize(pos + sizeof(uint32_t) + faceIdxCount * sizeof(uint64_t));
