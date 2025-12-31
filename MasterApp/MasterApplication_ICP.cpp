@@ -14,7 +14,7 @@
 #include "../include/bimtree/IcpSerialization.hpp"
 #include "../include/bimtree/PseudoPointGenerator.hpp"
 
-/// Data loading from DLLs
+ /// Data loading from DLLs
 #include "../LasImport/LasImport.h"
 #include "../BimImport/BimImport.h"
 
@@ -31,32 +31,32 @@ void MasterApplication::setupIcpApiRoutes() {
     /// POST /api/icp/start - Start new ICP job
     api_server_->POST("/api/icp/start", [this](const HttpRequest& req) {
         return handleIcpStart(req);
-    });
+        });
 
     /// GET /api/icp/jobs - List all ICP jobs
     api_server_->GET("/api/icp/jobs", [this](const HttpRequest& req) {
         return handleIcpJobs(req);
-    });
+        });
 
     /// GET /api/icp/jobs/{id} - Get job status
     api_server_->GET("/api/icp/jobs/{id}", [this](const HttpRequest& req) {
         return handleIcpJobStatus(req);
-    });
+        });
 
     /// GET /api/icp/jobs/{id}/result - Get job result
     api_server_->GET("/api/icp/jobs/{id}/result", [this](const HttpRequest& req) {
         return handleIcpJobResult(req);
-    });
+        });
 
     /// POST /api/icp/jobs/{id}/cancel - Cancel job
     api_server_->POST("/api/icp/jobs/{id}/cancel", [this](const HttpRequest& req) {
         return handleIcpJobCancel(req);
-    });
+        });
 
     /// GET /api/icp/jobs/{id}/stats - Get job statistics
     api_server_->GET("/api/icp/jobs/{id}/stats", [this](const HttpRequest& req) {
         return handleIcpJobStats(req);
-    });
+        });
 
     ILOG << "[ICP] REST API routes registered";
 }
@@ -73,7 +73,7 @@ std::string MasterApplication::generateIcpJobId() {
 
     std::stringstream ss;
     ss << "icp_" << std::put_time(std::localtime(&time_t_now), "%Y%m%d_%H%M%S")
-       << "_" << std::setfill('0') << std::setw(3) << ms.count();
+        << "_" << std::setfill('0') << std::setw(3) << ms.count();
 
     return ss.str();
 }
@@ -133,16 +133,16 @@ HttpResponse MasterApplication::handleIcpStart(const HttpRequest& req) {
             if (max_iter) job->config.maxIterations = static_cast<int>(*max_iter);
 
             auto conv_thresh = MiniJson::get_ex<double>(cfg, "convergence_threshold");
-            if (conv_thresh) job->config.convergenceThreshold = static_cast<float>(*conv_thresh);
+            if (conv_thresh) job->config.convergenceThreshold = *conv_thresh;
 
             auto max_dist = MiniJson::get_ex<double>(cfg, "max_correspondence_distance");
-            if (max_dist) job->config.maxCorrespondenceDistance = static_cast<float>(*max_dist);
+            if (max_dist) job->config.maxCorrespondenceDistance = *max_dist;
 
             auto ds_ratio = MiniJson::get_ex<double>(cfg, "downsample_ratio");
             if (ds_ratio) job->config.downsampleRatio = static_cast<int>(*ds_ratio);
 
             auto grid_size = MiniJson::get_ex<double>(cfg, "pseudo_point_grid_size");
-            if (grid_size) job->config.pseudoPointGridSize = static_cast<float>(*grid_size);
+            if (grid_size) job->config.pseudoPointGridSize = *grid_size;
         }
 
         /// Optional LAS offset (dx, dy, dz)
@@ -150,13 +150,13 @@ HttpResponse MasterApplication::handleIcpStart(const HttpRequest& req) {
         if (offset_opt) {
             auto& off = *offset_opt;
             auto dx = MiniJson::get_ex<double>(off, "dx");
-            if (dx) job->offsetX = static_cast<float>(*dx);
+            if (dx) job->offsetX = *dx;
 
             auto dy = MiniJson::get_ex<double>(off, "dy");
-            if (dy) job->offsetY = static_cast<float>(*dy);
+            if (dy) job->offsetY = *dy;
 
             auto dz = MiniJson::get_ex<double>(off, "dz");
-            if (dz) job->offsetZ = static_cast<float>(*dz);
+            if (dz) job->offsetZ = *dz;
         }
 
         /// Record start time
@@ -171,12 +171,12 @@ HttpResponse MasterApplication::handleIcpStart(const HttpRequest& req) {
         }
 
         ILOG << "[ICP] Job created: " << job->jobId
-             << " (LAS: " << las_file << ", BIM: " << bim_folder << ")";
+            << " (LAS: " << las_file << ", BIM: " << bim_folder << ")";
 
         /// Start processing in background thread
         std::thread([this, job]() {
             processIcpJob(job);
-        }).detach();
+            }).detach();
 
         /// Return response
         std::ostringstream oss;
@@ -316,8 +316,8 @@ HttpResponse MasterApplication::handleIcpJobResult(const HttpRequest& req) {
         }
 
         if (!job->isFinished()) {
-            return createErrorResponse(202, "Job not yet completed. Status: " + 
-                                       std::string(icp::statusToString(job->status)));
+            return createErrorResponse(202, "Job not yet completed. Status: " +
+                std::string(icp::statusToString(job->status)));
         }
 
         std::ostringstream oss;
@@ -483,13 +483,13 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
         }
 
         /// Convert to ICP format
-        std::vector<std::array<float, 3>> sourcePoints = icp::convertPointCloudToIcp(lasChunks);
+        std::vector<std::array<double, 3>> sourcePoints = icp::convertPointCloudToIcp(lasChunks);
         job->totalPointCount = sourcePoints.size();
 
         ILOG << "[ICP] LAS loaded: " << job->totalPointCount << " points";
 
         /// Apply offset to source points
-        if (job->offsetX != 0.0f || job->offsetY != 0.0f || job->offsetZ != 0.0f) {
+        if (job->offsetX != 0.0 || job->offsetY != 0.0 || job->offsetZ != 0.0) {
             ILOG << "[ICP] Applying offset: dx=" << job->offsetX
                 << ", dy=" << job->offsetY
                 << ", dz=" << job->offsetZ;
@@ -532,10 +532,10 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
             return;
         }
 
-        std::vector<std::array<float, 3>> pseudoFacePoints;
+        std::vector<std::array<double, 3>> pseudoFacePoints;
         std::vector<size_t> pseudoFaceIdx;
-        std::vector<std::array<float, 3>> facePts;
-        std::vector<std::array<float, 3>> targetNormals;
+        std::vector<std::array<double, 3>> facePts;
+        std::vector<std::array<double, 3>> targetNormals;
         /// [ToDo] use directly meshes, instead of extraction
         icp::generatePseudoPoints(meshes, job->config.pseudoPointGridSize, pseudoFacePoints, pseudoFaceIdx, facePts, targetNormals);
 
@@ -650,9 +650,9 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
         job->totalChunks = 1;
 
         ILOG << "[ICP] Fine alignment: RMSE=" << fineResult.finalRMSE
-             << ", converged=" << (fineResult.converged ? "Yes" : "No")
-             << ", iterations=" << fineResult.actualIterations
-             << ", time=" << (job->fineAlignmentTimeMs / 1000.0) << "s";
+            << ", converged=" << (fineResult.converged ? "Yes" : "No")
+            << ", iterations=" << fineResult.actualIterations
+            << ", time=" << (job->fineAlignmentTimeMs / 1000.0) << "s";
 
         /// =============================================
         /// Phase 6: Aggregate Results
@@ -675,9 +675,9 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
                 std::chrono::system_clock::now().time_since_epoch()).count());
 
         ILOG << "[ICP] Job completed: " << job->jobId
-             << " (Coarse RMSE: " << job->coarseRMSE
-             << ", Final RMSE: " << job->finalRMSE
-             << ", Time: " << job->getElapsedTimeSec() << "s)";
+            << " (Coarse RMSE: " << job->coarseRMSE
+            << ", Final RMSE: " << job->finalRMSE
+            << ", Time: " << job->getElapsedTimeSec() << "s)";
     }
     catch (const std::exception& e) {
         job->status = icp::IcpJobStatus::FAILED;
@@ -695,9 +695,9 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
 
 void MasterApplication::handleIcpResult(const icp::IcpResult& result, uint32_t task_id) {
     ILOG << "[ICP] Received result for task " << task_id
-         << " (chunk: " << result.chunk_id
-         << ", success: " << (result.success ? "Yes" : "No")
-         << ", RMSE: " << result.finalRMSE << ")";
+        << " (chunk: " << result.chunk_id
+        << ", success: " << (result.success ? "Yes" : "No")
+        << ", RMSE: " << result.finalRMSE << ")";
 
     /// TODO: For distributed processing, map task_id -> job_id
     /// and update the corresponding job's chunk results

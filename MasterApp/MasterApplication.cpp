@@ -1,4 +1,4 @@
-/**
+癤�/**
  * @file MasterApplication.cpp
  * @brief Core implementation of MasterApplication
  *
@@ -19,73 +19,73 @@
 #include <iostream>
 #include <atomic>
 
-/// [ToDo] Delete the follwing lines for clean-up
- /// Aftet completing compile test, comment out the follwing lines
+ /// [ToDo] Delete the follwing lines for clean-up
+  /// Aftet completing compile test, comment out the follwing lines
 #ifdef _DEBUG
 
 /*
 #ifdef _DEBUG
 void testIcpTypesCompile() {
-    // Transform4x4 테스트
+    // Transform4x4 test
     icp::Transform4x4 t1 = icp::Transform4x4::identity();
-    icp::Transform4x4 t2 = icp::Transform4x4::translation(1.0f, 2.0f, 3.0f);
+    icp::Transform4x4 t2 = icp::Transform4x4::translation(1.0, 2.0, 3.0);
     icp::Transform4x4 t3 = t1 * t2;
 
-    float x = 0, y = 0, z = 0;
-    t3.transformPoint(1.0f, 1.0f, 1.0f, x, y, z);
+    double x = 0, y = 0, z = 0;
+    t3.transformPoint(1.0, 1.0, 1.0, x, y, z);
 
-    float tx, ty, tz;
+    double tx, ty, tz;
     t3.getTranslation(tx, ty, tz);
 
-    // IcpConfig 테스트
+    // IcpConfig test
     icp::IcpConfig config;
     config.maxIterations = 100;
-    config.convergenceThreshold = 1e-6f;
+    config.convergenceThreshold = 1e-6;
     bool valid = config.isValid();
 
-    // IcpChunk 테스트
+    // IcpChunk test
     icp::IcpChunk chunk;
     chunk.chunk_id = 1;
-    chunk.sourcePoints.push_back({ 1.0f, 2.0f, 3.0f });
-    chunk.targetPoints.push_back({ 4.0f, 5.0f, 6.0f });
+    chunk.sourcePoints.push_back({ 1.0, 2.0, 3.0 });
+    chunk.targetPoints.push_back({ 4.0, 5.0, 6.0 });
     chunk.calculateSourceBounds();
     chunk.calculateTargetBounds();
     size_t size = chunk.getApproximateSize();
     bool chunkValid = chunk.isValid();
 
-    // IcpResult 테스트
+    // IcpResult test
     icp::IcpResult result;
     result.chunk_id = 1;
     result.success = true;
     result.converged = true;
-    result.finalRMSE = 0.01f;
-    result.initialRMSE = 0.1f;
-    float improvement = result.getImprovementRatio();
-    bool good = result.isGood(0.05f);
+    result.finalRMSE = 0.01;
+    result.initialRMSE = 0.1;
+    double improvement = result.getImprovementRatio();
+    bool good = result.isGood(0.05);
 
-    // IcpJobStatus 테스트
+    // IcpJobStatus test
     icp::IcpJobStatus status = icp::IcpJobStatus::PENDING;
     const char* statusStr = icp::statusToString(status);
 
-    // IcpJob 테스트
+    // IcpJob test
     icp::IcpJob job;
     job.jobId = "test_job_001";
     job.lasFilePath = "C:/data/test.las";
     job.bimFolderPath = "C:/data/bim";
     job.status = icp::IcpJobStatus::LOADING_DATA;
-    float progress = job.getProgress();
+    double progress = job.getProgress();
     bool finished = job.isFinished();
     bool running = job.isRunning();
 
-    // IcpStatistics 테스트
+    // IcpStatistics test
     icp::IcpStatistics stats = icp::IcpStatistics::fromJob(job);
 
-    // TaskType 테스트 (PointCloudTypes.h 수정 확인)
+    // TaskType test (PointCloudTypes.h modification check)
     DPApp::TaskType icpTask = DPApp::TaskType::ICP_FINE_ALIGNMENT;
     const char* taskName = DPApp::taskStr(icpTask);
     DPApp::TaskType parsed = DPApp::strTask("icp_fine");
 
-    // 사용하지 않는 변수 경고 방지
+    // Suppress unused variable warnings
     (void)x; (void)y; (void)z;
     (void)tx; (void)ty; (void)tz;
     (void)valid; (void)size; (void)chunkValid;
@@ -102,61 +102,61 @@ void testIcpTypesCompile() {
 void testIcpCoreCompile() {
     std::cout << "=== Phase 2 IcpCore Test ===" << std::endl;
 
-    /// 1. 테스트 데이터 생성
-    std::vector<std::array<float, 3>> sourcePoints = {
-        {0.0f, 0.0f, 0.0f},
-        {1.0f, 0.0f, 0.0f},
-        {0.0f, 1.0f, 0.0f},
-        {0.0f, 0.0f, 1.0f},
-        {1.0f, 1.0f, 0.0f},
-        {1.0f, 0.0f, 1.0f},
-        {0.0f, 1.0f, 1.0f},
-        {1.0f, 1.0f, 1.0f}
+    /// 1. Test data generation
+    std::vector<std::array<double, 3>> sourcePoints = {
+        {0.0, 0.0, 0.0},
+        {1.0, 0.0, 0.0},
+        {0.0, 1.0, 0.0},
+        {0.0, 0.0, 1.0},
+        {1.0, 1.0, 0.0},
+        {1.0, 0.0, 1.0},
+        {0.0, 1.0, 1.0},
+        {1.0, 1.0, 1.0}
     };
 
     /// Target = Source + (0.1, 0.2, 0.3) translation
-    std::vector<std::array<float, 3>> targetPoints;
+    std::vector<std::array<double, 3>> targetPoints;
     for (const auto& p : sourcePoints) {
-        targetPoints.push_back({ p[0] + 0.1f, p[1] + 0.2f, p[2] + 0.3f });
+        targetPoints.push_back({ p[0] + 0.1, p[1] + 0.2, p[2] + 0.3 });
     }
 
-    /// 2. KD-Tree 테스트
+    /// 2. KD-Tree test
     icp::PointCloudAdaptor adaptor(targetPoints);
     icp::KdTree3D tree(3, adaptor, nanoflann::KDTreeSingleIndexAdaptorParams(10));
     tree.buildIndex();
     std::cout << "KD-Tree built successfully" << std::endl;
 
-    /// 3. Correspondence 찾기 테스트
+    /// 3. Correspondence finding test
     std::vector<icp::Correspondence> correspondences;
-    icp::findCorrespondences(sourcePoints, tree, 1.0f, correspondences);
+    icp::findCorrespondences(sourcePoints, tree, 1.0, correspondences);
     std::cout << "Found " << correspondences.size() << " correspondences" << std::endl;
 
-    /// 4. SVD 변환 추정 테스트
+    /// 4. SVD transform estimation test
     icp::Transform4x4 transform = icp::estimateRigidTransformSVD(
         sourcePoints, targetPoints, correspondences);
 
-    float tx, ty, tz;
+    double tx, ty, tz;
     transform.getTranslation(tx, ty, tz);
     std::cout << "Estimated translation: (" << tx << ", " << ty << ", " << tz << ")" << std::endl;
     std::cout << "Expected translation: (0.1, 0.2, 0.3)" << std::endl;
 
-    /// 5. RMSE 계산 테스트
-    float rmse = icp::computeRMSE(correspondences);
+    /// 5. RMSE calculation test
+    double rmse = icp::computeRMSE(correspondences);
     std::cout << "Initial RMSE: " << rmse << std::endl;
 
-    /// 6. 다운샘플링 테스트
+    /// 6. Downsampling test
     auto downsampled = icp::downsampleUniform(sourcePoints, 2);
     std::cout << "Downsampled: " << sourcePoints.size() << " -> " << downsampled.size() << std::endl;
 
-    /// 7. 전체 ICP 테스트
+    /// 7. Full ICP test
     icp::IcpChunk chunk;
     chunk.chunk_id = 1;
     chunk.sourcePoints = sourcePoints;
     chunk.targetPoints = targetPoints;
     chunk.initialTransform = icp::Transform4x4::identity();
     chunk.config.maxIterations = 50;
-    chunk.config.convergenceThreshold = 1e-6f;
-    chunk.config.maxCorrespondenceDistance = 1.0f;
+    chunk.config.convergenceThreshold = 1e-6;
+    chunk.config.maxCorrespondenceDistance = 1.0;
     chunk.config.minCorrespondences = 3;
     chunk.config.useNormalFiltering = false;
 
@@ -174,7 +174,7 @@ void testIcpCoreCompile() {
     result.transform.getTranslation(tx, ty, tz);
     std::cout << "Final translation: (" << tx << ", " << ty << ", " << tz << ")" << std::endl;
 
-    /// 8. 결과 집계 테스트
+    /// 8. Result aggregation test
     std::vector<icp::IcpResult> results = { result };
     icp::Transform4x4 aggregated = icp::aggregateResultsWeighted(results);
     const icp::IcpResult* best = icp::selectBestResult(results);
@@ -182,25 +182,25 @@ void testIcpCoreCompile() {
     std::cout << "\nAggregation test: " << (best != nullptr ? "OK" : "Failed") << std::endl;
     std::cout << "=== Phase 2 Test Complete ===" << std::endl;
 
-    (void)aggregated;  // 경고 방지
+    (void)aggregated;  // Suppress warning
 }
 */
 
-/// 부동소수점 비교 헬퍼
-inline bool floatEquals(float a, float b, float epsilon = 1e-6f) {
+/// Floating point comparison helper
+inline bool doubleEquals(double a, double b, double epsilon = 1e-6) {
     return std::abs(a - b) < epsilon;
 }
 
-/// [ToDo] 직렬화 테스트 더 이상 필요없으면 삭제
-/// Phase 3 직렬화 테스트
+/// [ToDo] Delete serialization test if no longer needed
+/// Phase 3 serialization test
 void testIcpSerializationCompile() {
     std::cout << "=== Phase 3 Serialization Test ===" << std::endl;
 
     bool allPassed = true;
 
-    /// 1. Transform4x4 직렬화 테스트
+    /// 1. Transform4x4 serialization test
     {
-        icp::Transform4x4 original = icp::Transform4x4::translation(1.5f, 2.5f, 3.5f);
+        icp::Transform4x4 original = icp::Transform4x4::translation(1.5, 2.5, 3.5);
 
         std::vector<uint8_t> buffer;
         icp::serializeTransform(original, buffer);
@@ -208,21 +208,21 @@ void testIcpSerializationCompile() {
         size_t offset = 0;
         icp::Transform4x4 restored = icp::deserializeTransform(buffer.data(), offset);
 
-        float tx1, ty1, tz1, tx2, ty2, tz2;
+        double tx1, ty1, tz1, tx2, ty2, tz2;
         original.getTranslation(tx1, ty1, tz1);
         restored.getTranslation(tx2, ty2, tz2);
 
-        bool match = floatEquals(tx1, tx2) && floatEquals(ty1, ty2) && floatEquals(tz1, tz2);
+        bool match = doubleEquals(tx1, tx2) && doubleEquals(ty1, ty2) && doubleEquals(tz1, tz2);
         std::cout << "Transform4x4 serialization: " << (match ? "PASS" : "FAIL") << std::endl;
         allPassed &= match;
     }
 
-    /// 2. IcpConfig 직렬화 테스트
+    /// 2. IcpConfig serialization test
     {
         icp::IcpConfig original;
         original.maxIterations = 100;
-        original.convergenceThreshold = 1e-6f;
-        original.maxCorrespondenceDistance = 2.0f;
+        original.convergenceThreshold = 1e-6;
+        original.maxCorrespondenceDistance = 2.0;
         original.downsampleRatio = 5;
         original.useNormalFiltering = true;
         original.verbose = true;
@@ -235,8 +235,8 @@ void testIcpSerializationCompile() {
 
         bool match = (original.maxIterations == restored.maxIterations) &&
             (original.downsampleRatio == restored.downsampleRatio) &&
-            floatEquals(original.convergenceThreshold, restored.convergenceThreshold) &&
-            floatEquals(original.maxCorrespondenceDistance, restored.maxCorrespondenceDistance) &&
+            doubleEquals(original.convergenceThreshold, restored.convergenceThreshold) &&
+            doubleEquals(original.maxCorrespondenceDistance, restored.maxCorrespondenceDistance) &&
             (original.useNormalFiltering == restored.useNormalFiltering) &&
             (original.verbose == restored.verbose);
 
@@ -244,19 +244,19 @@ void testIcpSerializationCompile() {
         allPassed &= match;
     }
 
-    /// 3. IcpChunk 직렬화 테스트
+    /// 3. IcpChunk serialization test
     {
         icp::IcpChunk original;
         original.chunk_id = 42;
-        original.sourcePoints = { {1.0f, 2.0f, 3.0f}, {4.0f, 5.0f, 6.0f} };
-        original.targetPoints = { {7.0f, 8.0f, 9.0f}, {10.0f, 11.0f, 12.0f}, {13.0f, 14.0f, 15.0f} };
+        original.sourcePoints = { {1.0, 2.0, 3.0}, {4.0, 5.0, 6.0} };
+        original.targetPoints = { {7.0, 8.0, 9.0}, {10.0, 11.0, 12.0}, {13.0, 14.0, 15.0} };
         original.faceIndices = { 0, 1, 2 };
-        original.faceNormals = { {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f} };
-        original.initialTransform = icp::Transform4x4::translation(0.1f, 0.2f, 0.3f);
+        original.faceNormals = { {0.0, 0.0, 1.0}, {0.0, 1.0, 0.0}, {1.0, 0.0, 0.0} };
+        original.initialTransform = icp::Transform4x4::translation(0.1, 0.2, 0.3);
         original.config.maxIterations = 75;
-        original.source_min_x = -1.0f; original.source_max_x = 10.0f;
-        original.source_min_y = -2.0f; original.source_max_y = 20.0f;
-        original.source_min_z = -3.0f; original.source_max_z = 30.0f;
+        original.source_min_x = -1.0; original.source_max_x = 10.0;
+        original.source_min_y = -2.0; original.source_max_y = 20.0;
+        original.source_min_z = -3.0; original.source_max_z = 30.0;
 
         std::vector<uint8_t> buffer = icp::serializeIcpChunk(original);
         icp::IcpChunk restored = icp::deserializeIcpChunk(buffer);
@@ -267,14 +267,14 @@ void testIcpSerializationCompile() {
             (original.faceIndices.size() == restored.faceIndices.size()) &&
             (original.faceNormals.size() == restored.faceNormals.size()) &&
             (original.config.maxIterations == restored.config.maxIterations) &&
-            floatEquals(original.source_min_x, restored.source_min_x) &&
-            floatEquals(original.source_max_x, restored.source_max_x);
+            doubleEquals(original.source_min_x, restored.source_min_x) &&
+            doubleEquals(original.source_max_x, restored.source_max_x);
 
-        /// 포인트 데이터 확인
+        /// Point data check
         if (match && original.sourcePoints.size() > 0) {
-            match = floatEquals(original.sourcePoints[0][0], restored.sourcePoints[0][0]) &&
-                floatEquals(original.sourcePoints[0][1], restored.sourcePoints[0][1]) &&
-                floatEquals(original.sourcePoints[0][2], restored.sourcePoints[0][2]);
+            match = doubleEquals(original.sourcePoints[0][0], restored.sourcePoints[0][0]) &&
+                doubleEquals(original.sourcePoints[0][1], restored.sourcePoints[0][1]) &&
+                doubleEquals(original.sourcePoints[0][2], restored.sourcePoints[0][2]);
         }
 
         std::cout << "IcpChunk serialization: " << (match ? "PASS" : "FAIL")
@@ -282,14 +282,14 @@ void testIcpSerializationCompile() {
         allPassed &= match;
     }
 
-    /// 4. IcpResult 직렬화 테스트
+    /// 4. IcpResult serialization test
     {
         icp::IcpResult original;
         original.chunk_id = 123;
-        original.transform = icp::Transform4x4::translation(5.0f, 6.0f, 7.0f);
-        original.localTransform = icp::Transform4x4::translation(0.5f, 0.6f, 0.7f);
-        original.finalRMSE = 0.0123f;
-        original.initialRMSE = 0.5678f;
+        original.transform = icp::Transform4x4::translation(5.0, 6.0, 7.0);
+        original.localTransform = icp::Transform4x4::translation(0.5, 0.6, 0.7);
+        original.finalRMSE = 0.0123;
+        original.initialRMSE = 0.5678;
         original.actualIterations = 25;
         original.correspondenceCount = 1000;
         original.sourcePointCount = 5000;
@@ -297,14 +297,14 @@ void testIcpSerializationCompile() {
         original.converged = true;
         original.success = true;
         original.processingTimeMs = 123.456;
-        original.errorMessage = "";  // 빈 메시지
+        original.errorMessage = "";  // Empty message
 
         std::vector<uint8_t> buffer = icp::serializeIcpResult(original);
         icp::IcpResult restored = icp::deserializeIcpResult(buffer);
 
         bool match = (original.chunk_id == restored.chunk_id) &&
-            floatEquals(original.finalRMSE, restored.finalRMSE) &&
-            floatEquals(original.initialRMSE, restored.initialRMSE) &&
+            doubleEquals(original.finalRMSE, restored.finalRMSE) &&
+            doubleEquals(original.initialRMSE, restored.initialRMSE) &&
             (original.actualIterations == restored.actualIterations) &&
             (original.correspondenceCount == restored.correspondenceCount) &&
             (original.sourcePointCount == restored.sourcePointCount) &&
@@ -318,7 +318,7 @@ void testIcpSerializationCompile() {
         allPassed &= match;
     }
 
-    /// 5. IcpResult with error message 직렬화 테스트
+    /// 5. IcpResult with error message serialization test
     {
         icp::IcpResult original;
         original.chunk_id = 999;
@@ -339,12 +339,12 @@ void testIcpSerializationCompile() {
         allPassed &= match;
     }
 
-    /// 6. NetworkUtils wrapper 테스트
+    /// 6. NetworkUtils wrapper test
     {
         icp::IcpChunk chunk;
         chunk.chunk_id = 777;
-        chunk.sourcePoints = { {1.0f, 2.0f, 3.0f} };
-        chunk.targetPoints = { {4.0f, 5.0f, 6.0f} };
+        chunk.sourcePoints = { {1.0, 2.0, 3.0} };
+        chunk.targetPoints = { {4.0, 5.0, 6.0} };
 
         auto buffer = DPApp::NetworkUtils::serializeIcpChunk(chunk);
         auto restored = DPApp::NetworkUtils::deserializeIcpChunk(buffer);
@@ -360,9 +360,9 @@ void testIcpSerializationCompile() {
 
 #endif
 
- /// =========================================
- /// Global variable (for signal handler)
- /// =========================================
+/// =========================================
+/// Global variable (for signal handler)
+/// =========================================
 MasterApplication* g_app = nullptr;
 
 /// =========================================
@@ -832,11 +832,11 @@ void MasterApplication::handleTaskResult(const NetworkMessage& message, const st
 
         // result_type: 0 = ProcessingResult, 1 = BimPcResult, 2 = TestResult
         if (result_type == 2) {
-            // 테스트 결과 처리
+            // Test result processing
             TestResult result = TestResult::deserialize(result_data);
             handleTestResult(result);
 
-            // TaskManager 상태 업데이트
+            // TaskManager status update
             if (task_manager_) {
                 ProcessingResult simple_result;
                 simple_result.task_id = result.task_id;
@@ -852,7 +852,7 @@ void MasterApplication::handleTaskResult(const NetworkMessage& message, const st
                 << ", time: " << result.processing_time_ms << "ms)";
         }
         else if (result_type == 1) {
-            // BimPc 결과 처리
+            // BimPc result processing
             BimPcResult result = NetworkUtils::deserializeBimPcResult(result_data);
             if (task_manager_) {
                 task_manager_->addBimPcResult(result);
@@ -868,7 +868,7 @@ void MasterApplication::handleTaskResult(const NetworkMessage& message, const st
                 << " from " << client_id;
         }
         else {
-            // 일반 결과 처리
+            // General result processing
             ProcessingResult result = NetworkUtils::deserializeResult(result_data);
             if (task_manager_) {
                 task_manager_->completeTask(result.task_id, result);
@@ -888,10 +888,10 @@ void MasterApplication::handleTaskResult(const NetworkMessage& message, const st
 void MasterApplication::handleTestResult(const TestResult& result) {
     std::lock_guard<std::mutex> lock(test_mutex_);
 
-    // 결과 저장
+    // Store result
     test_results_.push_back(result);
 
-    // 해당 청크 찾아서 검증
+    // Find and verify chunk
     for (auto& chunk : test_chunks_) {
         if (chunk.chunk_id == result.chunk_id) {
             TestResult mutable_result = result;
@@ -973,7 +973,7 @@ void MasterApplication::sendAssignedTasks() {
         auto task_data = NetworkUtils::serializeTask(task);
         std::vector<uint8_t> chunk_data;
 
-        // 테스트 Task 타입인지 확인
+        // Check if test Task type
         bool is_test_task = (task_info.task_type == TaskType::TEST_ECHO ||
             task_info.task_type == TaskType::TEST_COMPUTE ||
             task_info.task_type == TaskType::TEST_DELAY ||
@@ -983,7 +983,7 @@ void MasterApplication::sendAssignedTasks() {
             task_info.bimpc_chunk_data != nullptr);
 
         if (is_test_task) {
-            // 테스트 청크 데이터 직렬화
+            // Test chunk data serialization
             std::lock_guard<std::mutex> lock(test_mutex_);
             for (const auto& test_chunk : test_chunks_) {
                 if (test_chunk.chunk_id == task_info.chunk_id) {
@@ -1083,20 +1083,20 @@ static BOOL WINAPI ConsoleHandler(DWORD signal) {
 
 int main(int argc, char* argv[]) {
 
-/// [ToDo] Delete the follwing lines for clean-up
-/// Aftet completing compile test, comment out the follwing lines
+    /// [ToDo] Delete the follwing lines for clean-up
+    /// Aftet completing compile test, comment out the follwing lines
 #ifdef _DEBUG
     /// Phase 1 test
     //testIcpTypesCompile();
-    
+
     /// Phase 2 test
     //testIcpCoreCompile();
-    //return 0;  // 테스트만 실행하고 종료
+    //return 0;  // Run test only and exit
 
     /// Phase 3 test
     //testIcpSerializationCompile();
     //return 0;
- 
+
 #endif
 
     SetConsoleCtrlHandler(ConsoleHandler, TRUE);

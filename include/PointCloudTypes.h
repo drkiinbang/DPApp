@@ -83,8 +83,8 @@ namespace DPApp {
     struct PointCloudHeader {
         std::string filename;
         uint64_t point_count;
-        float min_x, min_y, min_z;
-        float max_x, max_y, max_z;
+        double min_x, min_y, min_z;
+        double max_x, max_y, max_z;
         std::string coordinate_system;
 
         PointCloudHeader()
@@ -101,8 +101,8 @@ namespace DPApp {
         PointCloudHeader header;
 
         /// Bounding box of the chunk
-        float min_x, min_y, min_z;
-        float max_x, max_y, max_z;
+        double min_x, min_y, min_z;
+        double max_x, max_y, max_z;
 
         PointCloudChunk()
             : chunk_id(0),
@@ -145,8 +145,8 @@ namespace DPApp {
         std::vector<Point3D> points;      /// Point cloud chunk
 
         /// Bounding box of point cloud
-        float min_x, min_y, min_z;
-        float max_x, max_y, max_z;
+        double min_x, min_y, min_z;
+        double max_x, max_y, max_z;
 
         BimPcChunk()
             : chunk_id(0),
@@ -285,8 +285,8 @@ namespace DPApp {
                 if (line.empty() || line[0] == '#') continue;
 
                 std::istringstream iss(line);
-                float x, y, z;
-                float intensity = 0;
+                double x, y, z;
+                double intensity = 0;
                 uint8_t r = 255, g = 255, b = 255;
 
                 if (iss >> x >> y >> z) {

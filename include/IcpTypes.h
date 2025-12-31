@@ -31,18 +31,18 @@ namespace icp {
     /// | m[2]  m[6]  m[10]  m[14] |   | R20 R21 R22 Tz |
     /// | m[3]  m[7]  m[11]  m[15] |   | 0   0   0   1  |
     struct Transform4x4 {
-        float m[16];
+        double m[16];
 
         /// Create identity matrix
         static Transform4x4 identity() {
             Transform4x4 result;
             std::memset(result.m, 0, sizeof(result.m));
-            result.m[0] = result.m[5] = result.m[10] = result.m[15] = 1.0f;
+            result.m[0] = result.m[5] = result.m[10] = result.m[15] = 1.0;
             return result;
         }
 
         /// Create translation matrix
-        static Transform4x4 translation(float tx, float ty, float tz) {
+        static Transform4x4 translation(double tx, double ty, double tz) {
             Transform4x4 result = identity();
             result.m[12] = tx;
             result.m[13] = ty;
@@ -51,7 +51,7 @@ namespace icp {
         }
 
         /// Create from rotation matrix (3x3, row-major) and translation vector
-        static Transform4x4 fromRotationTranslation(const float R[9], float tx, float ty, float tz) {
+        static Transform4x4 fromRotationTranslation(const double R[9], double tx, double ty, double tz) {
             Transform4x4 result;
             std::memset(result.m, 0, sizeof(result.m));
 
@@ -66,7 +66,7 @@ namespace icp {
             result.m[14] = tz;
 
             /// Homogeneous coordinate
-            result.m[15] = 1.0f;
+            result.m[15] = 1.0;
 
             return result;
         }
@@ -87,28 +87,28 @@ namespace icp {
         }
 
         /// Transform a 3D point: result = R * p + t
-        void transformPoint(float x, float y, float z, float& ox, float& oy, float& oz) const {
+        void transformPoint(double x, double y, double z, double& ox, double& oy, double& oz) const {
             ox = m[0] * x + m[4] * y + m[8] * z + m[12];
             oy = m[1] * x + m[5] * y + m[9] * z + m[13];
             oz = m[2] * x + m[6] * y + m[10] * z + m[14];
         }
 
         /// Transform a 3D point (in-place version)
-        void transformPointInPlace(float& x, float& y, float& z) const {
-            float ox, oy, oz;
+        void transformPointInPlace(double& x, double& y, double& z) const {
+            double ox, oy, oz;
             transformPoint(x, y, z, ox, oy, oz);
             x = ox; y = oy; z = oz;
         }
 
         /// Get rotation matrix (3x3, row-major)
-        void getRotation(float R[9]) const {
+        void getRotation(double R[9]) const {
             R[0] = m[0];  R[1] = m[4];  R[2] = m[8];
             R[3] = m[1];  R[4] = m[5];  R[5] = m[9];
             R[6] = m[2];  R[7] = m[6];  R[8] = m[10];
         }
 
         /// Get translation vector
-        void getTranslation(float& tx, float& ty, float& tz) const {
+        void getTranslation(double& tx, double& ty, double& tz) const {
             tx = m[12];
             ty = m[13];
             tz = m[14];
@@ -129,17 +129,17 @@ namespace icp {
             result.m[14] = -(result.m[2] * m[12] + result.m[6] * m[13] + result.m[10] * m[14]);
 
             /// Homogeneous part
-            result.m[3] = result.m[7] = result.m[11] = 0.0f;
-            result.m[15] = 1.0f;
+            result.m[3] = result.m[7] = result.m[11] = 0.0;
+            result.m[15] = 1.0;
 
             return result;
         }
 
         /// Calculate Frobenius norm of difference (for convergence check)
-        float distanceTo(const Transform4x4& other) const {
-            float sum = 0.0f;
+        double distanceTo(const Transform4x4& other) const {
+            double sum = 0.0;
             for (int i = 0; i < 16; ++i) {
-                float diff = m[i] - other.m[i];
+                double diff = m[i] - other.m[i];
                 sum += diff * diff;
             }
             return std::sqrt(sum);
@@ -156,13 +156,13 @@ namespace icp {
         int maxIterations = 50;
 
         /// Convergence threshold (transformation change)
-        float convergenceThreshold = 1e-6f;
+        double convergenceThreshold = 1e-6;
 
         /// Maximum distance for correspondence matching (meters)
-        float maxCorrespondenceDistance = 1.0f;
+        double maxCorrespondenceDistance = 1.0;
 
         /// Outlier rejection threshold (multiplier of MAD)
-        float outlierRejectionThreshold = 2.5f;
+        double outlierRejectionThreshold = 2.5;
 
         /// Downsample ratio for coarse alignment (1 = no downsampling)
         int downsampleRatio = 10;
@@ -171,13 +171,13 @@ namespace icp {
         bool useNormalFiltering = true;
 
         /// Normal angle threshold (degrees) for filtering
-        float normalAngleThreshold = 45.0f;
+        double normalAngleThreshold = 45.0;
 
         /// Minimum number of correspondences required
         int minCorrespondences = 100;
 
         /// Grid size for mesh pseudo-point generation (meters)
-        float pseudoPointGridSize = 0.1f;
+        double pseudoPointGridSize = 0.1;
 
         /// Enable verbose logging
         bool verbose = false;
@@ -185,13 +185,13 @@ namespace icp {
         /// Validate configuration
         bool isValid() const {
             return maxIterations > 0 &&
-                convergenceThreshold > 0.0f &&
-                maxCorrespondenceDistance > 0.0f &&
-                outlierRejectionThreshold > 0.0f &&
+                convergenceThreshold > 0.0 &&
+                maxCorrespondenceDistance > 0.0 &&
+                outlierRejectionThreshold > 0.0 &&
                 downsampleRatio >= 1 &&
-                normalAngleThreshold > 0.0f && normalAngleThreshold < 180.0f &&
+                normalAngleThreshold > 0.0 && normalAngleThreshold < 180.0 &&
                 minCorrespondences > 0 &&
-                pseudoPointGridSize > 0.0f;
+                pseudoPointGridSize > 0.0;
         }
     };
 
@@ -205,20 +205,20 @@ namespace icp {
         uint32_t chunk_id = 0;
 
         /// Source points (from point cloud) - [x, y, z]
-        std::vector<std::array<float, 3>> sourcePoints;
+        std::vector<std::array<double, 3>> sourcePoints;
 
         /// Target points (pseudo-points from mesh) - [x, y, z]
-        std::vector<std::array<float, 3>> targetPoints;
+        std::vector<std::array<double, 3>> targetPoints;
 
         /// Index indicating which face each point belongs to
         std::vector<size_t> faceIndices;
 
         /// Face normal vectors - [nx, ny, nz]
-        std::vector<std::array<float, 3>> faceNormals;
+        std::vector<std::array<double, 3>> faceNormals;
 
         /// Face representative points (one vertex per face) - [x, y, z]
-        std::vector<std::array<float, 3>> facePts;
-        
+        std::vector<std::array<double, 3>> facePts;
+
         /// Initial transformation (from coarse alignment)
         Transform4x4 initialTransform;
 
@@ -226,12 +226,12 @@ namespace icp {
         IcpConfig config;
 
         /// Bounding box of source points
-        float source_min_x = 0.0f, source_min_y = 0.0f, source_min_z = 0.0f;
-        float source_max_x = 0.0f, source_max_y = 0.0f, source_max_z = 0.0f;
+        double source_min_x = 0.0, source_min_y = 0.0, source_min_z = 0.0;
+        double source_max_x = 0.0, source_max_y = 0.0, source_max_z = 0.0;
 
         /// Bounding box of target points
-        float target_min_x = 0.0f, target_min_y = 0.0f, target_min_z = 0.0f;
-        float target_max_x = 0.0f, target_max_y = 0.0f, target_max_z = 0.0f;
+        double target_min_x = 0.0, target_min_y = 0.0, target_min_z = 0.0;
+        double target_max_x = 0.0, target_max_y = 0.0, target_max_z = 0.0;
 
         /// Default constructor
         IcpChunk() : initialTransform(Transform4x4::identity()) {}
@@ -275,10 +275,10 @@ namespace icp {
         /// Get approximate memory size in bytes
         size_t getApproximateSize() const {
             return sizeof(IcpChunk) +
-                sourcePoints.size() * sizeof(std::array<float, 3>) +
-                targetPoints.size() * sizeof(std::array<float, 3>) +
+                sourcePoints.size() * sizeof(std::array<double, 3>) +
+                targetPoints.size() * sizeof(std::array<double, 3>) +
                 faceIndices.size() * sizeof(size_t) +
-                faceNormals.size() * sizeof(std::array<float, 3>);
+                faceNormals.size() * sizeof(std::array<double, 3>);
         }
 
         /// Check if chunk has valid data for processing
@@ -305,10 +305,10 @@ namespace icp {
         Transform4x4 localTransform;
 
         /// Final Root Mean Square Error
-        float finalRMSE = 0.0f;
+        double finalRMSE = 0.0;
 
         /// Initial RMSE (before ICP iterations)
-        float initialRMSE = 0.0f;
+        double initialRMSE = 0.0;
 
         /// Number of iterations actually performed
         int actualIterations = 0;
@@ -340,13 +340,13 @@ namespace icp {
         }
 
         /// Get RMSE improvement ratio (0.0 ~ 1.0)
-        float getImprovementRatio() const {
-            if (initialRMSE <= 0.0f) return 0.0f;
+        double getImprovementRatio() const {
+            if (initialRMSE <= 0.0) return 0.0;
             return (initialRMSE - finalRMSE) / initialRMSE;
         }
 
         /// Check if result is good quality
-        bool isGood(float maxRMSE = 0.1f) const {
+        bool isGood(double maxRMSE = 0.1) const {
             return success && converged && finalRMSE < maxRMSE;
         }
     };
@@ -404,9 +404,9 @@ namespace icp {
         std::string bimFolderPath;
 
         /// LAS offset (applied after loading)
-        float offsetX = 0.0f;
-        float offsetY = 0.0f;
-        float offsetZ = 0.0f;
+        double offsetX = 0.0;
+        double offsetY = 0.0;
+        double offsetZ = 0.0;
 
         /// Output file path for aligned point cloud
         std::string outputPath;
@@ -422,7 +422,7 @@ namespace icp {
 
         /// Coarse alignment result (Phase 1)
         Transform4x4 coarseTransform;
-        float coarseRMSE = 0.0f;
+        double coarseRMSE = 0.0;
         bool coarseConverged = false;
 
         /// Chunk results (Phase 2)
@@ -433,7 +433,7 @@ namespace icp {
 
         /// Final aggregated result (Phase 3)
         Transform4x4 finalTransform;
-        float finalRMSE = 0.0f;
+        double finalRMSE = 0.0;
 
         /// Statistics
         size_t totalPointCount = 0;
@@ -459,6 +459,9 @@ namespace icp {
             : jobId(other.jobId)
             , lasFilePath(other.lasFilePath)
             , bimFolderPath(other.bimFolderPath)
+            , offsetX(other.offsetX)
+            , offsetY(other.offsetY)
+            , offsetZ(other.offsetZ)
             , outputPath(other.outputPath)
             , config(other.config)
             , status(other.status)
@@ -484,25 +487,25 @@ namespace icp {
         }
 
         /// Get progress percentage (0-100)
-        float getProgress() const {
+        double getProgress() const {
             switch (status) {
-            case IcpJobStatus::PENDING:           return 0.0f;
-            case IcpJobStatus::LOADING_DATA:      return 5.0f;
-            case IcpJobStatus::GENERATING_PSEUDO: return 10.0f;
-            case IcpJobStatus::COARSE_ALIGNMENT:  return 20.0f;
-            case IcpJobStatus::DISTRIBUTING:      return 25.0f;
+            case IcpJobStatus::PENDING:           return 0.0;
+            case IcpJobStatus::LOADING_DATA:      return 5.0;
+            case IcpJobStatus::GENERATING_PSEUDO: return 10.0;
+            case IcpJobStatus::COARSE_ALIGNMENT:  return 20.0;
+            case IcpJobStatus::DISTRIBUTING:      return 25.0;
             case IcpJobStatus::FINE_ALIGNMENT: {
-                if (totalChunks == 0) return 25.0f;
-                float chunkProgress = static_cast<float>(completedChunks) / totalChunks;
-                return 25.0f + chunkProgress * 60.0f; // 25% ~ 85%
+                if (totalChunks == 0) return 25.0;
+                double chunkProgress = static_cast<double>(completedChunks) / totalChunks;
+                return 25.0 + chunkProgress * 60.0; // 25% ~ 85%
             }
-            case IcpJobStatus::AGGREGATING:        return 90.0f;
-            case IcpJobStatus::APPLYING_TRANSFORM: return 95.0f;
-            case IcpJobStatus::SAVING_RESULT:      return 98.0f;
-            case IcpJobStatus::COMPLETED:          return 100.0f;
-            case IcpJobStatus::FAILED:             return 0.0f;
-            case IcpJobStatus::CANCELLED:          return 0.0f;
-            default:                               return 0.0f;
+            case IcpJobStatus::AGGREGATING:        return 90.0;
+            case IcpJobStatus::APPLYING_TRANSFORM: return 95.0;
+            case IcpJobStatus::SAVING_RESULT:      return 98.0;
+            case IcpJobStatus::COMPLETED:          return 100.0;
+            case IcpJobStatus::FAILED:             return 0.0;
+            case IcpJobStatus::CANCELLED:          return 0.0;
+            default:                               return 0.0;
             }
         }
 
@@ -542,19 +545,19 @@ namespace icp {
         size_t totalPseudoPoints = 0;
 
         /// Alignment statistics
-        float initialRMSE = 0.0f;
-        float coarseRMSE = 0.0f;
-        float finalRMSE = 0.0f;
-        float rmseImprovement = 0.0f; ///< percentage
+        double initialRMSE = 0.0;
+        double coarseRMSE = 0.0;
+        double finalRMSE = 0.0;
+        double rmseImprovement = 0.0; ///< percentage
 
         /// Iteration statistics
         int coarseIterations = 0;
         int totalFineIterations = 0;
-        int averageFineIterations = 0;
+        double averageFineIterations = 0.0;
 
         /// Correspondence statistics
         int totalCorrespondences = 0;
-        float averageCorrespondenceDistance = 0.0f;
+        double averageCorrespondenceDistance = 0.0;
 
         /// Chunk statistics
         int totalChunks = 0;
@@ -603,11 +606,11 @@ namespace icp {
             stats.totalCorrespondences = totalCorr;
 
             if (successCount > 0) {
-                stats.averageFineIterations = totalIter / successCount;
+                stats.averageFineIterations = static_cast<double>(totalIter) / successCount;
             }
 
-            if (stats.coarseRMSE > 0.0f) {
-                stats.rmseImprovement = (stats.coarseRMSE - stats.finalRMSE) / stats.coarseRMSE * 100.0f;
+            if (stats.coarseRMSE > 0.0) {
+                stats.rmseImprovement = (stats.coarseRMSE - stats.finalRMSE) / stats.coarseRMSE * 100.0;
             }
 
             stats.totalProcessingTimeSec = job.getElapsedTimeSec();

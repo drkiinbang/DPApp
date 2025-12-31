@@ -34,7 +34,7 @@
 #include "SSMMatrixd.h"
 #include "rotation.hpp"
 
-const double Rad2Sec = ((180.*3600.)/acos(-1.0));
+const double Rad2Sec = ((180. * 3600.) / acos(-1.0));
 const double Rad2Deg = ((180.) / acos(-1.0));
 const double minParamSd = 1.0e-9;
 const double maxParamSd = 1.0e+9;
@@ -45,11 +45,11 @@ namespace icp {
     // Point Cloud Adapter for nanoflann KD-Tree
     //=========================================================================
 
-    /// Adapter class for using std::vector<std::array<float,3>> with nanoflann
+    /// Adapter class for using std::vector<std::array<double,3>> with nanoflann
     struct PointCloudAdaptor {
-        const std::vector<std::array<float, 3>>& points;
+        const std::vector<std::array<double, 3>>& points;
 
-        explicit PointCloudAdaptor(const std::vector<std::array<float, 3>>& pts)
+        explicit PointCloudAdaptor(const std::vector<std::array<double, 3>>& pts)
             : points(pts) {
         }
 
@@ -59,15 +59,15 @@ namespace icp {
         }
 
         /// Squared distance between point p1 and point at index idx_p2
-        inline float kdtree_distance(const float* p1, const size_t idx_p2, size_t /*size*/) const {
-            const float d0 = p1[0] - points[idx_p2][0];
-            const float d1 = p1[1] - points[idx_p2][1];
-            const float d2 = p1[2] - points[idx_p2][2];
+        inline double kdtree_distance(const double* p1, const size_t idx_p2, size_t /*size*/) const {
+            const double d0 = p1[0] - points[idx_p2][0];
+            const double d1 = p1[1] - points[idx_p2][1];
+            const double d2 = p1[2] - points[idx_p2][2];
             return d0 * d0 + d1 * d1 + d2 * d2;
         }
 
         /// Get dim-th component of point at index idx
-        inline float kdtree_get_pt(const size_t idx, int dim) const {
+        inline double kdtree_get_pt(const size_t idx, int dim) const {
             return points[idx][dim];
         }
 
@@ -80,7 +80,7 @@ namespace icp {
 
     /// KD-Tree type definition using nanoflann
     using KdTree3D = nanoflann::KDTreeSingleIndexAdaptor<
-        nanoflann::L2_Simple_Adaptor<float, PointCloudAdaptor>,
+        nanoflann::L2_Simple_Adaptor<double, PointCloudAdaptor>,
         PointCloudAdaptor,
         3,      // dimensions
         size_t  // index type
@@ -94,13 +94,13 @@ namespace icp {
     struct Correspondence {
         size_t sourceIdx;
         size_t targetIdx;
-        float squaredDistance;
+        double squaredDistance;
     };
 
     struct CorrespondenceFace {
         size_t sourceIdx;
-        std::array<float, 3> facePt;
-        float squaredDistance;
+        std::array<double, 3> facePt;
+        double squaredDistance;
     };
 
     //=========================================================================
@@ -113,9 +113,9 @@ namespace icp {
     /// @param maxDistanceSquared Maximum squared distance for valid correspondence
     /// @param correspondences Output vector of correspondences
     inline void findCorrespondences(
-        const std::vector<std::array<float, 3>>& sourcePoints,
+        const std::vector<std::array<double, 3>>& sourcePoints,
         const KdTree3D& targetTree,
-        float maxDistanceSquared,
+        double maxDistanceSquared,
         std::vector<Correspondence>& correspondences)
     {
         correspondences.clear();
@@ -123,10 +123,10 @@ namespace icp {
 
         for (size_t i = 0; i < sourcePoints.size(); ++i) {
             size_t resultIndex = 0;
-            float resultDistSq = 0.0f;
+            double resultDistSq = 0.0;
 
             /// Find single nearest neighbor
-            nanoflann::KNNResultSet<float> resultSet(1);
+            nanoflann::KNNResultSet<double> resultSet(1);
             resultSet.init(&resultIndex, &resultDistSq);
 
             targetTree.findNeighbors(resultSet, sourcePoints[i].data(),
@@ -144,50 +144,48 @@ namespace icp {
     }
 
     inline bool pointPlaneDistanceAndProjection(
-        const std::array<float, 3>& P,
-        const std::array<float, 3>& Q,
-        const std::array<float, 3>& N,
+        const std::array<double, 3>& P,
+        const std::array<double, 3>& Q,
+        const std::array<double, 3>& N,
         double& distance,
-        std::array<float, 3>& proj)
+        std::array<double, 3>& proj)
     {
         constexpr double EPSILON_SQ = 1e-12;
-        double nlen2 = static_cast<double>(N[0]) * N[0] +
-            static_cast<double>(N[1]) * N[1] +
-            static_cast<double>(N[2]) * N[2];
+        double nlen2 = N[0] * N[0] + N[1] * N[1] + N[2] * N[2];
         if (nlen2 < EPSILON_SQ)
             return false;
 
-        double PQx = static_cast<double>(P[0]) - Q[0];
-        double PQy = static_cast<double>(P[1]) - Q[1];
-        double PQz = static_cast<double>(P[2]) - Q[2];
+        double PQx = P[0] - Q[0];
+        double PQy = P[1] - Q[1];
+        double PQz = P[2] - Q[2];
 
         double pqn_dot = PQx * N[0] + PQy * N[1] + PQz * N[2];
 
         distance = pqn_dot / std::sqrt(nlen2);
 
         double t = pqn_dot / nlen2;
-        proj[0] = static_cast<float>(P[0] - N[0] * t);
-        proj[1] = static_cast<float>(P[1] - N[1] * t);
-        proj[2] = static_cast<float>(P[2] - N[2] * t);
+        proj[0] = P[0] - N[0] * t;
+        proj[1] = P[1] - N[1] * t;
+        proj[2] = P[2] - N[2] * t;
         return true;
     }
 
     inline void findCorrespondencesWithNormals(
-        const std::vector<std::array<float, 3>>& sourcePoints,
+        const std::vector<std::array<double, 3>>& sourcePoints,
         const KdTree3D& targetTree,
         const std::vector<size_t>& faceIdx,
-        const std::vector<std::array<float, 3>>& allTargetNormals,
-        const std::vector<std::array<float, 3>>& allFacePts,
-        float maxDistanceSquared,
-        float maxAngleDeg,
+        const std::vector<std::array<double, 3>>& allTargetNormals,
+        const std::vector<std::array<double, 3>>& allFacePts,
+        double maxDistanceSquared,
+        double maxAngleDeg,
         std::vector<CorrespondenceFace>& correspondences)
     {
         correspondences.clear();
         correspondences.reserve(sourcePoints.size());
 
         /// Build point-wise arrays from face indices
-        std::vector<std::array<float, 3>> targetNormals(faceIdx.size());
-        std::vector<std::array<float, 3>> facePts(faceIdx.size());
+        std::vector<std::array<double, 3>> targetNormals(faceIdx.size());
+        std::vector<std::array<double, 3>> facePts(faceIdx.size());
         for (size_t i = 0; i < faceIdx.size(); ++i) {
             targetNormals[i] = allTargetNormals[faceIdx[i]];
             facePts[i] = allFacePts[faceIdx[i]];
@@ -195,9 +193,9 @@ namespace icp {
 
         for (size_t i = 0; i < sourcePoints.size(); ++i) {
             size_t resultIndex = 0;
-            float resultDistSq = 0.0f;
+            double resultDistSq = 0.0;
 
-            nanoflann::KNNResultSet<float> resultSet(1);
+            nanoflann::KNNResultSet<double> resultSet(1);
             resultSet.init(&resultIndex, &resultDistSq);
             targetTree.findNeighbors(resultSet, sourcePoints[i].data(),
                 nanoflann::SearchParams());
@@ -205,7 +203,7 @@ namespace icp {
             if (resultDistSq > maxDistanceSquared) continue;
 
             double distance;
-            std::array<float, 3> proj;
+            std::array<double, 3> proj;
 
             /// Point-to-Plane distance and projection
             if (!pointPlaneDistanceAndProjection(
@@ -219,20 +217,20 @@ namespace icp {
             CorrespondenceFace corr;
             corr.sourceIdx = i;
             corr.facePt = proj;
-            corr.squaredDistance = static_cast<float>(distance * distance);
+            corr.squaredDistance = distance * distance;
             correspondences.push_back(corr);
         }
     }
 
     /// Fastest version: Unit normal vector provided (|N| = 1)
     inline bool pointTriangleDistanceAndProjectionUnitN(
-        const std::array<float, 3>& P,
-        const std::array<float, 3>& v0,
-        const std::array<float, 3>& v1,
-        const std::array<float, 3>& v2,
-        const std::array<float, 3>& N,  /// Must be unit vector
+        const std::array<double, 3>& P,
+        const std::array<double, 3>& v0,
+        const std::array<double, 3>& v1,
+        const std::array<double, 3>& v2,
+        const std::array<double, 3>& N,  /// Must be unit vector
         double& distance,
-        std::array<float, 3>& proj)
+        std::array<double, 3>& proj)
     {
         constexpr double EPSILON_SQ = 1e-12;
         constexpr double EDGE_TOLERANCE = 1e-6;
@@ -277,29 +275,29 @@ namespace icp {
         distance = pvx * N[0] + pvy * N[1] + pvz * N[2];
 
         /// Projection: P - N * distance
-        proj[0] = static_cast<float>(P[0] - N[0] * distance);
-        proj[1] = static_cast<float>(P[1] - N[1] * distance);
-        proj[2] = static_cast<float>(P[2] - N[2] * distance);
+        proj[0] = P[0] - N[0] * distance;
+        proj[1] = P[1] - N[1] * distance;
+        proj[2] = P[2] - N[2] * distance;
 
         return true;
     }
 
     inline void findCorrespondencesWithNormals(
-        const std::vector<std::array<float, 3>>& sourcePoints,
+        const std::vector<std::array<double, 3>>& sourcePoints,
         const KdTree3D& targetTree,
         const std::vector<size_t>& faceIdx,
-        const std::vector<std::array<float, 3>>& allTargetNormals,
-        const std::vector<std::array<std::array<float, 3>, 3>>& allFaceVtx,
-        float maxDistanceSquared,
-        float maxAngleDeg,
+        const std::vector<std::array<double, 3>>& allTargetNormals,
+        const std::vector<std::array<std::array<double, 3>, 3>>& allFaceVtx,
+        double maxDistanceSquared,
+        double maxAngleDeg,
         std::vector<CorrespondenceFace>& correspondences)
     {
         correspondences.clear();
         correspondences.reserve(sourcePoints.size());
 
         /// Build point-wise arrays from face indices
-        std::vector<std::array<float, 3>> targetNormals(faceIdx.size());
-        std::vector<std::array<std::array<float, 3>, 3>> faceVtx(faceIdx.size());
+        std::vector<std::array<double, 3>> targetNormals(faceIdx.size());
+        std::vector<std::array<std::array<double, 3>, 3>> faceVtx(faceIdx.size());
         for (size_t i = 0; i < faceIdx.size(); ++i) {
             targetNormals[i] = allTargetNormals[faceIdx[i]];
             faceVtx[i] = allFaceVtx[faceIdx[i]];
@@ -307,9 +305,9 @@ namespace icp {
 
         for (size_t i = 0; i < sourcePoints.size(); ++i) {
             size_t resultIndex = 0;
-            float resultDistSq = 0.0f;
+            double resultDistSq = 0.0;
 
-            nanoflann::KNNResultSet<float> resultSet(1);
+            nanoflann::KNNResultSet<double> resultSet(1);
             resultSet.init(&resultIndex, &resultDistSq);
             targetTree.findNeighbors(resultSet, sourcePoints[i].data(),
                 nanoflann::SearchParams());
@@ -317,7 +315,7 @@ namespace icp {
             if (resultDistSq > maxDistanceSquared) continue;
 
             double distance;
-            std::array<float, 3> proj;
+            std::array<double, 3> proj;
 
             /// Point-to-Plane distance and projection
             if (!pointTriangleDistanceAndProjectionUnitN(
@@ -333,7 +331,7 @@ namespace icp {
             CorrespondenceFace corr;
             corr.sourceIdx = i;
             corr.facePt = proj;
-            corr.squaredDistance = static_cast<float>(distance * distance);
+            corr.squaredDistance = distance * distance;
             correspondences.push_back(corr);
         }
     }
@@ -347,38 +345,38 @@ namespace icp {
     /// @param threshold Multiplier for MAD (typically 2.0 - 3.0)
     inline void rejectOutliersMAD(
         std::vector<Correspondence>& correspondences,
-        float threshold)
+        double threshold)
     {
         if (correspondences.size() < 10) return;
 
         /// Extract distances
-        std::vector<float> distances;
+        std::vector<double> distances;
         distances.reserve(correspondences.size());
         for (const auto& c : correspondences) {
             distances.push_back(std::sqrt(c.squaredDistance));
         }
 
         /// Compute median
-        std::vector<float> sortedDist = distances;
+        std::vector<double> sortedDist = distances;
         std::sort(sortedDist.begin(), sortedDist.end());
-        const float median = sortedDist[sortedDist.size() / 2];
+        const double median = sortedDist[sortedDist.size() / 2];
 
         /// Compute MAD (Median Absolute Deviation)
-        std::vector<float> absDevs;
+        std::vector<double> absDevs;
         absDevs.reserve(distances.size());
-        for (float d : distances) {
+        for (double d : distances) {
             absDevs.push_back(std::abs(d - median));
         }
         std::sort(absDevs.begin(), absDevs.end());
-        const float mad = absDevs[absDevs.size() / 2];
+        const double mad = absDevs[absDevs.size() / 2];
 
         /// MAD to standard deviation approximation
-        const float madScale = 1.4826f;
-        const float sigma = mad * madScale;
+        const double madScale = 1.4826;
+        const double sigma = mad * madScale;
 
         /// Reject outliers beyond threshold * sigma from median
-        const float maxDist = median + threshold * sigma;
-        const float maxDistSq = maxDist * maxDist;
+        const double maxDist = median + threshold * sigma;
+        const double maxDistSq = maxDist * maxDist;
 
         correspondences.erase(
             std::remove_if(correspondences.begin(), correspondences.end(),
@@ -393,20 +391,20 @@ namespace icp {
     /// @param percentile Keep only correspondences below this percentile (0-100)
     inline void rejectOutliersPercentile(
         std::vector<Correspondence>& correspondences,
-        float percentile)
+        double percentile)
     {
         if (correspondences.size() < 10) return;
 
-        std::vector<float> distances;
+        std::vector<double> distances;
         distances.reserve(correspondences.size());
         for (const auto& c : correspondences) {
             distances.push_back(c.squaredDistance);
         }
         std::sort(distances.begin(), distances.end());
 
-        size_t idx = static_cast<size_t>((percentile / 100.0f) * distances.size());
+        size_t idx = static_cast<size_t>((percentile / 100.0) * distances.size());
         idx = (std::min)(idx, distances.size() - 1);
-        const float maxDistSq = distances[idx];
+        const double maxDistSq = distances[idx];
 
         correspondences.erase(
             std::remove_if(correspondences.begin(), correspondences.end(),
@@ -427,8 +425,8 @@ namespace icp {
     /// @param correspondences Point correspondences
     /// @return 4x4 transformation matrix
     inline Transform4x4 estimateRigidTransformSVD(
-        const std::vector<std::array<float, 3>>& sourcePoints,
-        const std::vector<std::array<float, 3>>& targetPoints,
+        const std::vector<std::array<double, 3>>& sourcePoints,
+        const std::vector<std::array<double, 3>>& targetPoints,
         const std::vector<Correspondence>& correspondences)
     {
         if (correspondences.size() < 3) {
@@ -438,31 +436,31 @@ namespace icp {
         const size_t n = correspondences.size();
 
         /// Compute centroids
-        Eigen::Vector3f srcCentroid = Eigen::Vector3f::Zero();
-        Eigen::Vector3f tgtCentroid = Eigen::Vector3f::Zero();
+        Eigen::Vector3d srcCentroid = Eigen::Vector3d::Zero();
+        Eigen::Vector3d tgtCentroid = Eigen::Vector3d::Zero();
 
         for (const auto& c : correspondences) {
             const auto& sp = sourcePoints[c.sourceIdx];
             const auto& tp = targetPoints[c.targetIdx];
-            srcCentroid += Eigen::Vector3f(sp[0], sp[1], sp[2]);
-            tgtCentroid += Eigen::Vector3f(tp[0], tp[1], tp[2]);
+            srcCentroid += Eigen::Vector3d(sp[0], sp[1], sp[2]);
+            tgtCentroid += Eigen::Vector3d(tp[0], tp[1], tp[2]);
         }
-        srcCentroid /= static_cast<float>(n);
-        tgtCentroid /= static_cast<float>(n);
+        srcCentroid /= static_cast<double>(n);
+        tgtCentroid /= static_cast<double>(n);
 
         /// Compute cross-covariance matrix H
-        Eigen::Matrix3f H = Eigen::Matrix3f::Zero();
+        Eigen::Matrix3d H = Eigen::Matrix3d::Zero();
 
         for (const auto& c : correspondences) {
             const auto& sp = sourcePoints[c.sourceIdx];
             const auto& tp = targetPoints[c.targetIdx];
 
-            Eigen::Vector3f srcCentered(
+            Eigen::Vector3d srcCentered(
                 sp[0] - srcCentroid.x(),
                 sp[1] - srcCentroid.y(),
                 sp[2] - srcCentroid.z());
 
-            Eigen::Vector3f tgtCentered(
+            Eigen::Vector3d tgtCentered(
                 tp[0] - tgtCentroid.x(),
                 tp[1] - tgtCentroid.y(),
                 tp[2] - tgtCentroid.z());
@@ -471,12 +469,12 @@ namespace icp {
         }
 
         /// SVD decomposition: H = U * S * V^T
-        Eigen::JacobiSVD<Eigen::Matrix3f, Eigen::ComputeFullU | Eigen::ComputeFullV> svd(H);
-        Eigen::Matrix3f U = svd.matrixU();
-        Eigen::Matrix3f V = svd.matrixV();
+        Eigen::JacobiSVD<Eigen::Matrix3d, Eigen::ComputeFullU | Eigen::ComputeFullV> svd(H);
+        Eigen::Matrix3d U = svd.matrixU();
+        Eigen::Matrix3d V = svd.matrixV();
 
         /// Rotation: R = V * U^T
-        Eigen::Matrix3f R = V * U.transpose();
+        Eigen::Matrix3d R = V * U.transpose();
 
         /// Ensure proper rotation (det(R) = 1, not -1 for reflection)
         if (R.determinant() < 0) {
@@ -485,10 +483,10 @@ namespace icp {
         }
 
         /// Translation: t = tgtCentroid - R * srcCentroid
-        Eigen::Vector3f t = tgtCentroid - R * srcCentroid;
+        Eigen::Vector3d t = tgtCentroid - R * srcCentroid;
 
         /// Build 4x4 transformation matrix
-        float rotMat[9];
+        double rotMat[9];
         for (int i = 0; i < 3; ++i) {
             for (int j = 0; j < 3; ++j) {
                 rotMat[i * 3 + j] = R(i, j);
@@ -505,17 +503,17 @@ namespace icp {
     /// Compute Root Mean Square Error from correspondences
     /// @param correspondences Correspondences with squared distances
     /// @return RMSE value
-    inline float computeRMSE(const std::vector<Correspondence>& correspondences)
+    inline double computeRMSE(const std::vector<Correspondence>& correspondences)
     {
         if (correspondences.empty()) {
-            return std::numeric_limits<float>::max();
+            return std::numeric_limits<double>::max();
         }
 
         double sum = 0.0;
         for (const auto& c : correspondences) {
             sum += c.squaredDistance;
         }
-        return static_cast<float>(std::sqrt(sum / correspondences.size()));
+        return std::sqrt(sum / correspondences.size());
     }
 
     /// Compute RMSE with transformation applied
@@ -524,14 +522,14 @@ namespace icp {
     /// @param correspondences Point correspondences
     /// @param transform Transformation to apply to source
     /// @return RMSE value after transformation
-    inline float computeRMSE(
-        const std::vector<std::array<float, 3>>& sourcePoints,
-        const std::vector<std::array<float, 3>>& targetPoints,
+    inline double computeRMSE(
+        const std::vector<std::array<double, 3>>& sourcePoints,
+        const std::vector<std::array<double, 3>>& targetPoints,
         const std::vector<Correspondence>& correspondences,
         const Transform4x4& transform)
     {
         if (correspondences.empty()) {
-            return std::numeric_limits<float>::max();
+            return std::numeric_limits<double>::max();
         }
 
         double sumSquaredError = 0.0;
@@ -541,17 +539,17 @@ namespace icp {
             const auto& tp = targetPoints[c.targetIdx];
 
             /// Transform source point
-            float tx, ty, tz;
+            double tx, ty, tz;
             transform.transformPoint(sp[0], sp[1], sp[2], tx, ty, tz);
 
             /// Compute squared distance
-            const float dx = tx - tp[0];
-            const float dy = ty - tp[1];
-            const float dz = tz - tp[2];
+            const double dx = tx - tp[0];
+            const double dy = ty - tp[1];
+            const double dz = tz - tp[2];
             sumSquaredError += dx * dx + dy * dy + dz * dz;
         }
 
-        return static_cast<float>(std::sqrt(sumSquaredError / correspondences.size()));
+        return std::sqrt(sumSquaredError / correspondences.size());
     }
 
     //=========================================================================
@@ -560,7 +558,7 @@ namespace icp {
 
     /// Apply transformation to point cloud in-place
     inline void transformPointCloud(
-        std::vector<std::array<float, 3>>& points,
+        std::vector<std::array<double, 3>>& points,
         const Transform4x4& transform)
     {
         for (auto& p : points) {
@@ -569,15 +567,15 @@ namespace icp {
     }
 
     /// Apply transformation to point cloud (copy version)
-    inline std::vector<std::array<float, 3>> transformPointCloudCopy(
-        const std::vector<std::array<float, 3>>& points,
+    inline std::vector<std::array<double, 3>> transformPointCloudCopy(
+        const std::vector<std::array<double, 3>>& points,
         const Transform4x4& transform)
     {
-        std::vector<std::array<float, 3>> result;
+        std::vector<std::array<double, 3>> result;
         result.reserve(points.size());
 
         for (const auto& p : points) {
-            float tx, ty, tz;
+            double tx, ty, tz;
             transform.transformPoint(p[0], p[1], p[2], tx, ty, tz);
             result.push_back({ tx, ty, tz });
         }
@@ -590,9 +588,9 @@ namespace icp {
 
     /// Downsample point cloud by uniform selection (every N-th point)
     inline bool downsampleUniform(
-        const std::vector<std::array<float, 3>>& points,
+        const std::vector<std::array<double, 3>>& points,
         const std::vector<size_t>& faceIdx,
-        std::vector<std::array<float, 3>>& downPts,
+        std::vector<std::array<double, 3>>& downPts,
         std::vector<size_t>& downFaceIdx,
         int ratio)
     {
@@ -611,11 +609,11 @@ namespace icp {
     }
 
     /// Downsample point cloud by uniform selection (every N-th point)
-    inline std::vector<std::array<float, 3>> downsampleUniform(
-        const std::vector<std::array<float, 3>>& points,
+    inline std::vector<std::array<double, 3>> downsampleUniform(
+        const std::vector<std::array<double, 3>>& points,
         int ratio)
     {
-        std::vector<std::array<float, 3>> downPts;
+        std::vector<std::array<double, 3>> downPts;
 
         if (ratio <= 1) return downPts;
 
@@ -633,16 +631,16 @@ namespace icp {
     /// @param points Input point cloud
     /// @param voxelSize Size of each voxel
     /// @return Downsampled point cloud (voxel centroids)
-    inline std::vector<std::array<float, 3>> downsampleVoxelGrid(
-        const std::vector<std::array<float, 3>>& points,
-        float voxelSize)
+    inline std::vector<std::array<double, 3>> downsampleVoxelGrid(
+        const std::vector<std::array<double, 3>>& points,
+        double voxelSize)
     {
-        if (points.empty() || voxelSize <= 0.0f) return points;
+        if (points.empty() || voxelSize <= 0.0) return points;
 
         /// Find bounding box
-        float minX = points[0][0], maxX = points[0][0];
-        float minY = points[0][1], maxY = points[0][1];
-        float minZ = points[0][2], maxZ = points[0][2];
+        double minX = points[0][0], maxX = points[0][0];
+        double minY = points[0][1], maxY = points[0][1];
+        double minZ = points[0][2], maxZ = points[0][2];
 
         for (const auto& p : points) {
             if (p[0] < minX) minX = p[0]; if (p[0] > maxX) maxX = p[0];
@@ -675,16 +673,16 @@ namespace icp {
         }
 
         /// Extract centroids
-        std::vector<std::array<float, 3>> result;
+        std::vector<std::array<double, 3>> result;
         result.reserve(voxelMap.size());
 
         for (const auto& kv : voxelMap) {
             const auto& sum = kv.second.first;
             const size_t count = kv.second.second;
             result.push_back({
-                static_cast<float>(sum[0] / count),
-                static_cast<float>(sum[1] / count),
-                static_cast<float>(sum[2] / count)
+                sum[0] / count,
+                sum[1] / count,
+                sum[2] / count
                 });
         }
 
@@ -698,32 +696,32 @@ namespace icp {
     /// Reject outliers using MAD for CorrespondenceFace (Point-to-Plane)
     inline void rejectOutliersMAD(
         std::vector<CorrespondenceFace>& correspondences,
-        float threshold)
+        double threshold)
     {
         if (correspondences.size() < 10) return;
 
-        std::vector<float> distances;
+        std::vector<double> distances;
         distances.reserve(correspondences.size());
         for (const auto& c : correspondences) {
             distances.push_back(std::sqrt(c.squaredDistance));
         }
 
-        std::vector<float> sortedDist = distances;
+        std::vector<double> sortedDist = distances;
         std::sort(sortedDist.begin(), sortedDist.end());
-        const float median = sortedDist[sortedDist.size() / 2];
+        const double median = sortedDist[sortedDist.size() / 2];
 
-        std::vector<float> absDevs;
+        std::vector<double> absDevs;
         absDevs.reserve(distances.size());
-        for (float d : distances) {
+        for (double d : distances) {
             absDevs.push_back(std::abs(d - median));
         }
         std::sort(absDevs.begin(), absDevs.end());
-        const float mad = absDevs[absDevs.size() / 2];
+        const double mad = absDevs[absDevs.size() / 2];
 
-        const float madScale = 1.4826f;
-        const float sigma = mad * madScale;
-        const float maxDist = median + threshold * sigma;
-        const float maxDistSq = maxDist * maxDist;
+        const double madScale = 1.4826;
+        const double sigma = mad * madScale;
+        const double maxDist = median + threshold * sigma;
+        const double maxDistSq = maxDist * maxDist;
 
         correspondences.erase(
             std::remove_if(correspondences.begin(), correspondences.end(),
@@ -738,17 +736,17 @@ namespace icp {
     //=========================================================================
 
     /// Compute RMSE from CorrespondenceFace (Point-to-Plane distance)
-    inline float computeRMSE(const std::vector<CorrespondenceFace>& correspondences)
+    inline double computeRMSE(const std::vector<CorrespondenceFace>& correspondences)
     {
         if (correspondences.empty()) {
-            return std::numeric_limits<float>::max();
+            return std::numeric_limits<double>::max();
         }
 
         double sum = 0.0;
         for (const auto& c : correspondences) {
             sum += c.squaredDistance;
         }
-        return static_cast<float>(std::sqrt(sum / correspondences.size()));
+        return std::sqrt(sum / correspondences.size());
     }
 
     //=========================================================================
@@ -757,10 +755,10 @@ namespace icp {
 
     /// Estimate rigid transformation using Point-to-Plane linearized method
     inline Transform4x4 estimateRigidTransformPointToPlane(
-        const std::vector<std::array<float, 3>>& sourcePoints,
+        const std::vector<std::array<double, 3>>& sourcePoints,
         const std::vector<CorrespondenceFace>& correspondences,
         const std::vector<size_t>& faceIdx,
-        const std::vector<std::array<float, 3>>& allFaceNormals)
+        const std::vector<std::array<double, 3>>& allFaceNormals)
     {
         if (correspondences.size() < 6) {
             return Transform4x4::identity();
@@ -768,21 +766,21 @@ namespace icp {
 
         const size_t n = correspondences.size();
 
-        Eigen::MatrixXf A(n, 6);
-        Eigen::VectorXf b(n);
+        Eigen::MatrixXd A(n, 6);
+        Eigen::VectorXd b(n);
 
         for (size_t i = 0; i < n; ++i) {
             const auto& corr = correspondences[i];
             const auto& s = sourcePoints[corr.sourceIdx];
             const auto& p = corr.facePt;
 
-            float dx = s[0] - p[0];
-            float dy = s[1] - p[1];
-            float dz = s[2] - p[2];
-            float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+            double dx = s[0] - p[0];
+            double dy = s[1] - p[1];
+            double dz = s[2] - p[2];
+            double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
 
-            float nx, ny, nz;
-            if (dist > 1e-10f) {
+            double nx, ny, nz;
+            if (dist > 1e-10) {
                 nx = dx / dist;
                 ny = dy / dist;
                 nz = dz / dist;
@@ -791,7 +789,7 @@ namespace icp {
                 nx = 0; ny = 0; nz = 1;
             }
 
-            float sx = s[0], sy = s[1], sz = s[2];
+            double sx = s[0], sy = s[1], sz = s[2];
 
             A(i, 0) = nx;
             A(i, 1) = ny;
@@ -804,17 +802,17 @@ namespace icp {
         }
 
         /// Solve using SVD least squares (BDCSVD for newer Eigen)
-        Eigen::BDCSVD<Eigen::MatrixXf, Eigen::ComputeThinU | Eigen::ComputeThinV> svd(A);
-        Eigen::VectorXf x = svd.solve(b);
+        Eigen::BDCSVD<Eigen::MatrixXd, Eigen::ComputeThinU | Eigen::ComputeThinV> svd(A);
+        Eigen::VectorXd x = svd.solve(b);
 
-        float tx = x(0), ty = x(1), tz = x(2);
-        float rx = x(3), ry = x(4), rz = x(5);
+        double tx = x(0), ty = x(1), tz = x(2);
+        double rx = x(3), ry = x(4), rz = x(5);
 
-        float cx = std::cos(rx), sx_r = std::sin(rx);
-        float cy = std::cos(ry), sy = std::sin(ry);
-        float cz = std::cos(rz), sz = std::sin(rz);
+        double cx = std::cos(rx), sx_r = std::sin(rx);
+        double cy = std::cos(ry), sy = std::sin(ry);
+        double cz = std::cos(rz), sz = std::sin(rz);
 
-        Eigen::Matrix3f R;
+        Eigen::Matrix3d R;
         R(0, 0) = cy * cz;
         R(0, 1) = cz * sx_r * sy - cx * sz;
         R(0, 2) = sx_r * sz + cx * cz * sy;
@@ -825,7 +823,7 @@ namespace icp {
         R(2, 1) = cy * sx_r;
         R(2, 2) = cx * cy;
 
-        float rotMat[9];
+        double rotMat[9];
         for (int i = 0; i < 3; ++i) {
             for (int j = 0; j < 3; ++j) {
                 rotMat[i * 3 + j] = R(i, j);
@@ -835,7 +833,7 @@ namespace icp {
         return Transform4x4::fromRotationTranslation(rotMat, tx, ty, tz);
     }
 
-    inline void calDiscrepancy(const std::array<float, 3>& src, const std::array<float, 3>& tar, const std::array<double, 6>& params, math::Matrixd& ai, math::Matrixd& yi)
+    inline void calDiscrepancy(const std::array<double, 3>& src, const std::array<double, 3>& tar, const std::array<double, 6>& params, math::Matrixd& ai, math::Matrixd& yi)
     {
         math::Matrixd GA(3, 1), GB(3, 1);
 
@@ -851,7 +849,7 @@ namespace icp {
         auto RGA = R % GA;
 
         auto dRdO = math::getPartial_dRdO(params[3], params[4], params[5]);
-        auto Partial_O = dRdO% GA;
+        auto Partial_O = dRdO % GA;
 
         auto dRdP = math::getPartial_dRdP(params[3], params[4], params[5]);
         auto Partial_P = dRdP % GA;
@@ -901,10 +899,10 @@ namespace icp {
     };
 
     inline RETVAL_NLLS estimateRigidTransformPointToPlane_NLLS(
-        const std::vector<std::array<float, 3>>& sourcePoints,
+        const std::vector<std::array<double, 3>>& sourcePoints,
         const std::vector<CorrespondenceFace>& correspondences,
         const std::vector<size_t>& faceIdx,
-        const std::vector<std::array<float, 3>>& allFaceNormals,
+        const std::vector<std::array<double, 3>>& allFaceNormals,
         const std::array<double, 6>& params0,
         const std::array<double, 6>& paramsSd)
     {
@@ -921,16 +919,16 @@ namespace icp {
 
         const size_t n = correspondences.size();
 
-        Eigen::MatrixXf A(n, 6);
-        Eigen::VectorXf b(n);
-        
+        Eigen::MatrixXd A(n, 6);
+        Eigen::VectorXd b(n);
+
         math::Matrixd N(6, 6, 0.);
         math::Matrixd C(6, 1, 0.);
         math::Matrixd ai(3, 6);
         math::Matrixd yi(3, 1);
         const size_t numEqs = n;
         double etpe = 0.;
-        
+
         for (size_t i = 0; i < n; ++i) {
             const auto& corr = correspondences[i];
             const auto& s = sourcePoints[corr.sourceIdx];
@@ -948,7 +946,7 @@ namespace icp {
             C += ci;
         }
 
-        for (size_t i = 0; i < 6; ++i) {            
+        for (size_t i = 0; i < 6; ++i) {
             if (paramsSd[i] <= minParamSd) {
                 for (size_t j = 0; j < 6; ++j) {
                     if (i == j) {
@@ -979,6 +977,8 @@ namespace icp {
 #ifdef _DEBUG
         std::cout << "[N mat]\n";
         std::cout << math::matrixout(N) << "\n";
+        std::cout << "[Ninv mat]\n";
+        std::cout << math::matrixout(Ninv) << "\n";
         std::cout << "[C mat]\n";
         std::cout << math::matrixout(C) << "\n";
         std::cout << "[X mat]\n";
@@ -993,7 +993,7 @@ namespace icp {
         }
 
         retval.var = etpe / (numEqs - 6);
-        retval.varX = Ninv * retval.var;        
+        retval.varX = Ninv * retval.var;
 
         return retval;
     }
@@ -1001,10 +1001,10 @@ namespace icp {
     /// [ToDo]
     /// CorrespondenceFace, need it, all of them???
     inline Transform4x4 runLSM(
-        const std::vector<std::array<float, 3>>& sourcePoints,
+        const std::vector<std::array<double, 3>>& sourcePoints,
         const std::vector<CorrespondenceFace>& correspondences,
         const std::vector<size_t>& faceIdx,
-        const std::vector<std::array<float, 3>>& allFaceNormals,
+        const std::vector<std::array<double, 3>>& allFaceNormals,
         const std::array<double, 6>& params0,
         const double sdThr,
         const unsigned int maxIter)
@@ -1019,8 +1019,8 @@ namespace icp {
         for (size_t i = 0; i < correspondences.size(); ++i) {
             auto srcIdx = correspondences[i].sourceIdx;
             for (size_t j = 0; j < 3; ++j) {
-                sumTar[j] += static_cast<double>(correspondences[i].facePt[j]);                
-                sumSrc[j] += static_cast<double>(sourcePoints[srcIdx][j]);                
+                sumTar[j] += correspondences[i].facePt[j];
+                sumSrc[j] += sourcePoints[srcIdx][j];
             }
         }
 
@@ -1050,7 +1050,7 @@ namespace icp {
                 paramsSd);
 
             ILOG << "[ICP] Iter " << (iter + 1) << ": T(" << retval.params[0] << ", " << retval.params[1] << ", " << retval.params[2] << ")" \
-            << " R(" << retval.params[3] * Rad2Deg << ", " << retval.params[4] * Rad2Deg << ", " << retval.params[5] * Rad2Deg << ")deg";
+                << " R(" << retval.params[3] * Rad2Deg << ", " << retval.params[4] * Rad2Deg << ", " << retval.params[5] * Rad2Deg << ")deg";
 
             std::cout << "[Correlation]\n";
             std::cout << math::matrixout(retval.Correlation);
@@ -1058,25 +1058,25 @@ namespace icp {
             std::cout << "[X_VarCov]\n";
             std::cout << math::matrixout(retval.varX);
             std::cout << "[X sd]\n";
-            for(unsigned int i = 0; i < 6; ++i)
+            for (unsigned int i = 0; i < 6; ++i)
                 std::cout << sqrt(retval.varX(i, 0)) << "\n";
 
             if (fabs(preSd - sqrt(retval.var)) < sdThr) {
                 continueIter = false;
             }
 
-            ++ iter;
+            ++iter;
 
         } while (iter < maxIter && continueIter);
 
-        float tx = retval.params[0], ty = retval.params[1], tz = retval.params[2];
-        float rx = retval.params[3], ry = retval.params[4], rz = retval.params[5];
+        double tx = retval.params[0], ty = retval.params[1], tz = retval.params[2];
+        double rx = retval.params[3], ry = retval.params[4], rz = retval.params[5];
 
-        float cx = std::cos(rx), sx_r = std::sin(rx);
-        float cy = std::cos(ry), sy = std::sin(ry);
-        float cz = std::cos(rz), sz = std::sin(rz);
+        double cx = std::cos(rx), sx_r = std::sin(rx);
+        double cy = std::cos(ry), sy = std::sin(ry);
+        double cz = std::cos(rz), sz = std::sin(rz);
 
-        Eigen::Matrix3f R;
+        Eigen::Matrix3d R;
         R(0, 0) = cy * cz;
         R(0, 1) = cz * sx_r * sy - cx * sz;
         R(0, 2) = sx_r * sz + cx * cz * sy;
@@ -1087,7 +1087,7 @@ namespace icp {
         R(2, 1) = cy * sx_r;
         R(2, 2) = cx * cy;
 
-        float rotMat[9];
+        double rotMat[9];
         for (int i = 0; i < 3; ++i) {
             for (int j = 0; j < 3; ++j) {
                 rotMat[i * 3 + j] = R(i, j);
@@ -1144,12 +1144,12 @@ namespace icp {
         Transform4x4 accumulatedLocalTransform = Transform4x4::identity();
 
         /// Copy source points for transformation
-        std::vector<std::array<float, 3>> transformedSource = chunk.sourcePoints;
+        std::vector<std::array<double, 3>> transformedSource = chunk.sourcePoints;
         transformPointCloud(transformedSource, currentTransform);
 
-        const float maxDistSq = config.maxCorrespondenceDistance *
+        const double maxDistSq = config.maxCorrespondenceDistance *
             config.maxCorrespondenceDistance;
-        float prevRMSE = std::numeric_limits<float>::max();
+        double prevRMSE = std::numeric_limits<double>::max();
 
         /// =====================================================
         /// Point-to-Plane ICP
@@ -1202,7 +1202,7 @@ namespace icp {
                     chunk.faceIndices, chunk.faceNormals);
 #ifdef _DEBUG
                 /// [ToDo]: config
-                std::array<double, 6> params0 = {0., 0., 0., 0., 0., 0.};
+                std::array<double, 6> params0 = { 0., 0., 0., 0., 0., 0. };
                 double sdThr = 0.000001;
                 unsigned int maxIter = 50;
                 Transform4x4 deltaT2 = runLSM(
@@ -1214,31 +1214,31 @@ namespace icp {
 #ifdef _DEBUG
                 {
                     /// Extract translation
-                    float tx = deltaT.m[12];
-                    float ty = deltaT.m[13];
-                    float tz = deltaT.m[14];
+                    double tx = deltaT.m[12];
+                    double ty = deltaT.m[13];
+                    double tz = deltaT.m[14];
 
                     /// Extract rotation angles from rotation matrix (Euler angles)
                     /// R = Rz * Ry * Rx (ZYX convention)
-                    float r00 = deltaT.m[0], r01 = deltaT.m[4], r02 = deltaT.m[8];
-                    float r10 = deltaT.m[1], r11 = deltaT.m[5], r12 = deltaT.m[9];
-                    float r20 = deltaT.m[2], r21 = deltaT.m[6], r22 = deltaT.m[10];
+                    double r00 = deltaT.m[0], r01 = deltaT.m[4], r02 = deltaT.m[8];
+                    double r10 = deltaT.m[1], r11 = deltaT.m[5], r12 = deltaT.m[9];
+                    double r20 = deltaT.m[2], r21 = deltaT.m[6], r22 = deltaT.m[10];
 
-                    float pitch = std::asin(-r20);  /// ry (Y rotation)
-                    float yaw, roll;
+                    double pitch = std::asin(-r20);  /// ry (Y rotation)
+                    double yaw, roll;
 
-                    if (std::abs(r20) < 0.99999f) {
+                    if (std::abs(r20) < 0.99999) {
                         yaw = std::atan2(r10, r00);   /// rz (Z rotation)
                         roll = std::atan2(r21, r22);  /// rx (X rotation)
                     }
                     else {
                         /// Gimbal lock
                         yaw = std::atan2(-r01, r11);
-                        roll = 0.0f;
+                        roll = 0.0;
                     }
 
                     /// Convert to degrees
-                    const float rad2deg = 180.0f / 3.14159265f;
+                    const double rad2deg = 180.0 / 3.14159265;
                     roll *= rad2deg;
                     pitch *= rad2deg;
                     yaw *= rad2deg;
@@ -1256,10 +1256,10 @@ namespace icp {
                     transformedSource, targetTree, chunk.faceIndices,
                     chunk.faceNormals, chunk.facePts,
                     maxDistSq, config.normalAngleThreshold, correspondences);
-                float currentRMSE = computeRMSE(correspondences);
+                double currentRMSE = computeRMSE(correspondences);
 
                 /// 6. Check convergence
-                float transformChange = currentTransform.distanceTo(deltaT * currentTransform);
+                double transformChange = currentTransform.distanceTo(deltaT * currentTransform);
                 currentTransform = deltaT * currentTransform;
 
                 result.actualIterations = iter + 1;
@@ -1325,10 +1325,10 @@ namespace icp {
 
                 /// 5. Compute RMSE
                 findCorrespondences(transformedSource, targetTree, maxDistSq, correspondences);
-                float currentRMSE = computeRMSE(correspondences);
+                double currentRMSE = computeRMSE(correspondences);
 
                 /// 6. Check convergence
-                float transformChange = currentTransform.distanceTo(deltaT * currentTransform);
+                double transformChange = currentTransform.distanceTo(deltaT * currentTransform);
                 currentTransform = deltaT * currentTransform;
 
                 result.actualIterations = iter + 1;
@@ -1373,7 +1373,7 @@ namespace icp {
         /// Filter successful results
         std::vector<const IcpResult*> validResults;
         for (const auto& r : results) {
-            if (r.success && r.finalRMSE > 0.0f) {
+            if (r.success && r.finalRMSE > 0.0) {
                 validResults.push_back(&r);
             }
         }
@@ -1387,10 +1387,10 @@ namespace icp {
         }
 
         /// Compute weights (inverse RMSE)
-        std::vector<float> weights;
-        float totalWeight = 0.0f;
+        std::vector<double> weights;
+        double totalWeight = 0.0;
         for (const auto* r : validResults) {
-            float w = 1.0f / (r->finalRMSE + 1e-6f);
+            double w = 1.0 / (r->finalRMSE + 1e-6);
             weights.push_back(w);
             totalWeight += w;
         }
@@ -1400,27 +1400,27 @@ namespace icp {
         std::memset(result.m, 0, sizeof(result.m));
 
         for (size_t i = 0; i < validResults.size(); ++i) {
-            float w = weights[i] / totalWeight;
+            double w = weights[i] / totalWeight;
             for (int j = 0; j < 16; ++j) {
                 result.m[j] += w * validResults[i]->transform.m[j];
             }
         }
 
         /// Re-orthogonalize rotation matrix using SVD
-        Eigen::Matrix3f R;
+        Eigen::Matrix3d R;
         R << result.m[0], result.m[4], result.m[8],
             result.m[1], result.m[5], result.m[9],
             result.m[2], result.m[6], result.m[10];
 
-        Eigen::JacobiSVD<Eigen::Matrix3f, Eigen::ComputeFullU | Eigen::ComputeFullV> svd(R);
+        Eigen::JacobiSVD<Eigen::Matrix3d, Eigen::ComputeFullU | Eigen::ComputeFullV> svd(R);
         R = svd.matrixU() * svd.matrixV().transpose();
 
         result.m[0] = R(0, 0); result.m[4] = R(0, 1); result.m[8] = R(0, 2);
         result.m[1] = R(1, 0); result.m[5] = R(1, 1); result.m[9] = R(1, 2);
         result.m[2] = R(2, 0); result.m[6] = R(2, 1); result.m[10] = R(2, 2);
 
-        result.m[3] = result.m[7] = result.m[11] = 0.0f;
-        result.m[15] = 1.0f;
+        result.m[3] = result.m[7] = result.m[11] = 0.0;
+        result.m[15] = 1.0;
 
         return result;
     }
@@ -1431,7 +1431,7 @@ namespace icp {
     inline const IcpResult* selectBestResult(const std::vector<IcpResult>& results)
     {
         const IcpResult* best = nullptr;
-        float bestRMSE = std::numeric_limits<float>::max();
+        double bestRMSE = std::numeric_limits<double>::max();
 
         for (const auto& r : results) {
             if (r.success && r.finalRMSE < bestRMSE) {

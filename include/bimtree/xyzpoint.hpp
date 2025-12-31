@@ -8,33 +8,33 @@ namespace pctree
 {
 	struct XYZPoint
 	{
-		float xyz[3];
+		double xyz[3];
 
-		inline float x() const { return xyz[0]; }
-		inline float y() const { return xyz[1]; }
-		inline float z() const { return xyz[2]; }
+		inline double x() const { return xyz[0]; }
+		inline double y() const { return xyz[1]; }
+		inline double z() const { return xyz[2]; }
 
 		/// Ids of corresponding faces
 		std::vector<size_t> fIds;
 
 		XYZPoint(const XYZPoint& val) { copy(val); }
 		XYZPoint() { xyz[0] = xyz[1] = xyz[2] = 0.0; };
-		XYZPoint(const float x, const float y, const float z) { xyz[0] = x; xyz[1] = y; xyz[2] = z; };
-		XYZPoint(const float x, const float y, const float z, const size_t fId) { xyz[0] = x; xyz[1] = y; xyz[2] = z; fIds.push_back(fId); };
-		
+		XYZPoint(const double x, const double y, const double z) { xyz[0] = x; xyz[1] = y; xyz[2] = z; };
+		XYZPoint(const double x, const double y, const double z, const size_t fId) { xyz[0] = x; xyz[1] = y; xyz[2] = z; fIds.push_back(fId); };
+
 		inline XYZPoint& operator=(const XYZPoint& val) { copy(val); return *this; }
-		inline float& operator[](const int idx) { return xyz[idx]; }
-		inline const float& operator[](const int idx) const { return xyz[idx]; }
+		inline double& operator[](const int idx) { return xyz[idx]; }
+		inline const double& operator[](const int idx) const { return xyz[idx]; }
 		inline bool operator==(const XYZPoint& pt) const { return pt.xyz[0] == xyz[0] && pt.xyz[1] == xyz[1] && pt.xyz[2] == xyz[2]; }
 		inline bool operator!=(const XYZPoint& pt) const { return pt.xyz[0] != xyz[0] || pt.xyz[1] != xyz[1] || pt.xyz[2] != xyz[2]; }
 		inline XYZPoint operator+(const XYZPoint& pt) const { return XYZPoint(xyz[0] + pt.xyz[0], xyz[1] + pt.xyz[1], xyz[2] + pt.xyz[2]); }
 		inline XYZPoint& operator+=(const XYZPoint& pt) { for (int i = 0; i < 3; i++) xyz[i] += pt.xyz[i]; return *this; }
 		inline XYZPoint operator-(const XYZPoint& pt) const { XYZPoint temp(xyz[0] - pt.xyz[0], xyz[1] - pt.xyz[1], xyz[2] - pt.xyz[2]); return temp; }
 		inline XYZPoint& operator-=(const XYZPoint& pt) { for (int i = 0; i < 3; i++) xyz[i] -= pt.xyz[i]; return *this; }
-		inline XYZPoint operator*(const float s) const { return XYZPoint(xyz[0] * s, xyz[1] * s, xyz[2] * s); }
-		inline XYZPoint& operator*=(const float s) { for (int i = 0; i < 3; i++) xyz[i] *= s; return *this; }
+		inline XYZPoint operator*(const double s) const { return XYZPoint(xyz[0] * s, xyz[1] * s, xyz[2] * s); }
+		inline XYZPoint& operator*=(const double s) { for (int i = 0; i < 3; i++) xyz[i] *= s; return *this; }
 		/// inner product
-		inline float operator*(const XYZPoint& pt) const { return (this->xyz[0] * pt.xyz[0] + this->xyz[1] * pt.xyz[1] + this->xyz[2] * pt.xyz[2]); }
+		inline double operator*(const XYZPoint& pt) const { return (this->xyz[0] * pt.xyz[0] + this->xyz[1] * pt.xyz[1] + this->xyz[2] * pt.xyz[2]); }
 		/// cross product
 		inline XYZPoint operator%(const XYZPoint& pt) const {
 			XYZPoint ret;
@@ -43,22 +43,19 @@ namespace pctree
 			ret[2] = this->xyz[0] * pt.xyz[1] - this->xyz[1] * pt.xyz[0];
 			return ret;
 		}
-		inline XYZPoint operator/(const float s) const { return XYZPoint(xyz[0] / s, xyz[1] / s, xyz[2] / s); }
-		inline XYZPoint& operator/=(const float s) { for (int i = 0; i < 3; i++) xyz[i] /= s; return *this; }
-		inline XYZPoint normalize() 
-		{ 
-			double x = this->xyz[0];
-			double y = this->xyz[1];
-			double z = this->xyz[2];
-			double sum2 = x * x + y * y + z * z;
+		inline XYZPoint operator/(const double s) const { return XYZPoint(xyz[0] / s, xyz[1] / s, xyz[2] / s); }
+		inline XYZPoint& operator/=(const double s) { for (int i = 0; i < 3; i++) xyz[i] /= s; return *this; }
+		inline XYZPoint normalize() const
+		{
+			double sum2 = xyz[0] * xyz[0] + xyz[1] * xyz[1] + xyz[2] * xyz[2];
 			if (sum2 > std::numeric_limits<double>::epsilon()) {
 				double length = sqrt(sum2);
-				return XYZPoint(static_cast<float>(x/length), static_cast<float>(y / length), static_cast<float>(z / length));
+				return XYZPoint(xyz[0] / length, xyz[1] / length, xyz[2] / length);
 			}
 			else
 				return XYZPoint(*this);
 		}
-		inline float getSquareSum() const { return (this->xyz[0] * this->xyz[0] + this->xyz[1] * this->xyz[1] + this->xyz[2] * this->xyz[2]); }
+		inline double getSquareSum() const { return (this->xyz[0] * this->xyz[0] + this->xyz[1] * this->xyz[1] + this->xyz[2] * this->xyz[2]); }
 
 	private:
 		inline void copy(const XYZPoint& val) {
@@ -76,9 +73,9 @@ namespace pctree
 		pctree::XYZPoint operator % (const pctree::XYZPoint& p) const
 		{
 			pctree::XYZPoint retval;
-			retval.xyz[0] = static_cast<float>(r[0] * static_cast<double>(p.xyz[0]) + r[1] * static_cast<double>(p.xyz[1]) + r[2] * static_cast<double>(p.xyz[2]));
-			retval.xyz[1] = static_cast<float>(r[3] * static_cast<double>(p.xyz[0]) + r[4] * static_cast<double>(p.xyz[1]) + r[5] * static_cast<double>(p.xyz[2]));
-			retval.xyz[2] = static_cast<float>(r[6] * static_cast<double>(p.xyz[0]) + r[7] * static_cast<double>(p.xyz[1]) + r[8] * static_cast<double>(p.xyz[2]));
+			retval.xyz[0] = r[0] * p.xyz[0] + r[1] * p.xyz[1] + r[2] * p.xyz[2];
+			retval.xyz[1] = r[3] * p.xyz[0] + r[4] * p.xyz[1] + r[5] * p.xyz[2];
+			retval.xyz[2] = r[6] * p.xyz[0] + r[7] * p.xyz[1] + r[8] * p.xyz[2];
 
 			return retval;
 		}
@@ -110,4 +107,3 @@ namespace pctree
 		}
 	};
 }
-

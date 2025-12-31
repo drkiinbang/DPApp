@@ -9,31 +9,31 @@
 
 
 namespace chunkbim {
-	struct FaceVtx {
-		pctree::XYZPoint normal;
+    struct FaceVtx {
+        pctree::XYZPoint normal;
         pctree::XYZPoint vertices[3];
 
-		FaceVtx() = default;
-		FaceVtx(
-			const pctree::XYZPoint vertex0,
-			const pctree::XYZPoint vertex1,
-			const pctree::XYZPoint vertex2,
-			const pctree::XYZPoint& n)
-			: normal(n) {
+        FaceVtx() = default;
+        FaceVtx(
+            const pctree::XYZPoint vertex0,
+            const pctree::XYZPoint vertex1,
+            const pctree::XYZPoint vertex2,
+            const pctree::XYZPoint& n)
+            : normal(n) {
             vertices[0] = vertex0;
             vertices[1] = vertex1;
             vertices[2] = vertex2;
-		}
-	};
+        }
+    };
 
-	struct MeshChunk {
-		std::vector<FaceVtx> faces;
-		std::string name;
-		int id;
+    struct MeshChunk {
+        std::vector<FaceVtx> faces;
+        std::string name;
+        int id;
 
         /// Bounding box
-        float min_x, min_y, min_z;
-        float max_x, max_y, max_z;
+        double min_x, min_y, min_z;
+        double max_x, max_y, max_z;
 
         void calculateBounds() {
             if (faces.empty()) {
@@ -58,7 +58,7 @@ namespace chunkbim {
                 }
             }
         }
-	};
+    };
 }
 
 namespace chunkpc {
@@ -96,13 +96,13 @@ namespace chunkpc {
             min_z = max_z = points[0][2];
 
             for (const auto& point : points) {
-                min_x = (std::min)(min_x, static_cast<double>(point[0]));
-                min_y = (std::min)(min_y, static_cast<double>(point[1]));
-                min_z = (std::min)(min_z, static_cast<double>(point[2]));
+                min_x = (std::min)(min_x, point[0]);
+                min_y = (std::min)(min_y, point[1]);
+                min_z = (std::min)(min_z, point[2]);
 
-                max_x = (std::max)(max_x, static_cast<double>(point[0]));
-                max_y = (std::max)(max_y, static_cast<double>(point[1]));
-                max_z = (std::max)(max_z, static_cast<double>(point[2]));
+                max_x = (std::max)(max_x, point[0]);
+                max_y = (std::max)(max_y, point[1]);
+                max_z = (std::max)(max_z, point[2]);
             }
         }
 
