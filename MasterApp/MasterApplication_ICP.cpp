@@ -564,24 +564,24 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
         auto coarseSource = icp::downsampleUniform(sourcePoints, coarseDownsampleRatio);
 
         /// Downsample for coarse alignment: BIM points
-        std::vector<size_t> coarseIdx;
-        std::vector<std::array<float, 3>> coarseTarget;
-        if (!icp::downsampleUniform(pseudoFacePoints, pseudoFaceIdx, coarseTarget, coarseIdx, coarseDownsampleRatio)) {
-            throw std::runtime_error("Error from downsampleUniform");
-        }
+        //std::vector<size_t> coarseIdx;
+        //std::vector<std::array<double, 3>> coarseTarget;
+        //if (!icp::downsampleUniform(pseudoFacePoints, pseudoFaceIdx, coarseTarget, coarseIdx, coarseDownsampleRatio)) {
+        //    throw std::runtime_error("Error from downsampleUniform");
+        //}
 
-        ILOG << "[ICP] Coarse alignment: " << coarseSource.size() << " vs " << coarseTarget.size() << " points";
+        ILOG << "[ICP] Coarse alignment(pc vs pseudo bim pts): " << coarseSource.size() << " vs " << pseudoFacePoints.size() << " points";
 
         /// Create coarse chunk
         icp::IcpChunk coarseChunk;
         coarseChunk.chunk_id = 0;
         coarseChunk.sourcePoints = std::move(coarseSource);
-        coarseChunk.targetPoints = std::move(coarseTarget);
-        coarseChunk.faceIndices = std::move(coarseIdx);
+        coarseChunk.targetPoints = std::move(pseudoFacePoints);
+        coarseChunk.faceIndices = std::move(pseudoFaceIdx);
         coarseChunk.faceNormals = targetNormals;
         coarseChunk.facePts = facePts;
         coarseChunk.config = job->config;
-        coarseChunk.config.maxCorrespondenceDistance *= 2.0f;  /// Larger distance for coarse
+        coarseChunk.config.maxCorrespondenceDistance *= 2.0;  /// Larger distance for coarse
 
         /// Run coarse ICP
         icp::IcpResult coarseResult = icp::runIcp(coarseChunk, job->cancelRequested);
@@ -619,20 +619,20 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
         auto fineSource = icp::downsampleUniform(alignedSource, job->config.downsampleRatio);
 
         /// Downsample for fine alignment (less aggressive): BIM points
-        std::vector<size_t> fineIdx;
-        std::vector<std::array<float, 3>> fineTarget;
-        if (!icp::downsampleUniform(pseudoFacePoints, pseudoFaceIdx, fineTarget, fineIdx, job->config.downsampleRatio)) {
-            throw std::runtime_error("Error from downsampleUniform: fine");
-        }
+        //std::vector<size_t> fineIdx;
+        //std::vector<std::array<double, 3>> fineTarget;
+        //if (!icp::downsampleUniform(pseudoFacePoints, pseudoFaceIdx, fineTarget, fineIdx, job->config.downsampleRatio)) {
+        //    throw std::runtime_error("Error from downsampleUniform: fine");
+        //}
 
-        ILOG << "[ICP] Fine alignment: " << fineSource.size() << " vs " << fineTarget.size() << " points";
+        ILOG << "[ICP] Fine alignment(pc vs pseudo bim pts): " << fineSource.size() << " vs " << pseudoFacePoints.size() << " points";
 
         /// Create fine chunk
         icp::IcpChunk fineChunk;
         fineChunk.chunk_id = 0;
         fineChunk.sourcePoints = std::move(fineSource);
-        fineChunk.targetPoints = std::move(fineTarget);
-        fineChunk.faceIndices = std::move(fineIdx);
+        fineChunk.targetPoints = std::move(pseudoFacePoints);
+        fineChunk.faceIndices = std::move(pseudoFaceIdx);
         fineChunk.faceNormals = targetNormals;
         fineChunk.facePts = facePts;
         fineChunk.config = job->config;
