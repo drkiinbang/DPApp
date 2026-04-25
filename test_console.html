@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DPApp II - 원격 테스트 콘솔</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+<style>
+body { background:#0d1117; color:#e6edf3; font-size:14px; }
+.navbar { background:#161b22; border-bottom:1px solid #30363d; }
+.card { background:#161b22; border:1px solid #30363d; border-radius:8px; }
+.nav-tabs { border-color:#30363d; }
+.nav-tabs .nav-link { color:#8b949e; border-color:transparent; }
+.nav-tabs .nav-link.active { background:#161b22; color:#58a6ff; border-color:#30363d #30363d #161b22; }
+.nav-tabs .nav-link:hover { color:#e6edf3; border-color:#30363d #30363d transparent; }
+.form-control,.form-select { background:#0d1117; border:1px solid #30363d; color:#e6edf3; }
+.form-control:focus,.form-select:focus { background:#0d1117; border-color:#58a6ff; color:#e6edf3; box-shadow:none; }
+.input-group-text { background:#21262d; border-color:#30363d; color:#8b949e; }
+.form-check-input { background-color:#21262d; border-color:#30363d; }
+.form-check-input:checked { background-color:#238636; border-color:#238636; }
+.status-dot { width:9px; height:9px; border-radius:50%; display:inline-block; }
+.dot-green { background:#3fb950; box-shadow:0 0 4px #3fb950; }
+.dot-red { background:#f85149; }
+.dot-yellow { background:#d29922; box-shadow:0 0 4px #d29922; }
+.section-hdr { color:#58a6ff; font-size:.85rem; font-weight:600; border-bottom:1px solid #21262d; padding-bottom:.4rem; margin-bottom:.8rem; }
+.log-box { background:#010409; font-family:'Consolas',monospace; font-size:.72rem; height:180px; overflow-y:auto; border:1px solid #21262d; border-radius:4px; padding:8px; }
+.log-box .l-info { color:#58a6ff; }
+.log-box .l-ok   { color:#3fb950; }
+.log-box .l-err  { color:#f85149; }
+.log-box .l-warn { color:#d29922; }
+.mini-card { background:#21262d; border-radius:6px; padding:10px 14px; margin-bottom:8px; border:1px solid #30363d; }
+.job-card { background:#21262d; border:1px solid #30363d; border-radius:6px; padding:12px; margin-bottom:10px; border-left-width:3px; }
+.job-card.completed { border-left-color:#238636; }
+.job-card.failed    { border-left-color:#da3633; }
+.job-card.running   { border-left-color:#d29922; }
+.job-card.pending   { border-left-color:#58a6ff; }
+.job-card.cancelled { border-left-color:#6e7681; }
+.progress { background:#21262d; border-radius:4px; }
+.table-dark { --bs-table-bg:#161b22; --bs-table-border-color:#30363d; --bs-table-striped-bg:#1c2128; }
+.table { color:#e6edf3; }
+th { color:#8b949e !important; font-weight:500; font-size:.8rem; }
+td { font-size:.82rem; }
+code { color:#79c0ff; background:#21262d; padding:1px 5px; border-radius:3px; font-size:.8rem; }
+.matrix-tbl td { font-family:monospace; font-size:.78rem; padding:2px 8px; text-align:right; color:#f0883e; }
+pre.log-box { white-space:pre-wrap; word-break:break-all; }
+.btn-xs { padding:.1rem .4rem; font-size:.72rem; }
+</style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark px-3 py-2">
+  <span class="navbar-brand fw-bold mb-0">
+    <i class="bi bi-diagram-3 text-info me-2"></i>DPApp II
+    <small class="text-muted fw-normal fs-6 ms-2">원격 테스트 콘솔</small>
+  </span>
+  <div class="d-flex align-items-center gap-3 ms-auto">
+    <span id="g-status"><span class="status-dot dot-red me-1"></span><small class="text-muted">연결 안됨</small></span>
+    <small class="text-muted" id="clock"></small>
+  </div>
+</nav>
+
+<div class="container-fluid p-3">
+
+<!-- ── Connection Bar ── -->
+<div class="card p-3 mb-3">
+  <div class="row g-2 align-items-end">
+    <div class="col-md-2">
+      <label class="form-label small text-muted mb-1">Master IP</label>
+      <input id="c-ip" class="form-control form-control-sm" value="localhost">
+    </div>
+    <div class="col-md-1">
+      <label class="form-label small text-muted mb-1">Launcher</label>
+      <input id="c-lp" class="form-control form-control-sm" type="number" value="8090">
+    </div>
+    <div class="col-md-1">
+      <label class="form-label small text-muted mb-1">REST API</label>
+      <input id="c-rp" class="form-control form-control-sm" type="number" value="8081">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small text-muted mb-1">SlaveAgent IP</label>
+      <input id="c-sip" class="form-control form-control-sm" value="localhost">
+    </div>
+    <div class="col-md-1">
+      <label class="form-label small text-muted mb-1">Agent Port</label>
+      <input id="c-ap" class="form-control form-control-sm" type="number" value="8092">
+    </div>
+    <div class="col-md-2">
+      <button class="btn btn-outline-info btn-sm w-100" onclick="checkAll()">
+        <i class="bi bi-wifi me-1"></i>연결 확인
+      </button>
+    </div>
+    <div class="col-md-3 d-flex gap-3 align-items-center">
+      <small><span class="status-dot dot-red me-1" id="d-lnc"></span>Launcher</small>
+      <small><span class="status-dot dot-red me-1" id="d-mst"></span>MasterApp</small>
+      <small><span class="status-dot dot-red me-1" id="d-agt"></span>SlaveAgent</small>
+    </div>
+  </div>
+</div>
+
+<!-- ── Tabs ── -->
+<ul class="nav nav-tabs mb-3" id="tabs">
+  <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#t-launch"><i class="bi bi-power me-1"></i>MasterLauncher</a></li>
+  <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#t-icp"><i class="bi bi-arrows-angle-contract me-1"></i>ICP 정합</a></li>
+  <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#t-agents"><i class="bi bi-pc-display-horizontal me-1"></i>Agent / Slave</a></li>
+  <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#t-tasks"><i class="bi bi-list-task me-1"></i>작업 목록</a></li>
+  <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#t-status"><i class="bi bi-activity me-1"></i>시스템 상태</a></li>
+</ul>
+
+<div class="tab-content">
+
+<!-- ══════════ TAB 1: MASTERLAUNCHER ══════════ -->
+<div class="tab-pane fade show active" id="t-launch">
+  <div class="row g-3">
+    <div class="col-md-5">
+      <div class="card p-3">
+        <div class="section-hdr"><i class="bi bi-server me-2"></i>MasterApp 원격 제어</div>
+        <div class="row g-2 mb-3">
+          <div class="col-6">
+            <label class="form-label small text-muted mb-1">TCP Port</label>
+            <input id="l-sp" class="form-control form-control-sm" type="number" value="8080">
+          </div>
+          <div class="col-6">
+            <label class="form-label small text-muted mb-1">REST Port</label>
+            <input id="l-ap" class="form-control form-control-sm" type="number" value="8081">
+          </div>
+        </div>
+        <div class="d-flex gap-2 mb-3">
+          <button class="btn btn-success btn-sm flex-fill" onclick="lAction('start')"><i class="bi bi-play-fill me-1"></i>시작</button>
+          <button class="btn btn-warning btn-sm flex-fill" onclick="lAction('restart')"><i class="bi bi-arrow-clockwise me-1"></i>재시작</button>
+          <button class="btn btn-danger btn-sm flex-fill" onclick="lAction('stop')"><i class="bi bi-stop-fill me-1"></i>정지</button>
+        </div>
+        <button class="btn btn-outline-secondary btn-sm" onclick="getLStatus()"><i class="bi bi-arrow-repeat me-1"></i>상태 새로고침</button>
+      </div>
+    </div>
+    <div class="col-md-7">
+      <div class="card p-3">
+        <div class="section-hdr"><i class="bi bi-info-circle me-2"></i>Launcher / MasterApp 상태</div>
+        <div id="l-status-box"><small class="text-muted">연결 확인 후 표시됩니다.</small></div>
+      </div>
+    </div>
+    <div class="col-12">
+      <div class="card p-3">
+        <div class="section-hdr"><i class="bi bi-terminal me-2"></i>응답 로그</div>
+        <div class="log-box" id="l-log"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ TAB 2: ICP ══════════ -->
+<div class="tab-pane fade" id="t-icp">
+  <div class="row g-3">
+    <div class="col-md-5">
+      <div class="card p-3">
+        <div class="section-hdr"><i class="bi bi-play-circle me-2"></i>ICP 작업 시작</div>
+
+        <label class="form-label small text-muted mb-1">LAS 파일 경로 (서버 기준)</label>
+        <input id="icp-las" class="form-control form-control-sm mb-2" placeholder="C:/data/scan.las">
+
+        <label class="form-label small text-muted mb-1">BIM 폴더 경로 (서버 기준)</label>
+        <input id="icp-bim" class="form-control form-control-sm mb-2" placeholder="C:/data/bim_chunks/">
+
+        <label class="form-label small text-muted mb-1">출력 경로 (선택)</label>
+        <input id="icp-out" class="form-control form-control-sm mb-3" placeholder="C:/data/output/">
+
+        <a class="small text-muted" data-bs-toggle="collapse" href="#icp-cfg" style="cursor:pointer;">
+          <i class="bi bi-sliders me-1"></i>고급 설정 펼치기
+        </a>
+        <div class="collapse mt-2" id="icp-cfg">
+          <div class="mini-card">
+            <div class="row g-2">
+              <div class="col-6">
+                <label class="form-label small text-muted mb-1">최대 반복 횟수</label>
+                <input id="icp-iter" class="form-control form-control-sm" type="number" placeholder="50">
+              </div>
+              <div class="col-6">
+                <label class="form-label small text-muted mb-1">수렴 임계값</label>
+                <input id="icp-conv" class="form-control form-control-sm" type="number" step="0.0001" placeholder="0.001">
+              </div>
+              <div class="col-6">
+                <label class="form-label small text-muted mb-1">최대 대응 거리 (m)</label>
+                <input id="icp-dist" class="form-control form-control-sm" type="number" step="0.1" placeholder="2.0">
+              </div>
+              <div class="col-6">
+                <label class="form-label small text-muted mb-1">다운샘플 비율</label>
+                <input id="icp-ds" class="form-control form-control-sm" type="number" min="1" placeholder="1">
+              </div>
+              <div class="col-12">
+                <label class="form-label small text-muted mb-1">Pseudo 포인트 그리드 크기 (m)</label>
+                <input id="icp-grid" class="form-control form-control-sm" type="number" step="0.01" placeholder="0.1">
+              </div>
+              <div class="col-12">
+                <label class="form-label small text-muted mb-1">초기 오프셋 (dx / dy / dz)</label>
+                <div class="row g-1">
+                  <div class="col-4"><input id="icp-dx" class="form-control form-control-sm" type="number" step="any" placeholder="dx"></div>
+                  <div class="col-4"><input id="icp-dy" class="form-control form-control-sm" type="number" step="any" placeholder="dy"></div>
+                  <div class="col-4"><input id="icp-dz" class="form-control form-control-sm" type="number" step="any" placeholder="dz"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <button class="btn btn-primary btn-sm w-100 mt-3" onclick="startIcp()">
+          <i class="bi bi-play-fill me-1"></i>ICP 작업 시작
+        </button>
+      </div>
+    </div>
+
+    <div class="col-md-7">
+      <div class="card p-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="section-hdr mb-0"><i class="bi bi-list-ul me-2"></i>ICP 작업 목록</div>
+          <button class="btn btn-outline-secondary btn-sm btn-xs" onclick="loadJobs()"><i class="bi bi-arrow-repeat"></i></button>
+        </div>
+        <div id="jobs-list"><small class="text-muted">작업 없음</small></div>
+      </div>
+    </div>
+
+    <div class="col-12" id="icp-detail-panel" style="display:none;">
+      <div class="card p-3">
+        <div class="section-hdr"><i class="bi bi-clipboard-data me-2 text-success"></i>ICP 결과 상세</div>
+        <div id="icp-detail-body"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ TAB 3: AGENTS & SLAVES ══════════ -->
+<div class="tab-pane fade" id="t-agents">
+  <div class="row g-3">
+    <div class="col-md-6">
+      <div class="card p-3">
+        <div class="section-hdr"><i class="bi bi-hdd-network me-2"></i>등록된 Agent (MasterApp 기준)</div>
+        <div class="row g-2 mb-2">
+          <div class="col-5"><input id="ag-host" class="form-control form-control-sm" placeholder="Agent IP"></div>
+          <div class="col-3"><input id="ag-port" class="form-control form-control-sm" type="number" value="8092"></div>
+          <div class="col-4"><button class="btn btn-success btn-sm w-100" onclick="addAgent()"><i class="bi bi-plus me-1"></i>추가</button></div>
+        </div>
+        <div id="agents-list"><small class="text-muted">없음</small></div>
+        <div class="d-flex gap-2 mt-2">
+          <button class="btn btn-outline-success btn-sm flex-fill" onclick="agentsStartSlaves()"><i class="bi bi-play-fill me-1"></i>모두 Slave 시작</button>
+          <button class="btn btn-outline-danger btn-sm flex-fill" onclick="agentsStopSlaves()"><i class="bi bi-stop-fill me-1"></i>모두 Slave 정지</button>
+        </div>
+        <button class="btn btn-outline-secondary btn-sm mt-2 w-100" onclick="loadAgents()"><i class="bi bi-arrow-repeat me-1"></i>새로고침</button>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card p-3">
+        <div class="section-hdr"><i class="bi bi-cpu me-2"></i>연결된 Slave (MasterApp 기준)</div>
+        <div id="slaves-list"><small class="text-muted">없음</small></div>
+        <div class="d-flex gap-2 mt-2">
+          <button class="btn btn-outline-warning btn-sm flex-fill" onclick="slavesAll('pause')"><i class="bi bi-pause-fill me-1"></i>일시정지</button>
+          <button class="btn btn-outline-success btn-sm flex-fill" onclick="slavesAll('resume')"><i class="bi bi-play-fill me-1"></i>재개</button>
+          <button class="btn btn-outline-danger btn-sm flex-fill" onclick="slavesAll('shutdown')"><i class="bi bi-stop-fill me-1"></i>전체 종료</button>
+        </div>
+        <button class="btn btn-outline-secondary btn-sm mt-2 w-100" onclick="loadSlaves()"><i class="bi bi-arrow-repeat me-1"></i>새로고침</button>
+      </div>
+    </div>
+
+    <div class="col-12">
+      <div class="card p-3">
+        <div class="section-hdr"><i class="bi bi-terminal me-2"></i>SlaveAgent 직접 제어 (포트 8092)</div>
+        <div class="row g-2 align-items-end">
+          <div class="col-md-3">
+            <label class="form-label small text-muted mb-1">Master 주소</label>
+            <input id="sa-mip" class="form-control form-control-sm" placeholder="Master IP">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label small text-muted mb-1">Master TCP Port</label>
+            <input id="sa-mp" class="form-control form-control-sm" type="number" value="8080">
+          </div>
+          <div class="col-md-2">
+            <button class="btn btn-success btn-sm w-100" onclick="saStartSlave()"><i class="bi bi-play me-1"></i>Slave 시작</button>
+          </div>
+          <div class="col-md-2">
+            <button class="btn btn-danger btn-sm w-100" onclick="saStopAll()"><i class="bi bi-stop me-1"></i>전체 정지</button>
+          </div>
+          <div class="col-md-2">
+            <button class="btn btn-outline-info btn-sm w-100" onclick="saStatus()"><i class="bi bi-info-circle me-1"></i>상태 조회</button>
+          </div>
+        </div>
+        <div class="log-box mt-2" id="sa-log"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ TAB 4: TASKS ══════════ -->
+<div class="tab-pane fade" id="t-tasks">
+  <div class="row g-3">
+    <div class="col-12">
+      <div class="card p-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="section-hdr mb-0"><i class="bi bi-list-task me-2"></i>작업 목록</div>
+          <div class="d-flex gap-2">
+            <button class="btn btn-outline-secondary btn-sm" onclick="loadTasks()"><i class="bi bi-arrow-repeat me-1"></i>새로고침</button>
+            <button class="btn btn-outline-danger btn-sm" onclick="clearTasks()"><i class="bi bi-trash me-1"></i>완료 작업 삭제</button>
+          </div>
+        </div>
+        <div id="tasks-summary" class="mb-2"></div>
+        <div class="table-responsive">
+          <table class="table table-dark table-sm table-hover mb-0">
+            <thead><tr><th>Task ID</th><th>Chunk ID</th><th>유형</th><th>상태</th><th>할당 Slave</th></tr></thead>
+            <tbody id="tasks-tbody"><tr><td colspan="5" class="text-center text-muted py-3">데이터 없음</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-5">
+      <div class="card p-3">
+        <div class="section-hdr"><i class="bi bi-folder-open me-2"></i>파일 로드</div>
+        <label class="form-label small text-muted mb-1">파일명</label>
+        <input id="fl-name" class="form-control form-control-sm mb-2" placeholder="scan.las">
+        <label class="form-label small text-muted mb-1">작업 유형</label>
+        <select id="fl-type" class="form-select form-select-sm mb-3">
+          <option value="ICP">ICP</option>
+          <option value="CLASSIFICATION">CLASSIFICATION</option>
+        </select>
+        <button class="btn btn-primary btn-sm w-100" onclick="fileLoad()"><i class="bi bi-upload me-1"></i>로드 & 처리 시작</button>
+      </div>
+    </div>
+
+    <div class="col-md-7">
+      <div class="card p-3">
+        <div class="section-hdr"><i class="bi bi-save me-2"></i>결과 조회 / 저장</div>
+        <label class="form-label small text-muted mb-1">저장 파일명</label>
+        <input id="rs-name" class="form-control form-control-sm mb-2" placeholder="result.las">
+        <div class="d-flex gap-2 mb-2">
+          <button class="btn btn-success btn-sm flex-fill" onclick="saveRes()"><i class="bi bi-save me-1"></i>저장</button>
+          <button class="btn btn-outline-info btn-sm flex-fill" onclick="getRes()"><i class="bi bi-eye me-1"></i>결과 조회</button>
+        </div>
+        <div id="res-display"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ TAB 5: STATUS ══════════ -->
+<div class="tab-pane fade" id="t-status">
+  <div class="row g-3">
+    <div class="col-6 col-md-3">
+      <div class="card p-3 text-center">
+        <div class="fs-2 fw-bold text-info" id="st-slaves">-</div>
+        <div class="small text-muted">연결된 Slave</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card p-3 text-center">
+        <div class="fs-2 fw-bold text-warning" id="st-active">-</div>
+        <div class="small text-muted">진행중 작업</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card p-3 text-center">
+        <div class="fs-2 fw-bold text-success" id="st-done">-</div>
+        <div class="small text-muted">완료 작업</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card p-3 text-center">
+        <div class="fs-2 fw-bold text-danger" id="st-fail">-</div>
+        <div class="small text-muted">실패 작업</div>
+      </div>
+    </div>
+
+    <div class="col-12">
+      <div class="card p-3">
+        <div class="section-hdr"><i class="bi bi-bar-chart me-2"></i>전체 진행률</div>
+        <div class="progress mb-2" style="height:22px;">
+          <div id="prog-bar" class="progress-bar bg-success progress-bar-striped progress-bar-animated" style="width:0%">0%</div>
+        </div>
+        <div class="row text-center mt-1">
+          <div class="col"><small class="text-muted">대기</small><br><b id="pg-pend">-</b></div>
+          <div class="col"><small class="text-muted">처리중</small><br><b id="pg-act">-</b></div>
+          <div class="col"><small class="text-muted">완료</small><br><b id="pg-done">-</b></div>
+          <div class="col"><small class="text-muted">실패</small><br><b id="pg-fail">-</b></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12">
+      <div class="card p-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="section-hdr mb-0"><i class="bi bi-code-square me-2"></i>MasterApp 상태 (JSON)</div>
+          <div class="d-flex gap-2 align-items-center">
+            <div class="form-check form-switch mb-0">
+              <input class="form-check-input" type="checkbox" id="auto-toggle" checked onchange="toggleAuto()">
+              <label class="form-check-label small text-muted" for="auto-toggle">자동 (3s)</label>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm btn-xs" onclick="loadStatus()"><i class="bi bi-arrow-repeat"></i></button>
+          </div>
+        </div>
+        <pre class="log-box" id="status-raw" style="height:300px;"></pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /tab-content -->
+</div><!-- /container -->
+
+<!-- Toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+  <div id="toast" class="toast align-items-center text-white border-0" role="alert">
+    <div class="d-flex">
+      <div class="toast-body" id="toast-body"></div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+// ── Helpers ──────────────────────────────────────────────
+const $  = id => document.getElementById(id);
+const val = id => $(id).value.trim();
+
+const lBase = () => `http://${val('c-ip')}:${val('c-lp')}`;
+const mBase = () => `http://${val('c-ip')}:${val('c-rp')}`;
+const aBase = () => `http://${val('c-sip')}:${val('c-ap')}`;
+
+async function api(base, path, method='GET', body=null) {
+  const opt = { method, headers:{'Content-Type':'application/json'} };
+  if (body) opt.body = JSON.stringify(body);
+  try {
+    const r = await fetch(base + path, opt);
+    const txt = await r.text();
+    let data; try { data = JSON.parse(txt); } catch { data = txt; }
+    return { ok: r.ok, status: r.status, data };
+  } catch(e) {
+    return { ok: false, status: 0, data: { error: e.message } };
+  }
+}
+
+function toast(msg, type='info') {
+  const t = $('toast'), b = $('toast-body');
+  b.textContent = msg;
+  t.className = `toast align-items-center text-white border-0 bg-${type==='error'?'danger':type==='success'?'success':'info'}`;
+  new bootstrap.Toast(t, {delay:3000}).show();
+}
+
+function addLog(id, msg, cls='l-info') {
+  const el = $(id);
+  const d = document.createElement('div');
+  d.className = cls;
+  d.textContent = `[${new Date().toLocaleTimeString('ko-KR')}] ${msg}`;
+  el.appendChild(d);
+  el.scrollTop = el.scrollHeight;
+}
+
+function dot(id, color) {
+  const el = $(id);
+  if (el) el.className = `status-dot dot-${color} me-1`;
+}
+
+function badge(status) {
+  const map = {
+    running:['success','실행중'], stopped:['secondary','정지'], active:['success','활성'],
+    busy:['warning','처리중'], pending:['primary','대기'], completed:['success','완료'],
+    failed:['danger','실패'], timeout:['danger','타임아웃'], cancelled:['secondary','취소됨'],
+    true:['success','온라인'], false:['secondary','오프라인']
+  };
+  const s = String(status).toLowerCase();
+  const [c,l] = map[s] || ['secondary', status];
+  return `<span class="badge bg-${c}">${l}</span>`;
+}
+
+setInterval(() => { $('clock').textContent = new Date().toLocaleTimeString('ko-KR'); }, 1000);
+
+// ── Connection ────────────────────────────────────────────
+async function checkAll() {
+  [['d-lnc', lBase()], ['d-mst', mBase()], ['d-agt', aBase()]].forEach(async ([id, base]) => {
+    const r = await api(base, '/api/health');
+    dot(id, r.ok ? 'green' : 'red');
+  });
+  setTimeout(getLStatus, 500);
+}
+
+// ── Launcher ──────────────────────────────────────────────
+async function getLStatus() {
+  const r = await api(lBase(), '/api/status');
+  if (!r.ok) {
+    $('l-status-box').innerHTML = `<small class="text-danger">연결 실패: ${r.data?.error||r.status}</small>`;
+    addLog('l-log', 'Status 실패: ' + JSON.stringify(r.data), 'l-err');
+    return;
+  }
+  const d = r.data.data || {};
+  const mst = d.master || {};
+  $('l-status-box').innerHTML = `
+    <table class="table table-dark table-sm mb-0">
+      <tr><td class="text-muted">Launcher</td><td>${badge('running')} 포트 ${d.launcher?.port||'-'}</td></tr>
+      <tr><td class="text-muted">MasterApp</td><td>${badge(mst.running?'running':'stopped')}
+        ${mst.running ? `<small class="ms-2 text-muted">PID ${mst.pid} | TCP ${mst.server_port} | REST ${mst.api_port}</small>` : ''}
+      </td></tr>
+    </table>`;
+  addLog('l-log', JSON.stringify(d), 'l-info');
+  dot('d-lnc', 'green');
+}
+
+async function lAction(act) {
+  const body = act === 'start'
+    ? { server_port: +val('l-sp'), api_port: +val('l-ap') }
+    : act === 'stop' ? { force: false } : {};
+  const r = await api(lBase(), `/api/master/${act}`, 'POST', body);
+  const msg = r.data?.message || JSON.stringify(r.data);
+  addLog('l-log', `[${act.toUpperCase()}] ${msg}`, r.ok ? 'l-ok' : 'l-err');
+  toast(msg, r.ok ? 'success' : 'error');
+  setTimeout(getLStatus, 1500);
+}
+
+// ── ICP ───────────────────────────────────────────────────
+let pollTimer = null;
+
+async function startIcp() {
+  const las = val('icp-las'), bim = val('icp-bim');
+  if (!las || !bim) { toast('LAS 파일과 BIM 폴더는 필수입니다.', 'error'); return; }
+  const body = { las_file: las, bim_folder: bim };
+  const out = val('icp-out'); if (out) body.output_path = out;
+
+  const cfg = {};
+  const pairs = [['icp-iter','max_iterations',parseInt],['icp-conv','convergence_threshold',parseFloat],
+    ['icp-dist','max_correspondence_distance',parseFloat],['icp-ds','downsample_ratio',parseInt],
+    ['icp-grid','pseudo_point_grid_size',parseFloat]];
+  pairs.forEach(([id,k,fn]) => { const v = val(id); if (v) cfg[k] = fn(v); });
+  if (Object.keys(cfg).length) body.config = cfg;
+
+  const dx = val('icp-dx'), dy = val('icp-dy'), dz = val('icp-dz');
+  if (dx||dy||dz) body.offset = { dx:parseFloat(dx)||0, dy:parseFloat(dy)||0, dz:parseFloat(dz)||0 };
+
+  const r = await api(mBase(), '/api/icp/start', 'POST', body);
+  if (r.ok) {
+    toast(`작업 시작: ${r.data.job_id}`, 'success');
+    startPoll(r.data.job_id);
+  } else {
+    toast('시작 실패: ' + (r.data?.error || r.status), 'error');
+  }
+  loadJobs();
+}
+
+async function loadJobs() {
+  const r = await api(mBase(), '/api/icp/jobs');
+  if (!r.ok) return;
+  const jobs = r.data.jobs || [];
+  const el = $('jobs-list');
+  if (!jobs.length) { el.innerHTML = '<small class="text-muted">작업 없음</small>'; return; }
+  el.innerHTML = jobs.map(j => {
+    const pct = ((j.progress||0)*100).toFixed(1);
+    return `<div class="job-card ${(j.status||'').toLowerCase()}">
+      <div class="d-flex justify-content-between align-items-start">
+        <div><code>${j.job_id}</code> ${badge(j.status)}</div>
+        <div class="d-flex gap-1">
+          <button class="btn btn-xs btn-outline-info" onclick="showDetail('${j.job_id}')">상세</button>
+          ${!/completed|failed|cancelled/.test(j.status)
+            ? `<button class="btn btn-xs btn-outline-danger" onclick="cancelJob('${j.job_id}')">취소</button>` : ''}
+        </div>
+      </div>
+      <div class="progress mt-2" style="height:5px;">
+        <div class="progress-bar ${j.status==='failed'?'bg-danger':'bg-success'}" style="width:${pct}%"></div>
+      </div>
+      <small class="text-muted d-flex justify-content-between mt-1">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%" title="${j.las_file}">${j.las_file}</span>
+        <span>${j.completed_chunks||0}/${j.total_chunks||0} chunks · ${pct}%</span>
+      </small>
+    </div>`;
+  }).join('');
+}
+
+async function showDetail(id) {
+  const [sr, rr, str] = await Promise.all([
+    api(mBase(), `/api/icp/jobs/${id}`),
+    api(mBase(), `/api/icp/jobs/${id}/result`),
+    api(mBase(), `/api/icp/jobs/${id}/stats`),
+  ]);
+  const j = sr.data || {}, res = rr.data || {}, s = str.data?.statistics || {};
+
+  let mx = '';
+  if (res.final_transform?.length === 16) {
+    const m = res.final_transform;
+    mx = `<h6 class="text-muted small mt-3 mb-1">최종 변환 행렬 (column-major 4×4)</h6>
+      <table class="matrix-tbl">${[0,1,2,3].map(row=>`<tr>${[0,1,2,3].map(col=>`<td>${m[col*4+row].toFixed(6)}</td>`).join('')}</tr>`).join('')}</table>`;
+  }
+
+  $('icp-detail-body').innerHTML = `
+    <div class="row g-3">
+      <div class="col-md-4">
+        <div class="mini-card">
+          <div class="section-hdr">작업 정보</div>
+          <table class="table table-dark table-sm mb-0">
+            <tr><td class="text-muted">Job ID</td><td><code>${j.job_id||id}</code></td></tr>
+            <tr><td class="text-muted">상태</td><td>${badge(j.status)}</td></tr>
+            <tr><td class="text-muted">진행률</td><td>${((j.progress||0)*100).toFixed(1)}%</td></tr>
+            <tr><td class="text-muted">청크</td><td>${j.completed_chunks||0} / ${j.total_chunks||0}</td></tr>
+            <tr><td class="text-muted">실패 청크</td><td>${j.failed_chunks||0}</td></tr>
+            <tr><td class="text-muted">경과 시간</td><td>${(j.elapsed_time_sec||0).toFixed(2)}초</td></tr>
+          </table>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="mini-card">
+          <div class="section-hdr">정합 품질</div>
+          <table class="table table-dark table-sm mb-0">
+            <tr><td class="text-muted">Coarse RMSE</td><td class="text-warning">${(res.coarse_rmse||s.coarse_rmse||0).toFixed(4)} m</td></tr>
+            <tr><td class="text-muted">Final RMSE</td><td class="text-success">${(res.final_rmse||s.final_rmse||0).toFixed(4)} m</td></tr>
+            <tr><td class="text-muted">RMSE 개선율</td><td class="text-info">${(s.rmse_improvement_percent||0).toFixed(1)}%</td></tr>
+            <tr><td class="text-muted">총 포인트</td><td>${(res.total_points||s.total_source_points||0).toLocaleString()}</td></tr>
+            <tr><td class="text-muted">Pseudo 포인트</td><td>${(s.total_pseudo_points||0).toLocaleString()}</td></tr>
+            <tr><td class="text-muted">메쉬 삼각형</td><td>${(s.total_mesh_triangles||0).toLocaleString()}</td></tr>
+          </table>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="mini-card">
+          <div class="section-hdr">처리 통계</div>
+          <table class="table table-dark table-sm mb-0">
+            <tr><td class="text-muted">Coarse 시간</td><td>${(s.coarse_alignment_time_sec||0).toFixed(2)}초</td></tr>
+            <tr><td class="text-muted">Fine 시간</td><td>${(s.fine_alignment_time_sec||0).toFixed(2)}초</td></tr>
+            <tr><td class="text-muted">총 처리 시간</td><td>${(s.total_processing_time_sec||j.elapsed_time_sec||0).toFixed(2)}초</td></tr>
+            <tr><td class="text-muted">평균 Fine 반복</td><td>${(s.average_fine_iterations||0).toFixed(1)}</td></tr>
+            <tr><td class="text-muted">성공 청크</td><td>${s.successful_chunks||0}</td></tr>
+            <tr><td class="text-muted">수렴 청크</td><td>${s.converged_chunks||0}</td></tr>
+          </table>
+        </div>
+      </div>
+      ${mx ? `<div class="col-12"><div class="mini-card">${mx}</div></div>` : ''}
+      ${j.output_path ? `<div class="col-12"><small class="text-muted">출력: <code>${j.output_path}</code></small></div>` : ''}
+      ${j.error_message ? `<div class="col-12"><div class="alert alert-danger py-2 small mb-0">${j.error_message}</div></div>` : ''}
+    </div>`;
+  $('icp-detail-panel').style.display = 'block';
+  $('icp-detail-panel').scrollIntoView({ behavior:'smooth' });
+}
+
+function startPoll(id) {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    await loadJobs();
+    const r = await api(mBase(), `/api/icp/jobs/${id}`);
+    if (/completed|failed|cancelled/.test(r.data?.status)) {
+      clearInterval(pollTimer); pollTimer = null;
+      toast(`ICP ${r.data.status}: ${id}`, r.data.status==='completed'?'success':'error');
+      showDetail(id);
+    }
+  }, 2000);
+}
+
+async function cancelJob(id) {
+  const r = await api(mBase(), `/api/icp/jobs/${id}/cancel`, 'POST');
+  toast(r.data?.message||'취소 요청됨', 'info');
+  loadJobs();
+}
+
+// ── Agents ────────────────────────────────────────────────
+async function loadAgents() {
+  const r = await api(mBase(), '/api/agents');
+  if (!r.ok) return;
+  const list = r.data.data?.agents || [];
+  $('agents-list').innerHTML = list.length
+    ? list.map(a => `
+      <div class="mini-card d-flex justify-content-between align-items-center">
+        <div><code>${a.agent_id}</code> ${badge(String(a.online))} <small class="text-muted ms-1">${a.host}:${a.port}</small></div>
+        <div class="d-flex gap-1">
+          <button class="btn btn-xs btn-outline-info" onclick="testAgent('${a.agent_id}')">테스트</button>
+          <button class="btn btn-xs btn-outline-danger" onclick="delAgent('${a.agent_id}')">삭제</button>
+        </div>
+      </div>`).join('')
+    : '<small class="text-muted">등록된 Agent 없음</small>';
+}
+
+async function addAgent() {
+  const host = val('ag-host'), port = +val('ag-port');
+  if (!host) { toast('Agent IP 입력 필요', 'error'); return; }
+  const r = await api(mBase(), '/api/agents', 'POST', { host, port });
+  toast(r.data?.message||JSON.stringify(r.data), r.ok?'success':'error');
+  loadAgents();
+}
+
+async function delAgent(id) {
+  const r = await api(mBase(), `/api/agents/${id}`, 'DELETE');
+  toast(r.data?.message||'삭제됨', 'info'); loadAgents();
+}
+
+async function testAgent(id) {
+  const r = await api(mBase(), `/api/agents/${id}/test`, 'POST');
+  toast(`Agent ${id}: ${r.data?.data?.online?'온라인':'오프라인'}`, 'info');
+  loadAgents();
+}
+
+async function agentsStartSlaves() {
+  const r = await api(mBase(), '/api/agents/start-slaves', 'POST', {});
+  toast(r.data?.message||JSON.stringify(r.data), r.ok?'success':'error');
+}
+
+async function agentsStopSlaves() {
+  const r = await api(mBase(), '/api/agents/stop-slaves', 'POST', { force:false });
+  toast(r.data?.message||JSON.stringify(r.data), r.ok?'success':'error');
+}
+
+// ── Slaves ────────────────────────────────────────────────
+async function loadSlaves() {
+  const r = await api(mBase(), '/api/slaves');
+  if (!r.ok) return;
+  const list = r.data.data?.slaves || [];
+  $('slaves-list').innerHTML = list.length
+    ? list.map(s => `
+      <div class="mini-card">
+        <div class="d-flex justify-content-between align-items-center">
+          <div><code>${s.id}</code> ${badge(s.active?'active':'stopped')} ${s.busy?badge('busy'):''}</div>
+          <div class="d-flex gap-1">
+            <button class="btn btn-xs btn-outline-warning" onclick="slaveSingle('${s.id}','pause')">정지</button>
+            <button class="btn btn-xs btn-outline-success" onclick="slaveSingle('${s.id}','resume')">재개</button>
+            <button class="btn btn-xs btn-outline-danger" onclick="slaveSingle('${s.id}','shutdown')">종료</button>
+          </div>
+        </div>
+        <small class="text-muted">완료 ${s.completed_tasks} | 실패 ${s.failed_tasks} | 평균 ${(s.avg_processing_time||0).toFixed(2)}s</small>
+      </div>`).join('')
+    : '<small class="text-muted">연결된 Slave 없음</small>';
+}
+
+async function slaveSingle(id, act) {
+  await api(mBase(), `/api/slaves/${id}/${act}`, 'POST');
+  toast(`Slave ${id} → ${act}`, 'info'); loadSlaves();
+}
+
+async function slavesAll(act) {
+  await api(mBase(), `/api/slaves/${act}`, 'POST');
+  toast(`모든 Slave → ${act}`, 'info'); loadSlaves();
+}
+
+// SlaveAgent direct
+async function saStatus() {
+  const r = await api(aBase(), '/api/status');
+  addLog('sa-log', JSON.stringify(r.data, null, 2), r.ok?'l-ok':'l-err');
+}
+
+async function saStartSlave() {
+  const mip = val('sa-mip') || val('c-ip');
+  const r = await api(aBase(), '/api/slaves/start', 'POST', {
+    master_address: mip, master_port: +val('sa-mp')
+  });
+  addLog('sa-log', JSON.stringify(r.data), r.ok?'l-ok':'l-err');
+  toast(r.data?.message||JSON.stringify(r.data), r.ok?'success':'error');
+}
+
+async function saStopAll() {
+  const r = await api(aBase(), '/api/slaves/stop-all', 'POST', { force:false });
+  addLog('sa-log', JSON.stringify(r.data), r.ok?'l-ok':'l-err');
+  toast(r.data?.message||JSON.stringify(r.data), 'info');
+}
+
+// ── Tasks ─────────────────────────────────────────────────
+async function loadTasks() {
+  const r = await api(mBase(), '/api/tasks');
+  if (!r.ok) return;
+  const d = r.data.data || {};
+  const s = d.summary || {};
+  $('tasks-summary').innerHTML = `<div class="d-flex gap-3 flex-wrap">
+    <small>${badge('pending')} 대기 ${s.pending_count||0}</small>
+    <small>${badge('busy')} 처리중 ${s.active_count||0}</small>
+    <small>${badge('completed')} 완료 ${s.completed_count||0}</small>
+    <small>${badge('failed')} 실패 ${s.failed_count||0}</small>
+    <small class="text-muted ms-auto">유형: ${d.task_type||'-'}</small>
+  </div>`;
+}
+
+async function clearTasks() {
+  const r = await api(mBase(), '/api/tasks', 'DELETE');
+  toast(r.data?.message||JSON.stringify(r.data), r.ok?'success':'error');
+  loadTasks();
+}
+
+async function fileLoad() {
+  const nm = val('fl-name'), tp = val('fl-type');
+  if (!nm) { toast('파일명 필요', 'error'); return; }
+  const r = await api(mBase(), '/api/files/load', 'POST', { filename:nm, task_type:tp });
+  toast(r.data?.message||JSON.stringify(r.data), r.ok?'success':'error');
+}
+
+async function getRes() {
+  const r = await api(mBase(), '/api/results');
+  const el = $('res-display');
+  if (r.ok) {
+    const d = r.data.data||{};
+    el.innerHTML = `<div class="mini-card mt-2"><small class="text-muted d-block">유형: ${d.task_type||'-'}</small>
+      <small class="text-muted d-block">완료: ${d.completed_results||0}</small>
+      <small class="text-muted d-block">총 포인트: ${(d.total_processed_points||0).toLocaleString()}</small></div>`;
+  } else {
+    el.innerHTML = `<small class="text-danger">${r.data?.error||'조회 실패'}</small>`;
+  }
+}
+
+async function saveRes() {
+  const nm = val('rs-name');
+  if (!nm) { toast('파일명 필요', 'error'); return; }
+  const r = await api(mBase(), '/api/results/save', 'POST', { filename:nm });
+  toast(r.data?.message||JSON.stringify(r.data), r.ok?'success':'error');
+}
+
+// ── Status ────────────────────────────────────────────────
+let autoTimer = null;
+
+async function loadStatus() {
+  const [sr, pr] = await Promise.all([
+    api(mBase(), '/api/status'),
+    api(mBase(), '/api/progress'),
+  ]);
+  if (sr.ok) {
+    const d = sr.data.data||{};
+    $('st-slaves').textContent  = d.connected_slaves??'-';
+    $('st-active').textContent  = d.active_tasks??'-';
+    $('st-done').textContent    = d.completed_tasks??'-';
+    $('st-fail').textContent    = d.failed_tasks??'-';
+    $('status-raw').textContent = JSON.stringify(sr.data, null, 2);
+    $('g-status').innerHTML = `<span class="status-dot dot-green me-1"></span><small class="text-muted">연결됨</small>`;
+    dot('d-mst', 'green');
+  } else {
+    $('g-status').innerHTML = `<span class="status-dot dot-red me-1"></span><small class="text-muted">MasterApp 미연결</small>`;
+  }
+  if (pr.ok) {
+    const p = pr.data.data||{};
+    const pct = Math.min(100, Math.round((p.overall_progress||0)*100));
+    const bar = $('prog-bar');
+    bar.style.width = pct+'%'; bar.textContent = pct+'%';
+    $('pg-pend').textContent = p.pending_tasks??'-';
+    $('pg-act').textContent  = p.active_tasks??'-';
+    $('pg-done').textContent = p.completed_tasks??'-';
+    $('pg-fail').textContent = p.failed_tasks??'-';
+  }
+}
+
+function toggleAuto() {
+  if ($('auto-toggle').checked) {
+    autoTimer = setInterval(loadStatus, 3000);
+  } else {
+    clearInterval(autoTimer);
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  autoTimer = setInterval(loadStatus, 3000);
+  loadStatus();
+
+  // sync agent default master IP
+  $('c-ip').addEventListener('input', () => { $('sa-mip').value = $('c-ip').value; });
+
+  document.querySelectorAll('[data-bs-toggle="tab"]').forEach(tab => {
+    tab.addEventListener('shown.bs.tab', e => {
+      const t = e.target.getAttribute('href');
+      if (t==='#t-icp')    loadJobs();
+      if (t==='#t-agents') { loadAgents(); loadSlaves(); }
+      if (t==='#t-tasks')  loadTasks();
+      if (t==='#t-status') loadStatus();
+    });
+  });
+});
+</script>
+</body>
+</html>
