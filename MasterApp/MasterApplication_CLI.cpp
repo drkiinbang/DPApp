@@ -617,11 +617,7 @@ void MasterApplication::createTestTasks(TaskType test_type, const std::vector<Te
 
         uint32_t task_id = task_manager_->addTask(pc_chunk);
 
-        // Task 타입을 테스트 타입으로 변경
-        TaskInfo* task_info = task_manager_->getTaskById(task_id);
-        if (task_info) {
-            task_info->task_type = test_type;
-        }
+        task_manager_->setTaskType(task_id, test_type);
 
         ILOG << "Created test task " << task_id << " (type: " << taskStr(test_type)
             << ", chunk: " << chunk.chunk_id << ")";

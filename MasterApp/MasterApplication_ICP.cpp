@@ -71,8 +71,11 @@ std::string MasterApplication::generateIcpJobId() {
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         now.time_since_epoch()) % 1000;
 
+    std::tm tm_buf{};
+    localtime_s(&tm_buf, &time_t_now);
+
     std::stringstream ss;
-    ss << "icp_" << std::put_time(std::localtime(&time_t_now), "%Y%m%d_%H%M%S")
+    ss << "icp_" << std::put_time(&tm_buf, "%Y%m%d_%H%M%S")
         << "_" << std::setfill('0') << std::setw(3) << ms.count();
 
     return ss.str();
@@ -316,8 +319,12 @@ HttpResponse MasterApplication::handleIcpJobResult(const HttpRequest& req) {
         }
 
         if (!job->isFinished()) {
-            return createErrorResponse(202, "Job not yet completed. Status: " +
-                std::string(icp::statusToString(job->status)));
+            HttpResponse response;
+            response.status_code = 202;
+            response.body = std::string("{\"success\": false, \"status\": \"")
+                + icp::statusToString(job->status)
+                + "\", \"message\": \"Job not yet completed\"}";
+            return response;
         }
 
         std::ostringstream oss;

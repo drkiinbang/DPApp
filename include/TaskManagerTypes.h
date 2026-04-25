@@ -22,6 +22,7 @@
 #include <functional>
 #include <iostream>
 #include <algorithm>
+#include <optional>
 
 #include "PointCloudTypes.h"
 
@@ -377,14 +378,21 @@ namespace DPApp {
             return getTasksByStatus(TaskStatus::ASSIGNED);
         }
 
-        TaskInfo* getTaskById(uint32_t task_id) {
+        std::optional<TaskInfo> getTaskById(uint32_t task_id) {
             std::lock_guard<std::mutex> lock(tasks_mutex_);
-
             auto it = tasks_.find(task_id);
             if (it != tasks_.end()) {
-                return &(it->second);
+                return it->second;
             }
-            return nullptr;
+            return std::nullopt;
+        }
+
+        bool setTaskType(uint32_t task_id, TaskType type) {
+            std::lock_guard<std::mutex> lock(tasks_mutex_);
+            auto it = tasks_.find(task_id);
+            if (it == tasks_.end()) return false;
+            it->second.task_type = type;
+            return true;
         }
 
         void registerSlave(const std::string& slave_id) {
@@ -528,10 +536,10 @@ namespace DPApp {
                             std::cout << "Task " << task_id << " timed out after "
                                 << elapsed << " seconds" << std::endl;
 
-                            task_info.status = TaskStatus::TIMEOUT;
                             timed_out_count++;
 
-                            auto pending = failTaskInternalNoCallback(task_id, "Task timeout");
+                            auto pending = failTaskInternalNoCallback(task_id, "Task timeout",
+                                                                       TaskStatus::TIMEOUT);
                             if (pending.should_invoke) {
                                 pending_callbacks.push_back(std::move(pending));
                             }
@@ -587,7 +595,8 @@ namespace DPApp {
         }
 
     private:
-        PendingFailCallback failTaskInternalNoCallback(uint32_t task_id, const std::string& error_message) {
+        PendingFailCallback failTaskInternalNoCallback(uint32_t task_id, const std::string& error_message,
+                                                       TaskStatus terminal_status = TaskStatus::FAILED) {
             PendingFailCallback result;
             result.should_invoke = false;
             result.error_message = error_message;
@@ -620,7 +629,7 @@ namespace DPApp {
                 std::cout << "Task " << task_id << " failed, retrying..." << std::endl;
             }
             else {
-                task_info.status = TaskStatus::FAILED;
+                task_info.status = terminal_status;
                 std::cout << "Task " << task_id << " failed permanently." << std::endl;
 
                 if (task_failed_callback_) {

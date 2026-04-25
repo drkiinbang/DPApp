@@ -612,7 +612,8 @@ namespace icp {
         std::vector<size_t>& downFaceIdx,
         int ratio)
     {
-        if (ratio <= 1) return false;
+        if (ratio <= 0) return false;
+        if (ratio == 1) { downPts = points; downFaceIdx = faceIdx; return true; }
 
         auto numSamples = points.size() / ratio + 1;
         downPts.reserve(numSamples);
@@ -631,10 +632,10 @@ namespace icp {
         const std::vector<std::array<double, 3>>& points,
         int ratio)
     {
+        if (ratio <= 0) return {};
+        if (ratio == 1) return points;
+
         std::vector<std::array<double, 3>> downPts;
-
-        if (ratio <= 1) return downPts;
-
         auto numSamples = points.size() / ratio + 1;
         downPts.reserve(numSamples);
 

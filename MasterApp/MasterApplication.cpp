@@ -383,7 +383,10 @@ namespace DPApp {
 
                 /// 1. Load mesh data
                 std::vector<chunkbim::MeshChunk> bimData;
-                auto retval = loadGltf(bim_folder, bimData);
+                if (!loadGltf(bim_folder, bimData)) {
+                    std::cerr << "loadGltf failed for: " << bim_folder << std::endl;
+                    return chunks;
+                }
                 std::cout << "Loaded " << bimData.size() << " bim chunks" << std::endl;
 
                 if (bimData.empty()) {
@@ -398,27 +401,46 @@ namespace DPApp {
                 }
 
                 size_t numChunks = bimData.size();
-                size_t numChunkPts = (pc.size() + numChunks - 1) / numChunks;
 
+                /// Pre-create chunks and calculate BIM bounding boxes before moving
                 for (size_t i = 0; i < numChunks; ++i) {
                     chunks.emplace_back(std::make_shared<BimPcChunk>());
                     auto& bimpc_chunk = chunks.back();
-
                     bimpc_chunk->chunk_id = static_cast<uint32_t>(i);
+                    bimData[i].calculateBounds();
+                    bimpc_chunk->bim = std::move(bimData[i]);
+                }
 
-                    size_t start_idx = i * numChunkPts;
-                    size_t end_idx = (std::min)(start_idx + numChunkPts, pc.size());
+                /// Assign each point to the BIM chunk whose bounding box contains it.
+                /// If a point falls outside all boxes, assign it to the nearest chunk center.
+                const double margin = 1.0;
+                for (const auto& pt : pc) {
+                    double px = pt[0], py = pt[1], pz = pt[2];
 
-                    if (start_idx < pc.size()) {
-                        bimpc_chunk->points.assign(
-                            pc.begin() + start_idx,
-                            pc.begin() + end_idx
-                        );
+                    int best = 0;
+                    double best_dist_sq = std::numeric_limits<double>::max();
+
+                    for (size_t i = 0; i < numChunks; ++i) {
+                        const auto& bim = chunks[i]->bim;
+                        if (px >= bim.min_x - margin && px <= bim.max_x + margin &&
+                            py >= bim.min_y - margin && py <= bim.max_y + margin &&
+                            pz >= bim.min_z - margin && pz <= bim.max_z + margin) {
+                            best = static_cast<int>(i);
+                            best_dist_sq = -1.0;
+                            break;
+                        }
+                        double cx = (bim.min_x + bim.max_x) * 0.5;
+                        double cy = (bim.min_y + bim.max_y) * 0.5;
+                        double cz = (bim.min_z + bim.max_z) * 0.5;
+                        double d = (px - cx) * (px - cx) + (py - cy) * (py - cy) + (pz - cz) * (pz - cz);
+                        if (d < best_dist_sq) { best_dist_sq = d; best = static_cast<int>(i); }
                     }
 
-                    bimpc_chunk->bim = std::move(bimData[i]);
-                    bimpc_chunk->calculateBounds();
+                    chunks[best]->points.push_back(pt);
+                }
 
+                for (auto& bimpc_chunk : chunks) {
+                    bimpc_chunk->calculateBounds();
                     std::cout << "Created BimPcChunk " << bimpc_chunk->chunk_id
                         << " - points: " << bimpc_chunk->points.size()
                         << ", faces: " << bimpc_chunk->bim.faces.size()
@@ -836,14 +858,16 @@ void MasterApplication::handleTaskResult(const NetworkMessage& message, const st
             TestResult result = TestResult::deserialize(result_data);
             handleTestResult(result);
 
-            // TaskManager status update
             if (task_manager_) {
-                ProcessingResult simple_result;
-                simple_result.task_id = result.task_id;
-                simple_result.chunk_id = result.chunk_id;
-                simple_result.success = result.success;
-                simple_result.error_message = result.error_message;
-                task_manager_->completeTask(result.task_id, simple_result);
+                if (result.success) {
+                    ProcessingResult simple_result;
+                    simple_result.task_id = result.task_id;
+                    simple_result.chunk_id = result.chunk_id;
+                    simple_result.success = true;
+                    task_manager_->completeTask(result.task_id, simple_result);
+                } else {
+                    task_manager_->failTask(result.task_id, result.error_message);
+                }
             }
 
             ILOG << "TestResult received for task " << result.task_id
@@ -855,14 +879,16 @@ void MasterApplication::handleTaskResult(const NetworkMessage& message, const st
             // BimPc result processing
             BimPcResult result = NetworkUtils::deserializeBimPcResult(result_data);
             if (task_manager_) {
-                task_manager_->addBimPcResult(result);
-
-                ProcessingResult simple_result;
-                simple_result.task_id = result.task_id;
-                simple_result.chunk_id = result.chunk_id;
-                simple_result.success = result.success;
-                simple_result.error_message = result.error_message;
-                task_manager_->completeTask(result.task_id, simple_result);
+                if (result.success) {
+                    task_manager_->addBimPcResult(result);
+                    ProcessingResult simple_result;
+                    simple_result.task_id = result.task_id;
+                    simple_result.chunk_id = result.chunk_id;
+                    simple_result.success = true;
+                    task_manager_->completeTask(result.task_id, simple_result);
+                } else {
+                    task_manager_->failTask(result.task_id, result.error_message);
+                }
             }
             ILOG << "BimPcResult received for task " << result.task_id
                 << " from " << client_id;
@@ -871,7 +897,11 @@ void MasterApplication::handleTaskResult(const NetworkMessage& message, const st
             // General result processing
             ProcessingResult result = NetworkUtils::deserializeResult(result_data);
             if (task_manager_) {
-                task_manager_->completeTask(result.task_id, result);
+                if (result.success) {
+                    task_manager_->completeTask(result.task_id, result);
+                } else {
+                    task_manager_->failTask(result.task_id, result.error_message);
+                }
             }
         }
     }

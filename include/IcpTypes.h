@@ -12,6 +12,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <map>
@@ -509,12 +510,14 @@ namespace icp {
             }
         }
 
-        /// Get elapsed time in seconds
+        /// Get elapsed time in seconds (uses current time if job is still running)
         double getElapsedTimeSec() const {
-            if (endTimeMs > 0.0) {
-                return (endTimeMs - startTimeMs) / 1000.0;
-            }
-            return 0.0;
+            if (startTimeMs <= 0.0) return 0.0;
+            double end = (endTimeMs > 0.0) ? endTimeMs
+                : static_cast<double>(
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count());
+            return (end - startTimeMs) / 1000.0;
         }
 
         /// Check if job is finished (success, failed, or cancelled)
