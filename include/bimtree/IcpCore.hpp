@@ -38,6 +38,7 @@ const double Rad2Sec = ((180. * 3600.) / acos(-1.0));
 const double Rad2Deg = ((180.) / acos(-1.0));
 const double minParamSd = 1.0e-9;
 const double maxParamSd = 1.0e+9;
+const unsigned int uknw = 6;
 
 namespace icp {
 
@@ -191,6 +192,10 @@ namespace icp {
             facePts[i] = allFacePts[faceIdx[i]];
         }
 
+        double minDist = 1.0e+12;
+        double maxDist = 1.0e-12;
+        double sumDist = 0.0;
+        size_t count = 0;
         for (size_t i = 0; i < sourcePoints.size(); ++i) {
             size_t resultIndex = 0;
             double resultDistSq = 0.0;
@@ -214,11 +219,24 @@ namespace icp {
                 proj))
                 continue;
 
+            if (minDist > distance) minDist = distance;
+            if (maxDist < distance) maxDist = distance;
+            sumDist += distance;
+            ++count;
+
             CorrespondenceFace corr;
             corr.sourceIdx = i;
             corr.facePt = proj;
             corr.squaredDistance = distance * distance;
             correspondences.push_back(corr);
+        }
+
+        if (count > 1) {
+            double aveDist = sumDist / count;
+            ILOG << "[Find correspondence] " << count << "correspondences: min distance(" << minDist << ") max distance(" << maxDist << " ave distance(" << aveDist << ")";
+        }
+        else {
+            ILOG << "[Find correspondence] NONE";
         }
     }
 
@@ -760,13 +778,13 @@ namespace icp {
         const std::vector<size_t>& faceIdx,
         const std::vector<std::array<double, 3>>& allFaceNormals)
     {
-        if (correspondences.size() < 6) {
+        if (correspondences.size() < uknw) {
             return Transform4x4::identity();
         }
 
         const size_t n = correspondences.size();
 
-        Eigen::MatrixXd A(n, 6);
+        Eigen::MatrixXd A(n, uknw);
         Eigen::VectorXd b(n);
 
         for (size_t i = 0; i < n; ++i) {
@@ -833,7 +851,7 @@ namespace icp {
         return Transform4x4::fromRotationTranslation(rotMat, tx, ty, tz);
     }
 
-    inline void calDiscrepancy(const std::array<double, 3>& src, const std::array<double, 3>& tar, const std::array<double, 6>& params, math::Matrixd& ai, math::Matrixd& yi)
+    inline void calDiscrepancy(const std::array<double, 3>& src, const std::array<double, 3>& tar, const std::array<double, uknw>& params, math::Matrixd& ai, math::Matrixd& yi)
     {
         math::Matrixd GA(3, 1), GB(3, 1);
 
@@ -892,7 +910,7 @@ namespace icp {
     /// add const double benchSd
     /// add std::array<double, 3> xyzSd
     struct RETVAL_NLLS {
-        std::array<double, 6> params;
+        std::array<double, uknw> params;
         math::Matrixd Correlation;
         double var;
         math::Matrixd varX;
@@ -903,28 +921,28 @@ namespace icp {
         const std::vector<CorrespondenceFace>& correspondences,
         const std::vector<size_t>& faceIdx,
         const std::vector<std::array<double, 3>>& allFaceNormals,
-        const std::array<double, 6>& params0,
-        const std::array<double, 6>& paramsSd)
+        const std::array<double, uknw>& params0,
+        const std::array<double, uknw>& paramsSd)
     {
         RETVAL_NLLS retval;
         retval.params = params0;
 
-        if (correspondences.size() < 6) {
-            retval.Correlation.resize(6, 6);
+        if (correspondences.size() < uknw) {
+            retval.Correlation.resize(uknw, uknw);
             retval.Correlation.makeIdentityMat();
             retval.var = 0.;
-            retval.varX.resize(6, 1, 0.0);
+            retval.varX.resize(uknw, 1, 0.0);
             return retval;
         }
 
         const size_t n = correspondences.size();
 
-        Eigen::MatrixXd A(n, 6);
+        Eigen::MatrixXd A(n, uknw);
         Eigen::VectorXd b(n);
 
-        math::Matrixd N(6, 6, 0.);
-        math::Matrixd C(6, 1, 0.);
-        math::Matrixd ai(3, 6);
+        math::Matrixd N(uknw, uknw, 0.);
+        math::Matrixd C(uknw, 1, 0.);
+        math::Matrixd ai(3, uknw);
         math::Matrixd yi(3, 1);
         const size_t numEqs = n;
         double etpe = 0.;
@@ -946,9 +964,9 @@ namespace icp {
             C += ci;
         }
 
-        for (size_t i = 0; i < 6; ++i) {
+        for (size_t i = 0; i < uknw; ++i) {
             if (paramsSd[i] <= minParamSd) {
-                for (size_t j = 0; j < 6; ++j) {
+                for (size_t j = 0; j < uknw; ++j) {
                     if (i == j) {
                         N(i, j) = 1.0;
                     }
@@ -963,10 +981,10 @@ namespace icp {
 
         auto Ninv = N.inverse();
 
-        retval.Correlation.resize(6, 6, 0.0);
-        for (unsigned int i = 0; i < 6; i++)
+        retval.Correlation.resize(uknw, uknw, 0.0);
+        for (unsigned int i = 0; i < uknw; i++)
         {
-            for (unsigned int j = 0; j < 6; j++)
+            for (unsigned int j = 0; j < uknw; j++)
             {
                 retval.Correlation(i, j) = Ninv(i, j) / sqrt(Ninv(i, i)) / sqrt(Ninv(j, j));
             }
@@ -985,14 +1003,14 @@ namespace icp {
         std::cout << math::matrixout(X) << "\n";
 #endif
 
-        for (unsigned int i = 0; i < 6; i++) {
+        for (unsigned int i = 0; i < uknw; i++) {
             if (paramsSd[i] > minParamSd) {
                 if (i > 2) retval.params[i] += X(i, 0);
                 else retval.params[i] += X(i, 0);
             }
         }
 
-        retval.var = etpe / (numEqs - 6);
+        retval.var = etpe / (numEqs - uknw);
         retval.varX = Ninv * retval.var;
 
         return retval;
@@ -1005,11 +1023,11 @@ namespace icp {
         const std::vector<CorrespondenceFace>& correspondences,
         const std::vector<size_t>& faceIdx,
         const std::vector<std::array<double, 3>>& allFaceNormals,
-        const std::array<double, 6>& params0,
+        const std::array<double, uknw>& params0,
         const double sdThr,
         const unsigned int maxIter)
     {
-        if (correspondences.size() < 6) {
+        if (correspondences.size() < uknw) {
             return Transform4x4::identity();
         }
 
@@ -1024,7 +1042,7 @@ namespace icp {
             }
         }
 
-        std::array<double, 6> paramsSd;
+        std::array<double, uknw> paramsSd;
         paramsSd[0] = maxParamSd;
         paramsSd[1] = maxParamSd;
         paramsSd[2] = maxParamSd;
@@ -1058,8 +1076,8 @@ namespace icp {
             std::cout << "[X_VarCov]\n";
             std::cout << math::matrixout(retval.varX);
             std::cout << "[X sd]\n";
-            for (unsigned int i = 0; i < 6; ++i)
-                std::cout << sqrt(retval.varX(i, 0)) << "\n";
+            for (unsigned int i = 0; i < uknw; ++i)
+                std::cout << sqrt(retval.varX(i, i)) << "\n";
 
             if (fabs(preSd - sqrt(retval.var)) < sdThr) {
                 continueIter = false;
@@ -1202,7 +1220,7 @@ namespace icp {
                     chunk.faceIndices, chunk.faceNormals);
 #ifdef _DEBUG
                 /// [ToDo]: config
-                std::array<double, 6> params0 = { 0., 0., 0., 0., 0., 0. };
+                std::array<double, uknw> params0 = { 0., 0., 0., 0., 0., 0. };
                 double sdThr = 0.000001;
                 unsigned int maxIter = 50;
                 Transform4x4 deltaT2 = runLSM(

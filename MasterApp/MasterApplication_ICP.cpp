@@ -576,8 +576,8 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
         icp::IcpChunk coarseChunk;
         coarseChunk.chunk_id = 0;
         coarseChunk.sourcePoints = std::move(coarseSource);
-        coarseChunk.targetPoints = std::move(pseudoFacePoints);
-        coarseChunk.faceIndices = std::move(pseudoFaceIdx);
+        coarseChunk.targetPoints = pseudoFacePoints;
+        coarseChunk.faceIndices = pseudoFaceIdx;
         coarseChunk.faceNormals = targetNormals;
         coarseChunk.facePts = facePts;
         coarseChunk.config = job->config;
@@ -616,6 +616,11 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
         auto alignedSource = icp::transformPointCloudCopy(sourcePoints, job->coarseTransform);
 
         /// Downsample for fine alignment (less aggressive): point cloud
+#ifdef _DEBUG
+        ///[ToDo] replace it with a proper value
+        coarseChunk.config.downsampleRatio = 1;  /// Larger distance for coarse
+#endif
+
         auto fineSource = icp::downsampleUniform(alignedSource, job->config.downsampleRatio);
 
         /// Downsample for fine alignment (less aggressive): BIM points
@@ -631,8 +636,8 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
         icp::IcpChunk fineChunk;
         fineChunk.chunk_id = 0;
         fineChunk.sourcePoints = std::move(fineSource);
-        fineChunk.targetPoints = std::move(pseudoFacePoints);
-        fineChunk.faceIndices = std::move(pseudoFaceIdx);
+        fineChunk.targetPoints = pseudoFacePoints;
+        fineChunk.faceIndices = pseudoFaceIdx;
         fineChunk.faceNormals = targetNormals;
         fineChunk.facePts = facePts;
         fineChunk.config = job->config;
