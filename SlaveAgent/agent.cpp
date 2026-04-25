@@ -318,7 +318,7 @@ private:
         si.dwFlags = STARTF_USESHOWWINDOW;
 #ifdef _DEBUG
         si.wShowWindow = SW_SHOW;
-#elif
+#else
         //si.wShowWindow = SW_HIDE;
         si.wShowWindow = SW_SHOW;
 #endif
