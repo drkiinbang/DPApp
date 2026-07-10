@@ -13,6 +13,7 @@
 #include "../include/bimtree/IcpCore.hpp"
 #include "../include/bimtree/IcpSerialization.hpp"
 #include "../include/bimtree/PseudoPointGenerator.hpp"
+#include "../include/LaslibWriter.hpp"
 
  /// Data loading from DLLs
 #include "../LasImport/LasImport.h"
@@ -679,8 +680,31 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
         ILOG << "[ICP] Final transform computed, RMSE: " << job->finalRMSE;
 
         /// =============================================
-        /// Phase 7: Complete (No file saving)
+        /// Phase 7: Save Aligned Point Cloud
         /// =============================================
+        job->status = icp::IcpJobStatus::SAVING_RESULT;
+        ILOG << "[ICP] Applying final transform to " << sourcePoints.size()
+            << " points and saving to: " << job->outputPath;
+
+        auto alignedFullResSource = icp::transformPointCloudCopy(sourcePoints, job->finalTransform);
+
+        std::vector<las::PointData> outPoints;
+        outPoints.reserve(alignedFullResSource.size());
+        for (const auto& p : alignedFullResSource) {
+            las::PointData d;
+            d.x = p[0];
+            d.y = p[1];
+            d.z = p[2];
+            outPoints.push_back(d);
+        }
+
+        if (!las::LASToolsWriter::save(job->outputPath, outPoints)) {
+            throw std::runtime_error("Failed to write aligned LAS file: " + job->outputPath);
+        }
+
+        ILOG << "[ICP] Aligned point cloud saved: " << job->outputPath
+            << " (" << outPoints.size() << " points)";
+
         job->status = icp::IcpJobStatus::COMPLETED;
         job->endTimeMs = static_cast<double>(
             std::chrono::duration_cast<std::chrono::milliseconds>(

@@ -18,7 +18,7 @@
 #include "../include/PointCloudTypes.h"
 #include "../include/NetworkManager.h"
 #include "../include/TaskManager.h"
-#include "../include/TestTask.h"  // Å×½ºÆ® Task Ã³¸®¿ë
+#include "../include/TestTask.h"  // ï¿½×½ï¿½Æ® Task Ã³ï¿½ï¿½ï¿½ï¿½
 #include "../include/bimtree/IcpProcessor.hpp"
 #include "../include/Logger.h"
 #include "../include/RuntimeConfig.h"
@@ -84,10 +84,32 @@ public:
         ILOG << "Processing threads: " << processing_threads_;
         ILOG << "Slave ID: " << client_->getSlaveId();
 
-        // Connect to server
-        if (!client_->connect(server_address_, server_port_)) {
-            ELOG << "Failed to connect to master server";
-            return false;
+        // Connect to server, retrying on failure instead of giving up after a single attempt.
+        // A transient refusal right after the master starts (or a brief network hiccup)
+        // used to kill the slave process immediately; now it retries like a lost-connection does.
+        const int max_attempts = cfg_.slave_max_reconnect_attempts; // <=0 means retry forever
+        int attempt = 0;
+        bool connected = false;
+        while (!connected) {
+            ++attempt;
+            connected = client_->connect(server_address_, server_port_);
+            if (connected) break;
+
+            if (max_attempts > 0 && attempt >= max_attempts) {
+                ELOG << "Failed to connect to master server after " << attempt << " attempt(s), giving up";
+                return false;
+            }
+
+            WLOG << "Failed to connect to master server (attempt " << attempt
+                << (max_attempts > 0 ? "/" + std::to_string(max_attempts) : "")
+                << "), retrying in " << cfg_.slave_reconnect_interval_seconds << "s...";
+            for (int waited = 0; waited < cfg_.slave_reconnect_interval_seconds; ++waited) {
+                if (DPApp::g_cancel_requested.load(std::memory_order_relaxed)) {
+                    ELOG << "Connection retry cancelled";
+                    return false;
+                }
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
         }
 
         running_ = true;
@@ -158,16 +180,16 @@ public:
         // Status thread shutdown (with timeout)
         ILOG << "Waiting for status thread...";
         if (status_thread_.joinable()) {
-            // ÃÖ´ë 3ÃÊ ´ë±â ÈÄ detach
+            // ï¿½Ö´ï¿½ 3ï¿½ï¿½ ï¿½ï¿½ï¿½ ï¿½ï¿½ detach
             bool joined = false;
             for (int i = 0; i < 30 && !joined; ++i) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                // status_thread´Â running_ Ã¼Å©ÇÏ¹Ç·Î °ð Á¾·áµÉ °Í
-                // ÇÏÁö¸¸ sleep ÁßÀÏ ¼ö ÀÖÀ¸¹Ç·Î Å¸ÀÓ¾Æ¿ô ÇÊ¿ä
+                // status_threadï¿½ï¿½ running_ Ã¼Å©ï¿½Ï¹Ç·ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½
+                // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ sleep ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ç·ï¿½ Å¸ï¿½Ó¾Æ¿ï¿½ ï¿½Ê¿ï¿½
             }
 
             try {
-                // Å¸ÀÓ¾Æ¿ô ÈÄ¿¡µµ joinableÀÌ¸é detach
+                // Å¸ï¿½Ó¾Æ¿ï¿½ ï¿½Ä¿ï¿½ï¿½ï¿½ joinableï¿½Ì¸ï¿½ detach
                 if (status_thread_.joinable()) {
                     WLOG << "Status thread join timeout, detaching...";
                     status_thread_.detach();
@@ -182,12 +204,12 @@ public:
         ILOG << "Closing stdin for input thread...";
 #ifdef _WIN32
         try {
-            // Windows¿¡¼­ stdinÀÇ ´ë±â ÁßÀÎ I/O¸¸ Ãë¼Ò (ÆÄÀÏ ´ÝÁö ¾ÊÀ½)
+            // Windowsï¿½ï¿½ï¿½ï¿½ stdinï¿½ï¿½ ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ I/Oï¿½ï¿½ ï¿½ï¿½ï¿½ (ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½)
             HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
             if (hStdin != INVALID_HANDLE_VALUE && hStdin != NULL) {
-                CancelIoEx(hStdin, NULL);  // ´ë±â ÁßÀÎ I/O Ãë¼Ò
+                CancelIoEx(hStdin, NULL);  // ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ I/O ï¿½ï¿½ï¿½
             }
-            // _close()´Â È£ÃâÇÏÁö ¾ÊÀ½ - assertion ¹ß»ý ¿øÀÎ
+            // _close()ï¿½ï¿½ È£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ - assertion ï¿½ß»ï¿½ ï¿½ï¿½ï¿½ï¿½
         }
         catch (...) {
             // Already closed or error, ignore
@@ -206,7 +228,7 @@ public:
         // Input thread shutdown (with timeout)
         ILOG << "Waiting for input thread...";
         if (input_thread_.joinable()) {
-            // ÃÖ´ë 2ÃÊ ´ë±â
+            // ï¿½Ö´ï¿½ 2ï¿½ï¿½ ï¿½ï¿½ï¿½
             bool joined = false;
             auto input_start = std::chrono::steady_clock::now();
             while (!joined && std::chrono::steady_clock::now() - input_start < std::chrono::seconds(2)) {
@@ -298,10 +320,10 @@ private:
         PointCloudChunk chunk;
         BimPcChunk bimpc_chunk;
         TestChunk test_chunk;
-        icp::IcpChunk icp_chunk;       /// <-- Ãß°¡
+        icp::IcpChunk icp_chunk;       /// <-- ï¿½ß°ï¿½
         bool is_bimpc;
         bool is_test;
-        bool is_icp;                   /// <-- Ãß°¡
+        bool is_icp;                   /// <-- ï¿½ß°ï¿½
 
         TaskQueueItem() : is_bimpc(false), is_test(false), is_icp(false) {}
         TaskQueueItem(const ProcessingTask& t, const PointCloudChunk& c)
@@ -313,7 +335,7 @@ private:
         TaskQueueItem(const ProcessingTask& t, const TestChunk& tc)
             : task(t), test_chunk(tc), is_bimpc(false), is_test(true), is_icp(false) {
         }
-        /// ICP Ã»Å©¿ë »ý¼ºÀÚ Ãß°¡
+        /// ICP Ã»Å©ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ß°ï¿½
         TaskQueueItem(const ProcessingTask& t, const icp::IcpChunk& ic)
             : task(t), icp_chunk(ic), is_bimpc(false), is_test(false), is_icp(true) {
         }
@@ -499,16 +521,16 @@ private:
                 << ", is_bimpc: " << (is_bimpc_flag ? "Yes" : "No")
                 << ", chunk_data_size: " << chunk_data_size << " bytes)";
 
-            /// ICP Task Å¸ÀÔÀÎÁö È®ÀÎ
+            /// ICP Task Å¸ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ È®ï¿½ï¿½
             bool is_icp_task = (task.task_type == TaskType::ICP_FINE_ALIGNMENT);
 
-            /// 5. Å×½ºÆ® Task Å¸ÀÔÀÎÁö È®ÀÎ
+            /// 5. ï¿½×½ï¿½Æ® Task Å¸ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ È®ï¿½ï¿½
             bool is_test_task = (task.task_type == TaskType::TEST_ECHO ||
                 task.task_type == TaskType::TEST_COMPUTE ||
                 task.task_type == TaskType::TEST_DELAY ||
                 task.task_type == TaskType::TEST_FAIL);
             
-            /// ICP Task Ã³¸®
+            /// ICP Task Ã³ï¿½ï¿½
             if (is_icp_task && chunk_data_size > 0) {
                 /// Handle IcpChunk
                 std::vector<uint8_t> chunk_buffer(data + offset, data + offset + chunk_data_size);
@@ -570,7 +592,7 @@ private:
                 task_queue_cv_.notify_one();
             }
             else {
-                /// Handle case with no chunk data (ºó Å×½ºÆ® Task Æ÷ÇÔ)
+                /// Handle case with no chunk data (ï¿½ï¿½ ï¿½×½ï¿½Æ® Task ï¿½ï¿½ï¿½ï¿½)
                 if (is_test_task) {
                     ILOG << "Task " << task.task_id << " is TEST task with default data";
                     TestChunk test_chunk = TestChunk::generate(task.chunk_id, 100, 10000);
@@ -631,7 +653,7 @@ private:
 
             auto start_time = std::chrono::steady_clock::now();
 
-            /// ICP Task Ã³¸®
+            /// ICP Task Ã³ï¿½ï¿½
             if (item.is_icp) {
                 icp::IcpResult icp_result;
                 try {
@@ -655,7 +677,7 @@ private:
                 sendIcpResult(icp_result, item.task.task_id);
                 updateStats(icp_result.success, processing_time / 1000.0);
             }
-            /// Å×½ºÆ® Task Ã³¸®
+            /// ï¿½×½ï¿½Æ® Task Ã³ï¿½ï¿½
             else if (item.is_test) {
                 TestResult test_result;
                 try {
@@ -795,7 +817,7 @@ private:
     }
 
     /// =========================================
-    /// Å×½ºÆ® Task Ã³¸® ÇÔ¼ö
+    /// ï¿½×½ï¿½Æ® Task Ã³ï¿½ï¿½ ï¿½Ô¼ï¿½
     /// =========================================
 
     TestResult processTestTask(const ProcessingTask& task, TestChunk& chunk) {
@@ -900,10 +922,10 @@ private:
 
     void sendTestResult(const TestResult& result) {
         try {
-            /// TestResult¸¦ Á÷·ÄÈ­
+            /// TestResultï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½È­
             std::vector<uint8_t> result_data = result.serialize();
 
-            /// is_test flag (2) Ãß°¡ÇÏ¿© Master°¡ Å×½ºÆ® °á°úÀÓÀ» ÀÎ½Ä
+            /// is_test flag (2) ï¿½ß°ï¿½ï¿½Ï¿ï¿½ Masterï¿½ï¿½ ï¿½×½ï¿½Æ® ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Î½ï¿½
             std::vector<uint8_t> message_data;
             message_data.push_back(2);  /// is_test = true (0: normal, 1: bimpc, 2: test)
             message_data.insert(message_data.end(), result_data.begin(), result_data.end());

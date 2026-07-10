@@ -1,4 +1,4 @@
-// inet_ntoa ê²½ê³  ?´ê²°
+// inet_ntoa ê²½ê³  ?ï¿½ê²°
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 
 #include "../include/NetworkManager.h"
@@ -390,7 +390,7 @@ namespace DPApp {
             writer.write(meshChunk.id);
             writer.writeString(meshChunk.name);
 
-            /// 2. Faces (Batch Write) - vertices[3] ?¬ìš©
+            /// 2. Faces (Batch Write) - vertices[3] ?ï¿½ìš©
             uint32_t face_count = static_cast<uint32_t>(meshChunk.faces.size());
             writer.write(face_count);
 
@@ -439,7 +439,7 @@ namespace DPApp {
             meshChunk.id = reader.read<int>();
             meshChunk.name = reader.readString();
 
-            /// 2. Faces (Batch Read) - vertices[3] ?¬ìš©
+            /// 2. Faces (Batch Read) - vertices[3] ?ï¿½ìš©
             uint32_t face_count = reader.read<uint32_t>();
 
             if (face_count > 0) {
@@ -943,7 +943,26 @@ namespace DPApp {
         sockaddr_in server_addr{};
         server_addr.sin_family = AF_INET;
         server_addr.sin_port = htons(port);
-        inet_pton(AF_INET, address.c_str(), &server_addr.sin_addr);
+
+        /// inet_pton() only accepts numeric dotted-decimal addresses (e.g. "127.0.0.1");
+        /// it silently fails (leaving sin_addr as 0.0.0.0) for hostnames like "localhost",
+        /// which used to make every connection attempt to a named host fail. Resolve via
+        /// getaddrinfo() first, which handles both numeric addresses and hostnames.
+        if (inet_pton(AF_INET, address.c_str(), &server_addr.sin_addr) != 1) {
+            addrinfo hints{};
+            hints.ai_family = AF_INET;
+            hints.ai_socktype = SOCK_STREAM;
+            addrinfo* resolved = nullptr;
+            int gai_result = getaddrinfo(address.c_str(), nullptr, &hints, &resolved);
+            if (gai_result != 0 || resolved == nullptr) {
+                ELOG << "Failed to resolve server address: " << address;
+                cleanupSocket();
+                return false;
+            }
+            server_addr.sin_addr = reinterpret_cast<sockaddr_in*>(resolved->ai_addr)->sin_addr;
+            freeaddrinfo(resolved);
+        }
+
         if (::connect(client_socket_, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr)) < 0) {
             ELOG << "Failed to connect to server: " << address << ":" << port;
             cleanupSocket();
@@ -965,26 +984,26 @@ namespace DPApp {
         shutdown_requested_ = true;
         connected_ = false;
 
-        // ë¨¼ì? ?Œì¼“???«ì•„??ë¸”ë¡??recv/send ?´ì œ
+        // ë¨¼ï¿½? ?ï¿½ì¼“???ï¿½ì•„??ë¸”ë¡??recv/send ?ï¿½ì œ
         cleanupSocket();
 
-        // client_thread ì¢…ë£Œ ?€ê¸?(?€?„ì•„???ìš©)
+        // client_thread ì¢…ë£Œ ?ï¿½ï¿½?(?ï¿½?ï¿½ì•„???ï¿½ìš©)
         if (client_thread_.joinable()) {
-            for (int i = 0; i < 30; ++i) {  // ìµœë? 3ì´??€ê¸?
+            for (int i = 0; i < 30; ++i) {  // ìµœï¿½? 3ï¿½??ï¿½ï¿½?
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
             try {
                 if (client_thread_.joinable()) {
-                    client_thread_.detach();  // ?€?„ì•„????detach
+                    client_thread_.detach();  // ?ï¿½?ï¿½ì•„????detach
                     WLOG << "Client thread detached after timeout";
                 }
             }
             catch (...) {}
         }
 
-        // heartbeat_thread ì¢…ë£Œ ?€ê¸?(?€?„ì•„???ìš©)
+        // heartbeat_thread ì¢…ë£Œ ?ï¿½ï¿½?(?ï¿½?ï¿½ì•„???ï¿½ìš©)
         if (heartbeat_thread_.joinable()) {
-            for (int i = 0; i < 20; ++i) {  // ìµœë? 2ì´??€ê¸?
+            for (int i = 0; i < 20; ++i) {  // ìµœï¿½? 2ï¿½??ï¿½ï¿½?
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
             try {

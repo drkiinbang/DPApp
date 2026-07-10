@@ -71,6 +71,10 @@ namespace DPApp {
 
 		std::string api_key = "";
 
+		/// Slave -> Master initial connection retry
+		int slave_reconnect_interval_seconds = 5; /// wait time between connection attempts
+		int slave_max_reconnect_attempts = 10; /// give up after this many failed attempts (<=0 means retry forever)
+
 		/// Logging level, etc. can be extended
 		static RuntimeConfig loadFromEnv() {
 			RuntimeConfig cfg;
@@ -81,6 +85,8 @@ namespace DPApp {
 			cfg.rest_threadpool_size = getenv_int("DPAPP_REST_THREADS", cfg.rest_threadpool_size);
 			cfg.rest_socket_recv_timeout_ms = getenv_int("DPAPP_REST_RECV_TIMEOUT_MS", cfg.rest_socket_recv_timeout_ms);
 			cfg.api_key = getenv_string("DPAPP_API_KEY", "");
+			cfg.slave_reconnect_interval_seconds = getenv_int("DPAPP_SLAVE_RECONNECT_INTERVAL", cfg.slave_reconnect_interval_seconds);
+			cfg.slave_max_reconnect_attempts = getenv_int("DPAPP_SLAVE_MAX_RECONNECT_ATTEMPTS", cfg.slave_max_reconnect_attempts);
 
 			if (cfg.server_io_threads <= 0) {
 				cfg.server_io_threads = static_cast<int>((std::max)(2u, std::thread::hardware_concurrency()));

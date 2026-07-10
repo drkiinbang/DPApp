@@ -9,7 +9,7 @@ TEST(TestCaseName, TestName) {
 
 TEST(TaskManagerTest, ImportBIM)
 {
-    const std::string dataFolder = "F:\\repository\\DPApp\\data";
+    const std::string dataFolder = "../data";
     std::string project_name = "samsung_test";
     std::string bim_folder = dataFolder + std::string("\\10glb");
     std::string nodes2_folder = dataFolder + std::string("\\10glbnodes2_");
@@ -33,7 +33,7 @@ TEST(TaskManagerTest, ImportBIM)
 
 TEST(TaskManagerTest, ImportPTS)
 {
-    const std::string dataFolder = "F:\\repository\\DPApp\\data";
+    const std::string dataFolder = "../data";
     std::string project_name = "samsung_test_pts";
     
     bool is_offset_applied = false;
@@ -58,7 +58,7 @@ TEST(TaskManagerTest, ImportPTS)
 
 TEST(TaskManagerTest, ImportLAS)
 {
-    const std::string dataFolder = "F:\\repository\\DPApp\\data";
+    const std::string dataFolder = "../data";
     std::string project_name = "samsung_test_las";
     
     bool is_offset_applied = false;
@@ -82,7 +82,7 @@ TEST(TaskManagerTest, ImportLAS)
 
 TEST(TaskManagerTest, ImportPointclouds2)
 {
-    const std::string dataFolder = "F:\\repository\\DPApp\\data";
+    const std::string dataFolder = "../data";
     std::string project_name = "samsung_test_pc2";
 
     bool is_offset_applied = false;
