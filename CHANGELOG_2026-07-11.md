@@ -77,6 +77,38 @@
 
 ---
 
+## 10. [후속] 외부 재검토 피드백 반영 (같은 날 2차 커밋)
+
+이 문서의 §1~9 커밋을 외부에 다시 검토받은 결과, 2개의 유효한 지적과 1개의 부가 제안을 받아 모두 반영했습니다.
+
+### 10-1. [높음] `NetworkClient::sendMessage()` 동시 송신 시 메시지 프레임 손상 위험 — ✅ 완료
+
+- **지적 내용**: §6에서 `-t` 옵션으로 다중 처리 스레드를 실제로 활성화했는데, 여러 스레드가 동시에 `NetworkClient::sendMessage()`를 호출할 수 있고, `sendAll()`은 큰 메시지에 대해 `send()`를 여러 번 호출할 수 있어 두 스레드의 바이트가 뒤섞여 Master의 메시지 프레임 해석이 깨질 수 있다는 지적이었습니다.
+- **검증 결과**: **지적이 정확했고, 실제로는 리뷰보다 더 넓은 범위의 문제였습니다.** 코드를 확인한 결과 `sendMessage()`에는 애초에 뮤텍스가 전혀 없었고, `-t 2` 이상뿐 아니라 **`-t 1`(기본값)에서도 이미 위험한 상태**였습니다 — heartbeat 응답이 별도 스레드(`NetworkClient::heartbeatThread()`)에서 같은 소켓으로 독립적으로 전송되기 때문입니다. 지금까지 우연히 타이밍이 겹치지 않아 드러나지 않았을 뿐입니다. 같은 문제가 Master 쪽(`NetworkServer::sendMessage()`, `NetworkServer::broadcastMessage()`)에도 대칭적으로 존재했고, `broadcastMessage()` 코드에는 이 문제를 인지만 하고 실제로 고치지 않은 기존 코멘트(`// sendAll is assumed to be thread-safe, or per-socket locking is required`)가 남아 있었습니다.
+- **수정**: `NetworkClient`에 `send_mutex_`를, `ClientConnection`(Master가 각 클라이언트별로 갖는 연결 정보)에 `send_mutex`를 추가해 각각의 `sendMessage()`/`broadcastMessage()`가 소켓 전송 구간 전체를 잠그도록 수정.
+- **검증**: `SlaveApp.exe -t 4`로 4개 처리 스레드를 활성화하고, 20개의 test_echo/test_compute 태스크를 빠르게 연속 실행. Master 로그에서 **11개 결과 전부 `[TEST] Task N VERIFIED - all 100 results correct`** 로 프레임 손상 없이 정상 수신됨을 확인. 이어서 `bimpc` 태스크도 정상 완료되어 회귀 없음을 확인.
+
+### 10-2. [중간] BIM 거리계산이 실제 삼각형 거리가 아닌 가상점 근사 거리였던 문제 — ✅ 완료
+
+- **지적 내용**: §2에서 구현한 거리계산이 메시 표면 위에 0.1m 간격으로 뿌린 가상점 중 최근접점까지의 거리이지, 엄밀한 점-삼각형 거리가 아니므로, 5cm 허용오차 판정이 샘플링 오차의 영향을 받을 수 있다는 지적이었습니다.
+- **수정**: [include/bimtree/PseudoPointGenerator.hpp](include/bimtree/PseudoPointGenerator.hpp)에 표준 point-to-triangle 최근접점 알고리즘(`pointToTriangleDistanceSquared`, Ericson의 *Real-Time Collision Detection* 기반)을 추가. `processBimPc()`는 이제 KD-Tree로 후보 가상점 8개를 찾아 그 가상점들이 속한 면(face)들을 후보로 좁힌 뒤, 각 후보 면에 대해 정확한 점-삼각형 거리를 계산하고 그중 최솟값을 사용하도록 변경(KD-Tree는 후보를 빠르게 좁히는 용도로만 사용, 최종 거리는 항상 엄밀 계산).
+- **검증**: 동일 샘플(371,643점, icp_test)에 대해 수정 전/후 비교:
+  | | 근사(가상점, 수정 전) | 정확(삼각형, 수정 후) |
+  |---|---|---|
+  | avg_distance | 0.0240m | 0.0118m |
+  | min_distance | 0.000112m | 0m |
+  | 5cm 이내 포인트 | 336,059 / 371,643 | 366,460 / 371,643 |
+
+  근사 거리는 항상 실제 거리보다 크거나 같아야 하므로(가상점은 표면 위 이산 샘플일 뿐), 평균이 줄고 5cm 이내 판정 포인트 수가 늘어난 것은 기하학적으로 정확히 예상된 방향입니다.
+
+### 10-3. [부가] `TestTaskManager`가 `bin/`에서 실행할 때만 상대경로가 맞는 문제 — ✅ 완료
+
+- **지적 내용**: `../data`가 CWD(현재 작업 폴더) 기준이라 `bin/`이 아닌 다른 위치(저장소 루트 등)에서 실행하면 실패하므로, CI나 개발 편의를 위해 실행 파일 위치 기준으로 경로를 계산하는 편이 더 견고하다는 제안이었습니다.
+- **수정**: [Test/TestTaskManager/test.cpp](Test/TestTaskManager/test.cpp)에 `GetModuleFileNameA()`로 실행 파일의 실제 경로를 구해 그 위치를 기준으로 `data` 폴더를 찾는 `getTestDataFolder()` 헬퍼를 추가.
+- **검증**: 저장소 **루트 폴더에서** `bin/TestTaskManager.exe`를 실행해도(기존에는 실패했어야 할 상황) 정상적으로 `bin/../data/...` 경로를 찾아 `[  PASSED  ] 1 test.` 확인. `bin/`에서 실행한 전체 스위트도 5/5 PASSED로 회귀 없음.
+
+---
+
 ## 종합 결과
 
 | 항목 | 상태 |
@@ -87,14 +119,18 @@
 | `processing_threads` 설정 | ✅ 실제로 동작하도록 배선 완료 |
 | 빌드 스크립트/README | ✅ 현재 구조와 일치하도록 정리 |
 | 레거시 문서 | ✅ 점검 완료, 1건 정정 필요 사항 식별(문서 소유자 조치 필요) |
+| 다중 스레드(`-t`) 결과 송신 안전성 | ✅ 뮤텍스 추가, `-t 4`로 재현 테스트 통과 (§10-1) |
+| BIM 거리계산 정확도 | ✅ 근사(가상점) → 정확(점-삼각형) 거리로 교체 (§10-2) |
 
 ## 부록. 변경된 파일 목록
 
 | 파일 | 변경 내용 |
 |---|---|
-| `src/NetworkManager.cpp` | BimPcChunk/MeshChunk 역직렬화 float→double 수정 (§1) |
-| `include/TaskManager.h` | `processBimPc()` 실제 거리계산 로직 구현 (§2) |
-| `Test/TestTaskManager/test.cpp` | `ImportPointclouds2` 방어 코드 보강 (§4) |
+| `src/NetworkManager.cpp` | BimPcChunk/MeshChunk 역직렬화 float→double 수정 (§1), 송신 뮤텍스 추가 (§10-1) |
+| `include/NetworkManager.h` | `NetworkClient::send_mutex_`, `ClientConnection::send_mutex` 추가 (§10-1) |
+| `include/TaskManager.h` | `processBimPc()` 실제 거리계산 로직 구현 (§2), 정확한 삼각형 거리로 교체 (§10-2) |
+| `include/bimtree/PseudoPointGenerator.hpp` | `pointToTriangleDistanceSquared()` 추가 (§10-2) |
+| `Test/TestTaskManager/test.cpp` | `ImportPointclouds2` 방어 코드 보강 (§4), 실행파일 기준 경로 계산으로 변경 (§10-3) |
 | `MasterApp/MasterApplication.cpp` | `handleTaskResult()` result_type==3 라우팅 수정 (§5) |
 | `MasterApp/MasterApplication.h` | `icp_task_to_job_` 매핑 테이블 추가 (§5) |
 | `MasterApp/MasterApplication_ICP.cpp` | `handleIcpResult()` 구현 (§5) |

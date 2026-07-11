@@ -7,9 +7,31 @@ TEST(TestCaseName, TestName) {
 
 #include "TaskManager.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+/// [Fix] The data path used to be the literal "../data", which only resolves correctly when
+/// the test is run with bin/ as the working directory (e.g. double-clicking the exe in
+/// Explorer, or running it from a different directory in CI, would fail to find any test
+/// data). This resolves the path relative to the running executable's own location instead,
+/// so it works regardless of the caller's current working directory.
+static std::string getTestDataFolder() {
+#ifdef _WIN32
+    char exePath[MAX_PATH] = { 0 };
+    GetModuleFileNameA(NULL, exePath, MAX_PATH);
+    std::string path(exePath);
+    size_t lastSlash = path.find_last_of("\\/");
+    std::string exeDir = (lastSlash != std::string::npos) ? path.substr(0, lastSlash) : ".";
+    return exeDir + "\\..\\data";
+#else
+    return "../data";
+#endif
+}
+
 TEST(TaskManagerTest, ImportBIM)
 {
-    const std::string dataFolder = "../data";
+    const std::string dataFolder = getTestDataFolder();
     std::string project_name = "samsung_test";
     std::string bim_folder = dataFolder + std::string("\\10glb");
     std::string nodes2_folder = dataFolder + std::string("\\10glbnodes2_");
@@ -33,7 +55,7 @@ TEST(TaskManagerTest, ImportBIM)
 
 TEST(TaskManagerTest, ImportPTS)
 {
-    const std::string dataFolder = "../data";
+    const std::string dataFolder = getTestDataFolder();
     std::string project_name = "samsung_test_pts";
     
     bool is_offset_applied = false;
@@ -58,7 +80,7 @@ TEST(TaskManagerTest, ImportPTS)
 
 TEST(TaskManagerTest, ImportLAS)
 {
-    const std::string dataFolder = "../data";
+    const std::string dataFolder = getTestDataFolder();
     std::string project_name = "samsung_test_las";
     
     bool is_offset_applied = false;
@@ -82,7 +104,7 @@ TEST(TaskManagerTest, ImportLAS)
 
 TEST(TaskManagerTest, ImportPointclouds2)
 {
-    const std::string dataFolder = "../data";
+    const std::string dataFolder = getTestDataFolder();
     std::string project_name = "samsung_test_pc2";
 
     bool is_offset_applied = false;

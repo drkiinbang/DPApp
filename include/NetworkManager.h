@@ -87,6 +87,11 @@ namespace DPApp {
         std::atomic<bool> is_active;
         std::chrono::steady_clock::time_point last_heartbeat;
 
+        /// Serializes sends to this client's socket (see NetworkClient::send_mutex_ for the
+        /// matching issue on the Slave side: NetworkServer::heartbeatThread() and the main
+        /// task-dispatch path can both send to the same client concurrently).
+        std::mutex send_mutex;
+
         ClientConnection(int fd, const std::string& addr, uint16_t p)
             : socket_fd(fd), address(addr), port(p), is_active(true),
             last_heartbeat(std::chrono::steady_clock::now()) {
@@ -203,6 +208,14 @@ namespace DPApp {
 
         std::thread client_thread_;
         std::thread heartbeat_thread_;
+
+        /// Serializes sendMessage() so concurrent callers (multiple processing threads when
+        /// -t > 1, plus the independent heartbeat thread that always runs regardless of -t)
+        /// can't interleave their send() calls on the same socket. sendAll() may issue several
+        /// send() calls for one message, so without this a large result and a heartbeat (or two
+        /// results) sent at the same time could interleave mid-message and corrupt the byte
+        /// stream the Master parses as message frames.
+        std::mutex send_mutex_;
 
         MessageCallback message_callback_;
         ConnectionCallback connection_callback_;

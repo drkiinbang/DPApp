@@ -831,6 +831,9 @@ namespace DPApp {
             if (it == clients_.end() || !it->second->is_active) return false;
             client = it->second;
         }
+        /// [Fix] Same hazard as NetworkClient::sendMessage(): the task-dispatch path and
+        /// heartbeatThread() can both reach this for the same client concurrently.
+        std::lock_guard<std::mutex> send_lock(client->send_mutex);
         return NetworkUtils::sendAll(client->socket_fd, message.serialize());
     }
 
@@ -906,12 +909,16 @@ namespace DPApp {
             }
         }
 
-        /// 2. Send without holding the lock
-        /// (sendAll is assumed to be thread-safe, or per-socket locking is required)
+        /// 2. Send without holding clients_mutex_, but still serialized per-socket.
+        /// [Fix] This used to call sendAll() directly with no per-socket locking (per the
+        /// comment that used to be here); a client's own send_mutex now guards it, matching
+        /// sendMessage() above, so a broadcast can't interleave with a heartbeat or task send
+        /// to the same client.
         bool all_success = true;
         auto data = message.serialize(); /// Perform serialization only once
 
         for (const auto& conn : targets) {
+            std::lock_guard<std::mutex> send_lock(conn->send_mutex);
             if (!NetworkUtils::sendAll(conn->socket_fd, data)) {
                 all_success = false;
             }
@@ -1045,6 +1052,10 @@ namespace DPApp {
 
     bool NetworkClient::sendMessage(const NetworkMessage& message) {
         if (!connected_) return false;
+        /// [Fix] Serialize concurrent senders (processing threads with -t > 1, and the
+        /// independent heartbeat thread) so sendAll()'s possibly-multiple send() calls for
+        /// one message can't interleave with another thread's send() calls on the same socket.
+        std::lock_guard<std::mutex> lock(send_mutex_);
         return NetworkUtils::sendAll(client_socket_, message.serialize());
     }
 

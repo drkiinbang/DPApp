@@ -2855,8 +2855,17 @@ namespace DPApp {
                     icp::KdTree3D tree(3, adaptor, nanoflann::KDTreeSingleIndexAdaptorParams(50));
                     tree.buildIndex();
 
-                    /// 3. For every input point, find the nearest point on the mesh surface
-                    /// and record the distance and the originating face id.
+                    /// 3. For every input point, use the KD-Tree over pseudo points to narrow
+                    /// down a handful of candidate faces (the ones nearby pseudo points came
+                    /// from), then compute the *exact* point-to-triangle distance to each
+                    /// candidate and keep the minimum. This reports true point-to-surface
+                    /// distance rather than distance to the nearest sampled pseudo point --
+                    /// using only the nearest pseudo point would bias distances by up to
+                    /// roughly the grid spacing (kBimPcPseudoPointGridSize), which matters
+                    /// right at the QC threshold below.
+                    constexpr size_t kCandidateNeighbors = 8;
+                    const size_t numCandidates = (std::min)(kCandidateNeighbors, pseudoPoints.size());
+
                     const size_t n = chunk.points.size();
                     result.point_distances.resize(n);
                     result.nearest_face_ids.resize(n);
@@ -2867,6 +2876,9 @@ namespace DPApp {
                     double maxDist = 0.0;
                     uint32_t within = 0;
 
+                    std::vector<size_t> candidateIdx(numCandidates);
+                    std::vector<double> candidateDistSq(numCandidates);
+
                     for (size_t i = 0; i < n; ++i) {
                         std::array<double, 3> query = {
                             static_cast<double>(chunk.points[i].x()),
@@ -2874,15 +2886,34 @@ namespace DPApp {
                             static_cast<double>(chunk.points[i].z())
                         };
 
-                        size_t nearestIdx = 0;
-                        double nearestDistSq = 0.0;
-                        nanoflann::KNNResultSet<double> resultSet(1);
-                        resultSet.init(&nearestIdx, &nearestDistSq);
+                        nanoflann::KNNResultSet<double> resultSet(numCandidates);
+                        resultSet.init(candidateIdx.data(), candidateDistSq.data());
                         tree.findNeighbors(resultSet, query.data(), nanoflann::SearchParams());
 
-                        double dist = std::sqrt(nearestDistSq);
+                        double bestDistSq = (std::numeric_limits<double>::max)();
+                        size_t bestFace = faceIdx[candidateIdx[0]];
+                        size_t lastFace = static_cast<size_t>(-1);
+
+                        for (size_t k = 0; k < numCandidates; ++k) {
+                            size_t face = faceIdx[candidateIdx[k]];
+                            if (face == lastFace) continue; /// candidates are often on the same face; skip repeats
+                            lastFace = face;
+
+                            const auto& f = chunk.bim.faces[face];
+                            std::array<double, 3> a = { f.vertices[0][0], f.vertices[0][1], f.vertices[0][2] };
+                            std::array<double, 3> b = { f.vertices[1][0], f.vertices[1][1], f.vertices[1][2] };
+                            std::array<double, 3> c = { f.vertices[2][0], f.vertices[2][1], f.vertices[2][2] };
+
+                            double distSq = icp::pointToTriangleDistanceSquared(query, a, b, c);
+                            if (distSq < bestDistSq) {
+                                bestDistSq = distSq;
+                                bestFace = face;
+                            }
+                        }
+
+                        double dist = std::sqrt(bestDistSq);
                         result.point_distances[i] = dist;
-                        result.nearest_face_ids[i] = static_cast<int32_t>(faceIdx[nearestIdx]);
+                        result.nearest_face_ids[i] = static_cast<int32_t>(bestFace);
 
                         sum += dist;
                         sumSq += dist * dist;
