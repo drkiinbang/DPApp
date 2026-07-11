@@ -427,12 +427,16 @@ namespace DPApp {
                     auto& bimpc_chunk = chunks.back();
                     bimpc_chunk->chunk_id = static_cast<uint32_t>(i);
                     bimpc_chunk->bim = std::move(bimData[i]);
+                    bimpc_chunk->offsetX = rebaseOffset[0];
+                    bimpc_chunk->offsetY = rebaseOffset[1];
+                    bimpc_chunk->offsetZ = rebaseOffset[2];
                 }
 
                 /// Assign each point to the BIM chunk whose bounding box contains it. `pc` is
-                /// shifted (float, absolute - rebaseOffset); unshift back to absolute double
-                /// coordinates here so the comparison/storage below matches chunk.bim's
-                /// (unshifted) frame -- BimPcChunk always holds absolute-frame data.
+                /// shifted (float, absolute - rebaseOffset); widen+unshift just for the bbox
+                /// comparison (chunk.bim is always absolute), but store the original shifted
+                /// float value -- BimPcChunk::points stays float+shifted, matching `pc`'s own
+                /// representation exactly (no conversion needed).
                 /// If a point falls outside all boxes, assign it to the nearest chunk center.
                 const double margin = 1.0;
                 for (const auto& pt : pc) {
@@ -459,7 +463,7 @@ namespace DPApp {
                         if (d < best_dist_sq) { best_dist_sq = d; best = static_cast<int>(i); }
                     }
 
-                    chunks[best]->points.push_back(Point3D(px, py, pz));
+                    chunks[best]->points.push_back(pt);
                 }
 
                 for (auto& bimpc_chunk : chunks) {
@@ -515,11 +519,11 @@ namespace DPApp {
 
                 /// Clip points into every element's (margin-expanded) box. coarseAlignedPoints
                 /// is shifted (float, absolute - offset); elements are absolute (unshifted), so
-                /// shift each element's box down by the same offset for the comparison, and
-                /// widen + unshift each matched point back to absolute double coordinates --
-                /// IcpChunk always holds absolute-frame data.
+                /// widen+unshift each point just for the bbox comparison, but store the
+                /// original shifted float value -- IcpChunk::sourcePoints stays float+shifted,
+                /// matching this bulk array's own representation exactly (no conversion needed).
                 const double margin = (std::max)(config.maxCorrespondenceDistance, 0.1);
-                std::vector<std::vector<std::array<double, 3>>> elementPoints(numElements);
+                std::vector<std::vector<std::array<float, 3>>> elementPoints(numElements);
 
                 for (const auto& pt : coarseAlignedPoints) {
                     double px = static_cast<double>(pt[0]) + offsetX;
@@ -530,7 +534,7 @@ namespace DPApp {
                         if (px >= bim.min_x - margin && px <= bim.max_x + margin &&
                             py >= bim.min_y - margin && py <= bim.max_y + margin &&
                             pz >= bim.min_z - margin && pz <= bim.max_z + margin) {
-                            elementPoints[i].push_back({ px, py, pz });
+                            elementPoints[i].push_back(pt);
                         }
                     }
                 }
@@ -544,12 +548,15 @@ namespace DPApp {
                         continue;
                     }
 
+                    /// Generated in the same shifted frame as elementPoints[i] (offset passed
+                    /// through), so it can be narrowed to float and stored directly below.
                     std::vector<std::array<double, 3>> pseudoPoints;
                     std::vector<size_t> faceIdx;
                     std::vector<std::array<double, 3>> facePts;
                     std::vector<std::array<double, 3>> faceNormals;
                     icp::generatePseudoPointsFromMesh(boundedElements[i], config.pseudoPointGridSize,
-                        pseudoPoints, faceIdx, facePts, faceNormals);
+                        pseudoPoints, faceIdx, facePts, faceNormals,
+                        offsetX, offsetY, offsetZ);
 
                     if (pseudoPoints.empty()) {
                         ++skippedDegenerateMesh;
@@ -559,11 +566,14 @@ namespace DPApp {
                     auto chunk = std::make_shared<icp::IcpChunk>();
                     chunk->chunk_id = static_cast<uint32_t>(chunks.size());
                     chunk->sourcePoints = std::move(elementPoints[i]);
-                    chunk->targetPoints = std::move(pseudoPoints);
+                    chunk->targetPoints = icp::narrowToFloat(pseudoPoints);
                     chunk->faceIndices = std::move(faceIdx);
-                    chunk->faceNormals = std::move(faceNormals);
-                    chunk->facePts = std::move(facePts);
+                    chunk->faceNormals = icp::narrowToFloat(faceNormals);
+                    chunk->facePts = icp::narrowToFloat(facePts);
                     chunk->config = config;
+                    chunk->offsetX = offsetX;
+                    chunk->offsetY = offsetY;
+                    chunk->offsetZ = offsetZ;
                     chunk->calculateSourceBounds();
                     chunk->calculateTargetBounds();
 

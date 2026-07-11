@@ -223,31 +223,40 @@ namespace icp {
     // IcpChunk - Data chunk for distributed ICP processing
     //=========================================================================
 
-    /// Chunk data sent to Slave for local ICP processing
+    /// Chunk data sent to Slave for local ICP processing. Point arrays are stored as `float`,
+    /// shifted by (offsetX, offsetY, offsetZ) relative to absolute coordinates -- this keeps
+    /// wire/storage size small while preserving sub-mm precision (see icp::computeBimRebaseOffset
+    /// in PseudoPointGenerator.hpp for how the offset is chosen). Consumers (runIcp) widen back
+    /// to double and add the offset back exactly once, at the top of the function, before doing
+    /// any actual math.
     struct IcpChunk {
         /// Unique chunk identifier
         uint32_t chunk_id = 0;
 
-        /// Source points (from point cloud) - [x, y, z]
-        std::vector<std::array<double, 3>> sourcePoints;
+        /// Source points (from point cloud) - [x, y, z], shifted, float
+        std::vector<std::array<float, 3>> sourcePoints;
 
-        /// Target points (pseudo-points from mesh) - [x, y, z]
-        std::vector<std::array<double, 3>> targetPoints;
+        /// Target points (pseudo-points from mesh) - [x, y, z], shifted, float
+        std::vector<std::array<float, 3>> targetPoints;
 
         /// Index indicating which face each point belongs to
         std::vector<size_t> faceIndices;
 
-        /// Face normal vectors - [nx, ny, nz]
-        std::vector<std::array<double, 3>> faceNormals;
+        /// Face normal vectors - [nx, ny, nz]. Direction vectors, never shifted by offset.
+        std::vector<std::array<float, 3>> faceNormals;
 
-        /// Face representative points (one vertex per face) - [x, y, z]
-        std::vector<std::array<double, 3>> facePts;
+        /// Face representative points (one vertex per face) - [x, y, z], shifted, float
+        std::vector<std::array<float, 3>> facePts;
 
         /// Initial transformation (from coarse alignment)
         Transform4x4 initialTransform;
 
         /// ICP configuration for this chunk
         IcpConfig config;
+
+        /// Rebase offset applied to sourcePoints/targetPoints/facePts (double, exact) -- add
+        /// this back after widening to double to recover absolute coordinates.
+        double offsetX = 0.0, offsetY = 0.0, offsetZ = 0.0;
 
         /// Bounding box of source points
         double source_min_x = 0.0, source_min_y = 0.0, source_min_z = 0.0;
@@ -299,10 +308,10 @@ namespace icp {
         /// Get approximate memory size in bytes
         size_t getApproximateSize() const {
             return sizeof(IcpChunk) +
-                sourcePoints.size() * sizeof(std::array<double, 3>) +
-                targetPoints.size() * sizeof(std::array<double, 3>) +
+                sourcePoints.size() * sizeof(std::array<float, 3>) +
+                targetPoints.size() * sizeof(std::array<float, 3>) +
                 faceIndices.size() * sizeof(size_t) +
-                faceNormals.size() * sizeof(std::array<double, 3>);
+                faceNormals.size() * sizeof(std::array<float, 3>);
         }
 
         /// Check if chunk has valid data for processing

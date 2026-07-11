@@ -64,6 +64,8 @@ void MasterApplication::printHelp() {
     ILOG << "";
     ILOG << "=== DPApp Master Console Commands ===";
     ILOG << "bimpc <mesh_folder> <pc_file>  - Process BIM mesh + PointCloud";
+    ILOG << "gensynth <bim_folder> <out.las> [num_elements] [grid_size] [noise_sigma] [shift_x] [shift_y] [shift_z] [rot_deg]";
+    ILOG << "                                - Generate a synthetic scan point cloud from a BIM mesh";
     ILOG << "load <file> <task_type>        - Load file and create tasks";
     ILOG << "status                         - Show system status";
     ILOG << "slaves                         - List connected slaves";
@@ -141,6 +143,24 @@ void MasterApplication::processCommand(const std::string& command) {
 
             loadAndProcessPointCloud(filename, task_type);
         }
+    }
+    else if (cmd == "gensynth") {
+        std::string bim_folder, output_las;
+        int num_elements = 0;
+        double grid_size = 0.02, noise_sigma = 0.0;
+        double shift_x = 0.0, shift_y = 0.0, shift_z = 0.0, rot_deg = 0.0;
+        iss >> bim_folder >> output_las >> num_elements >> grid_size >> noise_sigma
+            >> shift_x >> shift_y >> shift_z >> rot_deg;
+
+        if (bim_folder.empty() || output_las.empty()) {
+            WLOG << "Usage: gensynth <bim_folder> <output.las> [num_elements=all] [grid_size=0.02] "
+                << "[noise_sigma=0] [shift_x=0] [shift_y=0] [shift_z=0] [rot_deg=0]";
+        }
+        else {
+            runGenerateSyntheticPointCloud(bim_folder, output_las, num_elements, grid_size,
+                noise_sigma, shift_x, shift_y, shift_z, rot_deg);
+        }
+        return;
     }
     else if (cmd == "pts2bim_dist") {
         std::string gltfPath, pc2Path;
@@ -506,7 +526,7 @@ void MasterApplication::printTestHelp() {
 void MasterApplication::runTestEcho(uint32_t count, uint32_t base_time_ms) {
     ILOG << "Starting TEST_ECHO: " << count << " tasks, " << base_time_ms << "ms each";
 
-    // TaskManager ÃÊ±âÈ­ (¾ÆÁ÷ ¾øÀ¸¸é)
+    // TaskManager ï¿½Ê±ï¿½È­ (ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½)
     if (!task_manager_) {
         if (!initializeTaskManager(TaskType::TEST_ECHO)) {
             ELOG << "Failed to initialize TaskManager for TEST_ECHO";
@@ -514,11 +534,11 @@ void MasterApplication::runTestEcho(uint32_t count, uint32_t base_time_ms) {
         }
     }
 
-    // Å×½ºÆ® Ã»Å© »ý¼º
+    // ï¿½×½ï¿½Æ® Ã»Å© ï¿½ï¿½ï¿½ï¿½
     std::vector<TestChunk> chunks;
     for (uint32_t i = 0; i < count; ++i) {
         TestChunk chunk = TestChunk::generate(i, 100, base_time_ms);
-        // TEST_ECHO: expected_outputÀº input°ú µ¿ÀÏÇØ¾ß ÇÔ
+        // TEST_ECHO: expected_outputï¿½ï¿½ inputï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ø¾ï¿½ ï¿½ï¿½
         chunk.expected_output = chunk.input_numbers;
         chunks.push_back(chunk);
     }
@@ -602,18 +622,18 @@ void MasterApplication::createTestTasks(TaskType test_type, const std::vector<Te
         return;
     }
 
-    // TaskManager¿¡ Task Ãß°¡
-    for (auto chunk : chunks) {  // º¹»çº» »ç¿ë (chunk_id ¼öÁ¤ À§ÇØ)
-        // Àü¿ª °íÀ¯ chunk_id ÇÒ´ç
+    // TaskManagerï¿½ï¿½ Task ï¿½ß°ï¿½
+    for (auto chunk : chunks) {  // ï¿½ï¿½ï¿½çº» ï¿½ï¿½ï¿½ (chunk_id ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½)
+        // ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ chunk_id ï¿½Ò´ï¿½
         {
             std::lock_guard<std::mutex> lock(test_mutex_);
             chunk.chunk_id = next_test_chunk_id_++;
-            test_chunks_.push_back(chunk);  // ¼öÁ¤µÈ chunk_id·Î ÀúÀå
+            test_chunks_.push_back(chunk);  // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ chunk_idï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
         }
 
         auto pc_chunk = std::make_shared<PointCloudChunk>();
         pc_chunk->chunk_id = chunk.chunk_id;
-        // points´Â ºñ¿öµÒ - ½ÇÁ¦ µ¥ÀÌÅÍ´Â TestChunk¿¡¼­ Àü¼Û
+        // pointsï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ - ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Í´ï¿½ TestChunkï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
 
         uint32_t task_id = task_manager_->addTask(pc_chunk);
 
@@ -648,7 +668,7 @@ void MasterApplication::printTestStatus() {
             success_count++;
             total_time += result.processing_time_ms;
 
-            // °ËÁõ
+            // ï¿½ï¿½ï¿½ï¿½
             for (const auto& chunk : test_chunks_) {
                 if (chunk.chunk_id == result.chunk_id) {
                     TestResult mutable_result = result;

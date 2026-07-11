@@ -2825,6 +2825,19 @@ namespace DPApp {
                 result.total_points_processed = static_cast<uint32_t>(chunk.points.size());
                 result.total_faces_processed = static_cast<uint32_t>(chunk.bim.faces.size());
 
+                /// chunk.points is stored float, shifted by (offsetX, offsetY, offsetZ) -- widen
+                /// to double and add the offset back exactly once, here, so the rest of this
+                /// function compares against chunk.bim (always absolute, double) exactly as
+                /// before this offset-rebase optimization existed.
+                std::vector<std::array<double, 3>> pointsAbsolute;
+                pointsAbsolute.reserve(chunk.points.size());
+                for (const auto& p : chunk.points) {
+                    pointsAbsolute.push_back({
+                        static_cast<double>(p[0]) + chunk.offsetX,
+                        static_cast<double>(p[1]) + chunk.offsetY,
+                        static_cast<double>(p[2]) + chunk.offsetZ });
+                }
+
                 if (chunk.points.empty() || chunk.bim.faces.empty()) {
                     result.min_distance = 0.0;
                     result.max_distance = 0.0;
@@ -2880,11 +2893,7 @@ namespace DPApp {
                     std::vector<double> candidateDistSq(numCandidates);
 
                     for (size_t i = 0; i < n; ++i) {
-                        std::array<double, 3> query = {
-                            static_cast<double>(chunk.points[i].x()),
-                            static_cast<double>(chunk.points[i].y()),
-                            static_cast<double>(chunk.points[i].z())
-                        };
+                        const std::array<double, 3>& query = pointsAbsolute[i];
 
                         nanoflann::KNNResultSet<double> resultSet(numCandidates);
                         resultSet.init(candidateIdx.data(), candidateDistSq.data());

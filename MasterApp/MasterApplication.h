@@ -145,6 +145,10 @@ public:
     void run();
 
     void runBimPcProcess(const std::string& mesh_folder, const std::string& pointcloud_file);
+    void runGenerateSyntheticPointCloud(
+        const std::string& bim_folder, const std::string& output_las,
+        int num_elements, double grid_size, double noise_sigma,
+        double shift_x, double shift_y, double shift_z, double rot_deg);
     void runDaemon();
     void runInteractive();
     bool loadAndProcessPointCloud(const std::string& filename, const TaskType task_type);

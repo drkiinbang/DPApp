@@ -1214,6 +1214,27 @@ namespace icp {
             return result;
         }
 
+        /// chunk's point arrays are stored float, shifted by (offsetX, offsetY, offsetZ) --
+        /// widen to double and add the offset back exactly once, here, before any actual
+        /// computation. Everything below this point operates on these local double vectors
+        /// exactly as it did before this offset-rebase optimization existed. faceNormals are
+        /// direction vectors and are widened but never shifted.
+        const auto unshiftWiden = [&](const std::vector<std::array<float, 3>>& src) {
+            std::vector<std::array<double, 3>> out;
+            out.reserve(src.size());
+            for (const auto& p : src) {
+                out.push_back({
+                    static_cast<double>(p[0]) + chunk.offsetX,
+                    static_cast<double>(p[1]) + chunk.offsetY,
+                    static_cast<double>(p[2]) + chunk.offsetZ });
+            }
+            return out;
+            };
+        std::vector<std::array<double, 3>> sourcePointsD = unshiftWiden(chunk.sourcePoints);
+        std::vector<std::array<double, 3>> targetPointsD = unshiftWiden(chunk.targetPoints);
+        std::vector<std::array<double, 3>> facePtsD = unshiftWiden(chunk.facePts);
+        std::vector<std::array<double, 3>> faceNormalsD = widenToDouble(chunk.faceNormals);
+
         const auto& config = chunk.config;
 
         /// Check if Point-to-Plane mode is available
@@ -1222,7 +1243,7 @@ namespace icp {
             !chunk.facePts.empty();
 
         /// Build KD-Tree for target points
-        PointCloudAdaptor targetAdaptor(chunk.targetPoints);
+        PointCloudAdaptor targetAdaptor(targetPointsD);
         KdTree3D targetTree(3, targetAdaptor,
             nanoflann::KDTreeSingleIndexAdaptorParams(50));
         targetTree.buildIndex();
@@ -1232,7 +1253,7 @@ namespace icp {
         Transform4x4 accumulatedLocalTransform = Transform4x4::identity();
 
         /// Copy source points for transformation
-        std::vector<std::array<double, 3>> transformedSource = chunk.sourcePoints;
+        std::vector<std::array<double, 3>> transformedSource = sourcePointsD;
         transformPointCloud(transformedSource, currentTransform);
 
         const double maxDistSq = config.maxCorrespondenceDistance *
@@ -1248,7 +1269,7 @@ namespace icp {
             /// Initial RMSE
             findCorrespondencesWithNormals(
                 transformedSource, targetTree, chunk.faceIndices,
-                chunk.faceNormals, chunk.facePts,
+                faceNormalsD, facePtsD,
                 maxDistSq, config.normalAngleThreshold, correspondences);
             result.initialRMSE = computeRMSE(correspondences);
 
@@ -1263,7 +1284,7 @@ namespace icp {
                 /// 1. Find correspondences
                 findCorrespondencesWithNormals(
                     transformedSource, targetTree, chunk.faceIndices,
-                    chunk.faceNormals, chunk.facePts,
+                    faceNormalsD, facePtsD,
                     maxDistSq, config.normalAngleThreshold, correspondences);
 
                 if (static_cast<int>(correspondences.size()) < config.minCorrespondences) {
@@ -1287,7 +1308,7 @@ namespace icp {
                 /// 3. Estimate transformation (Point-to-Plane)
                 Transform4x4 deltaT = estimateRigidTransformPointToPlane(
                     transformedSource, correspondences,
-                    chunk.faceIndices, chunk.faceNormals);
+                    chunk.faceIndices, faceNormalsD);
 #ifdef _DEBUG
                 /// [ToDo]: config
                 std::array<double, uknw> params0 = { 0., 0., 0., 0., 0., 0. };
@@ -1295,7 +1316,7 @@ namespace icp {
                 unsigned int maxIter = 50;
                 Transform4x4 deltaT2 = runLSM(
                     transformedSource, correspondences,
-                    chunk.faceIndices, chunk.faceNormals,
+                    chunk.faceIndices, faceNormalsD,
                     params0, sdThr, maxIter);
 #endif
 
@@ -1342,7 +1363,7 @@ namespace icp {
                 /// 5. Compute RMSE
                 findCorrespondencesWithNormals(
                     transformedSource, targetTree, chunk.faceIndices,
-                    chunk.faceNormals, chunk.facePts,
+                    faceNormalsD, facePtsD,
                     maxDistSq, config.normalAngleThreshold, correspondences);
                 double currentRMSE = computeRMSE(correspondences);
 
@@ -1405,7 +1426,7 @@ namespace icp {
 
                 /// 3. Estimate transformation (Point-to-Point)
                 Transform4x4 deltaT = estimateRigidTransformSVD(
-                    transformedSource, chunk.targetPoints, correspondences);
+                    transformedSource, targetPointsD, correspondences);
 
                 /// 4. Apply transformation
                 transformPointCloud(transformedSource, deltaT);

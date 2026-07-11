@@ -138,11 +138,17 @@ namespace DPApp {
         }
     };
 
-    /// BIM and PointCloud combined chunk
+    /// BIM and PointCloud combined chunk. `points` is stored as `float`, shifted by
+    /// (offsetX, offsetY, offsetZ) relative to absolute coordinates -- `bim` (the mesh) stays
+    /// double/absolute. Consumers (processBimPc) widen `points` back to double and add the
+    /// offset back exactly once, at the top of the function, before comparing against `bim`.
     struct BimPcChunk {
         uint32_t chunk_id;
-        chunkbim::MeshChunk bim;          /// BIM mesh chunk
-        std::vector<Point3D> points;      /// Point cloud chunk
+        chunkbim::MeshChunk bim;               /// BIM mesh chunk (double, absolute)
+        std::vector<std::array<float, 3>> points; /// Point cloud chunk, shifted, float
+
+        /// Rebase offset applied to `points` (double, exact)
+        double offsetX = 0.0, offsetY = 0.0, offsetZ = 0.0;
 
         /// Bounding box of point cloud
         double min_x, min_y, min_z;
@@ -156,7 +162,7 @@ namespace DPApp {
 
         /// Estimate memory usage
         size_t estimateMemoryUsage() const {
-            return sizeof(BimMeshInfo) + points.size() * sizeof(Point3D);
+            return sizeof(BimMeshInfo) + points.size() * sizeof(std::array<float, 3>);
         }
 
         /// Compute bounding box for BIM and point cloud
@@ -174,18 +180,18 @@ namespace DPApp {
             min_z = max_z = points[0][2];
 
             for (const auto& point : points) {
-                min_x = std::min(min_x, point[0]);
-                min_y = std::min(min_y, point[1]);
-                min_z = std::min(min_z, point[2]);
-                max_x = std::max(max_x, point[0]);
-                max_y = std::max(max_y, point[1]);
-                max_z = std::max(max_z, point[2]);
+                min_x = std::min(min_x, static_cast<double>(point[0]));
+                min_y = std::min(min_y, static_cast<double>(point[1]));
+                min_z = std::min(min_z, static_cast<double>(point[2]));
+                max_x = std::max(max_x, static_cast<double>(point[0]));
+                max_y = std::max(max_y, static_cast<double>(point[1]));
+                max_z = std::max(max_z, static_cast<double>(point[2]));
             }
         }
 
         /// Get estimated chunk size in bytes
         size_t getSize() const {
-            return sizeof(PointCloudChunk) + points.size() * sizeof(Point3D);
+            return sizeof(BimPcChunk) + points.size() * sizeof(std::array<float, 3>);
         }
     };
 

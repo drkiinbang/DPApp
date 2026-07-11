@@ -120,15 +120,21 @@ namespace icp {
         return distSq(sub(p, proj));
     }
 
-    /// Generate pseudo points from a single MeshChunk (always in the mesh's own absolute
-    /// coordinate frame -- the mesh itself is never offset-shifted).
+    /// Generate pseudo points from a single MeshChunk. `mesh` itself is read in its own
+    /// absolute coordinate frame (never offset-shifted), but the generated outPoints/facePts
+    /// can optionally be shifted by (offsetX, offsetY, offsetZ) as they're written out -- used
+    /// when populating an IcpChunk, so the pseudo-points land in the same shifted frame as the
+    /// (offset-rebased) point cloud they'll be matched against. Defaults to 0 (no shift) for
+    /// other callers (e.g. the synthetic test-data generator). outNormals are direction
+    /// vectors and are never shifted.
     inline void generatePseudoPointsFromMesh(
         const chunkbim::MeshChunk& mesh,
         double gridSize,
         std::vector<std::array<double, 3>>& outPoints,
         std::vector<size_t>& faceIdx,
         std::vector<std::array<double, 3>>& facePts,
-        std::vector<std::array<double, 3>>& outNormals)
+        std::vector<std::array<double, 3>>& outNormals,
+        double offsetX = 0.0, double offsetY = 0.0, double offsetZ = 0.0)
     {
         if (mesh.faces.empty())
             return;
@@ -139,9 +145,9 @@ namespace icp {
             const auto& face = mesh.faces[f];
 
             std::array<double, 3> fPt;
-            fPt[0] = face.vertices[0][0];
-            fPt[1] = face.vertices[0][1];
-            fPt[2] = face.vertices[0][2];
+            fPt[0] = face.vertices[0][0] - offsetX;
+            fPt[1] = face.vertices[0][1] - offsetY;
+            fPt[2] = face.vertices[0][2] - offsetZ;
 
             facePts.push_back(fPt);
 
@@ -180,9 +186,9 @@ namespace icp {
 
                     /// Interpolate position
                     std::array<double, 3> point;
-                    point[0] = u * v0[0] + v * v1[0] + w * v2[0];
-                    point[1] = u * v0[1] + v * v1[1] + w * v2[1];
-                    point[2] = u * v0[2] + v * v1[2] + w * v2[2];
+                    point[0] = u * v0[0] + v * v1[0] + w * v2[0] - offsetX;
+                    point[1] = u * v0[1] + v * v1[1] + w * v2[1] - offsetY;
+                    point[2] = u * v0[2] + v * v1[2] + w * v2[2] - offsetZ;
 
                     outPoints.push_back(point);
                     faceIdx.push_back(f);
@@ -198,7 +204,8 @@ namespace icp {
         std::vector<std::array<double, 3>>& outPoints,
         std::vector<size_t>& faceIdx,
         std::vector<std::array<double, 3>>& facePts,
-        std::vector<std::array<double, 3>>& outNormals)
+        std::vector<std::array<double, 3>>& outNormals,
+        double offsetX = 0.0, double offsetY = 0.0, double offsetZ = 0.0)
     {
         outPoints.clear();
         faceIdx.clear();
@@ -218,7 +225,8 @@ namespace icp {
 
         /// Generate from each mesh
         for (const auto& chunk : chunks) {
-            generatePseudoPointsFromMesh(chunk, gridSize, outPoints, faceIdx, facePts, outNormals);
+            generatePseudoPointsFromMesh(chunk, gridSize, outPoints, faceIdx, facePts, outNormals,
+                offsetX, offsetY, offsetZ);
         }
 
         outPoints.shrink_to_fit();

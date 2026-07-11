@@ -20,6 +20,7 @@
 #include "../BimImport/BimImport.h"
 
 #include <chrono>
+#include <cmath>
 #include <random>
 #include <sstream>
 #include <iomanip>
@@ -632,12 +633,16 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
             return;
         }
 
+        /// Generated in the same shifted frame as `sourcePoints` (offset passed through), so
+        /// they can be narrowed to float and stored directly into IcpChunk fields below with no
+        /// further conversion.
         std::vector<std::array<double, 3>> pseudoFacePoints;
         std::vector<size_t> pseudoFaceIdx;
         std::vector<std::array<double, 3>> facePts;
         std::vector<std::array<double, 3>> targetNormals;
         /// [ToDo] use directly meshes, instead of extraction
-        icp::generatePseudoPoints(meshes, job->config.pseudoPointGridSize, pseudoFacePoints, pseudoFaceIdx, facePts, targetNormals);
+        icp::generatePseudoPoints(meshes, job->config.pseudoPointGridSize, pseudoFacePoints, pseudoFaceIdx, facePts, targetNormals,
+            job->rebaseOffsetX, job->rebaseOffsetY, job->rebaseOffsetZ);
 
         job->totalPseudoPoints = pseudoFacePoints.size();
         ILOG << "[ICP] Pseudo points generated: " << job->totalPseudoPoints;
@@ -659,24 +664,11 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
             return;
         }
 
-        /// Downsample for coarse alignment: point cloud. Downsample the (float, shifted) bulk
-        /// array first -- cheap, element-wise copy -- then widen + unshift the much smaller
-        /// downsampled result back to absolute-frame double for the ICP chunk below.
+        /// Downsample for coarse alignment: point cloud. `sourcePoints` is already float,
+        /// shifted by the job's rebase offset -- IcpChunk fields are the same representation,
+        /// so the downsampled result can be assigned directly with no widen/unshift needed.
         int coarseDownsampleRatio = job->config.downsampleRatio * 2;  /// More aggressive for coarse
-        auto coarseSourceShifted = icp::downsampleUniform(sourcePoints, coarseDownsampleRatio);
-        auto coarseSource = icp::widenToDouble(coarseSourceShifted);
-        for (auto& pt : coarseSource) {
-            pt[0] += job->rebaseOffsetX;
-            pt[1] += job->rebaseOffsetY;
-            pt[2] += job->rebaseOffsetZ;
-        }
-
-        /// Downsample for coarse alignment: BIM points
-        //std::vector<size_t> coarseIdx;
-        //std::vector<std::array<double, 3>> coarseTarget;
-        //if (!icp::downsampleUniform(pseudoFacePoints, pseudoFaceIdx, coarseTarget, coarseIdx, coarseDownsampleRatio)) {
-        //    throw std::runtime_error("Error from downsampleUniform");
-        //}
+        auto coarseSource = icp::downsampleUniform(sourcePoints, coarseDownsampleRatio);
 
         ILOG << "[ICP] Coarse alignment(pc vs pseudo bim pts): " << coarseSource.size() << " vs " << pseudoFacePoints.size() << " points";
 
@@ -684,12 +676,15 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
         icp::IcpChunk coarseChunk;
         coarseChunk.chunk_id = 0;
         coarseChunk.sourcePoints = std::move(coarseSource);
-        coarseChunk.targetPoints = pseudoFacePoints;
+        coarseChunk.targetPoints = icp::narrowToFloat(pseudoFacePoints);
         coarseChunk.faceIndices = pseudoFaceIdx;
-        coarseChunk.faceNormals = targetNormals;
-        coarseChunk.facePts = facePts;
+        coarseChunk.faceNormals = icp::narrowToFloat(targetNormals);
+        coarseChunk.facePts = icp::narrowToFloat(facePts);
         coarseChunk.config = job->config;
         coarseChunk.config.maxCorrespondenceDistance *= 2.0;  /// Larger distance for coarse
+        coarseChunk.offsetX = job->rebaseOffsetX;
+        coarseChunk.offsetY = job->rebaseOffsetY;
+        coarseChunk.offsetZ = job->rebaseOffsetZ;
 
         /// Run coarse ICP
         icp::IcpResult coarseResult = icp::runIcp(coarseChunk, job->cancelRequested);
@@ -815,24 +810,23 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
             coarseChunk.config.downsampleRatio = 1;  /// Larger distance for coarse
 #endif
 
-            auto fineSourceShifted = icp::downsampleUniform(alignedSource, job->config.downsampleRatio);
-            auto fineSource = icp::widenToDouble(fineSourceShifted);
-            for (auto& pt : fineSource) {
-                pt[0] += job->rebaseOffsetX;
-                pt[1] += job->rebaseOffsetY;
-                pt[2] += job->rebaseOffsetZ;
-            }
+            /// `alignedSource` is already float, shifted by the job's rebase offset -- IcpChunk
+            /// fields are the same representation, so no widen/unshift is needed here.
+            auto fineSource = icp::downsampleUniform(alignedSource, job->config.downsampleRatio);
 
             ILOG << "[ICP] Fine alignment(pc vs pseudo bim pts): " << fineSource.size() << " vs " << pseudoFacePoints.size() << " points";
 
             icp::IcpChunk fineChunk;
             fineChunk.chunk_id = 0;
             fineChunk.sourcePoints = std::move(fineSource);
-            fineChunk.targetPoints = pseudoFacePoints;
+            fineChunk.targetPoints = icp::narrowToFloat(pseudoFacePoints);
             fineChunk.faceIndices = pseudoFaceIdx;
-            fineChunk.faceNormals = targetNormals;
-            fineChunk.facePts = facePts;
+            fineChunk.faceNormals = icp::narrowToFloat(targetNormals);
+            fineChunk.facePts = icp::narrowToFloat(facePts);
             fineChunk.config = job->config;
+            fineChunk.offsetX = job->rebaseOffsetX;
+            fineChunk.offsetY = job->rebaseOffsetY;
+            fineChunk.offsetZ = job->rebaseOffsetZ;
 
             icp::IcpResult fineResult = icp::runIcp(fineChunk, job->cancelRequested);
 
@@ -931,6 +925,128 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count());
         ELOG << "[ICP] Job failed: " << job->jobId << " - " << e.what();
+    }
+}
+
+/// =========================================
+/// Synthetic Test Data Generator
+/// =========================================
+
+/// Generate a synthetic laser-scan point cloud from a BIM mesh: sample dense points on the
+/// mesh surface (as if a scanner had measured it), apply a known "ground truth" rigid
+/// transform (rotation about Z + translation) to simulate a real misalignment, optionally add
+/// Gaussian noise to simulate scan measurement error, and save the result as a .las file. The
+/// injected transform is printed so it can be compared against ICP's recovered `final_transform`
+/// to validate correctness -- lets tests start with a handful of BIM elements (fast) and scale
+/// up toward the full model before finally validating against real measured data.
+void MasterApplication::runGenerateSyntheticPointCloud(
+    const std::string& bim_folder, const std::string& output_las,
+    int num_elements, double grid_size, double noise_sigma,
+    double shift_x, double shift_y, double shift_z, double rot_deg) {
+
+    try {
+        std::vector<chunkbim::MeshChunk> meshes;
+        if (!loadGltf(bim_folder, meshes)) {
+            ELOG << "[gensynth] Failed to load GLTF from: " << bim_folder;
+            return;
+        }
+        ILOG << "[gensynth] Loaded " << meshes.size() << " BIM elements from " << bim_folder;
+
+        if (num_elements > 0 && static_cast<size_t>(num_elements) < meshes.size()) {
+            meshes.resize(num_elements);
+            ILOG << "[gensynth] Using first " << num_elements << " element(s) for this run";
+        }
+
+        /// Sample dense points on the mesh surface (absolute frame, no offset -- this is a
+        /// standalone test-data tool, not part of the distributed ICP pipeline).
+        std::vector<std::array<double, 3>> points, facePts, faceNormals;
+        std::vector<size_t> faceIdx;
+        icp::generatePseudoPoints(meshes, grid_size, points, faceIdx, facePts, faceNormals);
+
+        if (points.empty()) {
+            ELOG << "[gensynth] No points generated -- check bim_folder/grid_size";
+            return;
+        }
+        ILOG << "[gensynth] Generated " << points.size() << " synthetic scan points "
+            << "(grid_size=" << grid_size << "m)";
+
+        /// Ground-truth transform: rotation about Z (yaw) + translation. The rotation is
+        /// applied about the *selected elements' own centroid*, not the absolute coordinate
+        /// origin -- these BIM elements can sit hundreds of meters from the origin in real site
+        /// coordinates, so rotating about the origin would displace them by meters (lever-arm
+        /// effect) instead of producing a realistic small misalignment.
+        for (auto& mesh : meshes) {
+            mesh.calculateBounds();
+        }
+        std::array<double, 3> rotationCenter = icp::computeBimRebaseOffset(meshes);
+
+        double rad = rot_deg * 3.14159265358979323846 / 180.0;
+        double R[9] = {
+            std::cos(rad), -std::sin(rad), 0.0,
+            std::sin(rad),  std::cos(rad), 0.0,
+            0.0,             0.0,           1.0
+        };
+        icp::Transform4x4 rotation = icp::Transform4x4::fromRotationTranslation(R, 0.0, 0.0, 0.0);
+
+        std::mt19937 rng(12345); /// fixed seed for reproducibility
+        std::normal_distribution<double> noise(0.0, noise_sigma);
+
+        std::vector<las::PointData> outPoints;
+        outPoints.reserve(points.size());
+        for (const auto& p : points) {
+            /// Shift to rotation center, rotate, shift back, then translate.
+            double cx = p[0] - rotationCenter[0];
+            double cy = p[1] - rotationCenter[1];
+            double cz = p[2] - rotationCenter[2];
+            double rx, ry, rz;
+            rotation.transformPoint(cx, cy, cz, rx, ry, rz);
+
+            double x = rx + rotationCenter[0] + shift_x;
+            double y = ry + rotationCenter[1] + shift_y;
+            double z = rz + rotationCenter[2] + shift_z;
+            if (noise_sigma > 0.0) {
+                x += noise(rng); y += noise(rng); z += noise(rng);
+            }
+            las::PointData d;
+            d.x = x; d.y = y; d.z = z;
+            outPoints.push_back(d);
+        }
+
+        if (!las::LASToolsWriter::save(output_las, outPoints)) {
+            ELOG << "[gensynth] Failed to write: " << output_las;
+            return;
+        }
+
+        ILOG << "[gensynth] Saved " << outPoints.size() << " points to " << output_las;
+
+        /// The synthetic scan is `groundTruth(mesh)` -- i.e. the mesh, rotated/shifted. When ICP
+        /// later aligns this scan (as source) back to the mesh (as target), its recovered
+        /// final_transform should approximate the *inverse* of the transform applied here, not
+        /// the transform itself. Print both the applied (rotation_z, shift) parameters and the
+        /// equivalent absolute-frame inverse (R, t) that final_transform should match, so no
+        /// mental inversion is needed when comparing.
+        double tEquivX = rotationCenter[0] - (R[0] * rotationCenter[0] + R[1] * rotationCenter[1] + R[2] * rotationCenter[2]) + shift_x;
+        double tEquivY = rotationCenter[1] - (R[3] * rotationCenter[0] + R[4] * rotationCenter[1] + R[5] * rotationCenter[2]) + shift_y;
+        double tEquivZ = rotationCenter[2] - (R[6] * rotationCenter[0] + R[7] * rotationCenter[1] + R[8] * rotationCenter[2]) + shift_z;
+        icp::Transform4x4 groundTruthAbsolute = icp::Transform4x4::fromRotationTranslation(R, tEquivX, tEquivY, tEquivZ);
+        icp::Transform4x4 expectedIcpTransform = groundTruthAbsolute.inverse();
+
+        ILOG << "[gensynth] Applied: rotation_z=" << rot_deg << "deg about centroid ("
+            << rotationCenter[0] << ", " << rotationCenter[1] << ", " << rotationCenter[2]
+            << "), then shift=(" << shift_x << ", " << shift_y << ", " << shift_z
+            << "), noise_sigma=" << noise_sigma;
+        ILOG << "[gensynth] ICP's final_transform should approximate this inverse (16 values, "
+            << "column-major): [" << expectedIcpTransform.m[0] << ", " << expectedIcpTransform.m[1] << ", "
+            << expectedIcpTransform.m[2] << ", " << expectedIcpTransform.m[3] << ", "
+            << expectedIcpTransform.m[4] << ", " << expectedIcpTransform.m[5] << ", "
+            << expectedIcpTransform.m[6] << ", " << expectedIcpTransform.m[7] << ", "
+            << expectedIcpTransform.m[8] << ", " << expectedIcpTransform.m[9] << ", "
+            << expectedIcpTransform.m[10] << ", " << expectedIcpTransform.m[11] << ", "
+            << expectedIcpTransform.m[12] << ", " << expectedIcpTransform.m[13] << ", "
+            << expectedIcpTransform.m[14] << ", " << expectedIcpTransform.m[15] << "]";
+    }
+    catch (const std::exception& e) {
+        ELOG << "[gensynth] Error: " << e.what();
     }
 }
 

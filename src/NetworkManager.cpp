@@ -494,7 +494,8 @@ namespace DPApp {
             /// 1. Meta data
             writer.write(chunk.chunk_id);
 
-            /// 2. Point Cloud (Optimized Batch Write)
+            /// 2. Point Cloud (Optimized Batch Write) -- chunk.points is already float,
+            /// shifted by (offsetX, offsetY, offsetZ); write as-is.
             uint32_t point_count = static_cast<uint32_t>(chunk.points.size());
             writer.write(point_count);
 
@@ -502,9 +503,9 @@ namespace DPApp {
                 std::vector<float> raw_floats;
                 raw_floats.reserve(point_count * 3);
                 for (const auto& point : chunk.points) {
-                    raw_floats.push_back(point.x());
-                    raw_floats.push_back(point.y());
-                    raw_floats.push_back(point.z());
+                    raw_floats.push_back(point[0]);
+                    raw_floats.push_back(point[1]);
+                    raw_floats.push_back(point[2]);
                 }
                 writer.writeBytes(raw_floats.data(), raw_floats.size() * sizeof(float));
             }
@@ -513,8 +514,24 @@ namespace DPApp {
             writer.write(chunk.min_x); writer.write(chunk.min_y); writer.write(chunk.min_z);
             writer.write(chunk.max_x); writer.write(chunk.max_y); writer.write(chunk.max_z);
 
-            /// 4. MeshChunk (Nested serialization)
-            std::vector<uint8_t> bim_data = serializeMeshChunk(chunk.bim);
+            /// 4. Rebase offset (double, exact)
+            writer.write(chunk.offsetX); writer.write(chunk.offsetY); writer.write(chunk.offsetZ);
+
+            /// 5. MeshChunk (Nested serialization). `bim` itself is always absolute/unshifted
+            /// (used broadly beyond just this chunk), but the bytes actually sent over the wire
+            /// benefit from the same offset-rebase precision trick as the point cloud -- shift a
+            /// temporary copy down by the chunk's offset before narrowing to float (inside
+            /// serializeMeshChunk), and shift back up after deserializing (see below).
+            chunkbim::MeshChunk shiftedBim = chunk.bim;
+            for (auto& face : shiftedBim.faces) {
+                for (auto& v : face.vertices) {
+                    v[0] -= chunk.offsetX; v[1] -= chunk.offsetY; v[2] -= chunk.offsetZ;
+                }
+            }
+            shiftedBim.min_x -= chunk.offsetX; shiftedBim.min_y -= chunk.offsetY; shiftedBim.min_z -= chunk.offsetZ;
+            shiftedBim.max_x -= chunk.offsetX; shiftedBim.max_y -= chunk.offsetY; shiftedBim.max_z -= chunk.offsetZ;
+
+            std::vector<uint8_t> bim_data = serializeMeshChunk(shiftedBim);
             uint32_t bim_data_size = static_cast<uint32_t>(bim_data.size());
 
             writer.write(bim_data_size);
@@ -533,7 +550,8 @@ namespace DPApp {
             /// 1. Meta data
             chunk.chunk_id = reader.read<uint32_t>();
 
-            /// 2. Point Cloud (Optimized Batch Read)
+            /// 2. Point Cloud (Optimized Batch Read) -- stays float, shifted; unshifting happens
+            /// once, at the top of processBimPc(), not here.
             uint32_t point_count = reader.read<uint32_t>();
 
             if (point_count > 0) {
@@ -544,11 +562,7 @@ namespace DPApp {
                 const float* raw_floats = static_cast<const float*>(reader.readBytesRef(total_bytes));
 
                 for (uint32_t i = 0; i < point_count; ++i) {
-                    chunk.points[i] = Point3D(
-                        raw_floats[i * 3 + 0],
-                        raw_floats[i * 3 + 1],
-                        raw_floats[i * 3 + 2]
-                    );
+                    chunk.points[i] = { raw_floats[i * 3 + 0], raw_floats[i * 3 + 1], raw_floats[i * 3 + 2] };
                 }
             }
 
@@ -560,12 +574,24 @@ namespace DPApp {
             chunk.min_x = reader.read<double>(); chunk.min_y = reader.read<double>(); chunk.min_z = reader.read<double>();
             chunk.max_x = reader.read<double>(); chunk.max_y = reader.read<double>(); chunk.max_z = reader.read<double>();
 
-            /// 4. MeshChunk (Nested deserialization)
+            /// 4. Rebase offset
+            chunk.offsetX = reader.read<double>(); chunk.offsetY = reader.read<double>(); chunk.offsetZ = reader.read<double>();
+
+            /// 5. MeshChunk (Nested deserialization) -- shift back up to absolute coordinates
+            /// (see serializeBimPcChunk for why the wire bytes are shifted down before narrowing).
             uint32_t bim_data_size = reader.read<uint32_t>();
             const void* bim_ptr = reader.readBytesRef(bim_data_size);
             const uint8_t* byte_ptr = static_cast<const uint8_t*>(bim_ptr);
             std::vector<uint8_t> bim_buffer(byte_ptr, byte_ptr + bim_data_size);
             chunk.bim = deserializeMeshChunk(bim_buffer);
+
+            for (auto& face : chunk.bim.faces) {
+                for (auto& v : face.vertices) {
+                    v[0] += chunk.offsetX; v[1] += chunk.offsetY; v[2] += chunk.offsetZ;
+                }
+            }
+            chunk.bim.min_x += chunk.offsetX; chunk.bim.min_y += chunk.offsetY; chunk.bim.min_z += chunk.offsetZ;
+            chunk.bim.max_x += chunk.offsetX; chunk.bim.max_y += chunk.offsetY; chunk.bim.max_z += chunk.offsetZ;
 
             return chunk;
         }
