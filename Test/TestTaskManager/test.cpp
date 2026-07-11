@@ -95,11 +95,20 @@ TEST(TaskManagerTest, ImportPointclouds2)
 
         std::vector<float> pointbuffer;
         auto retval = pointclouds2::loadPointclouds2(pc2_path, pointbuffer);
+        ASSERT_TRUE(retval) << "Failed to load " << pc2_path
+            << " -- check that the working directory is set to bin/ so the relative "
+            << "path resolves correctly.";
 
         std::vector<float> pointbuffer2;
         size_t beginPtsIdx = 100000;
         size_t numPtsToRead = 100;
         auto retval2 = pointclouds2::loadPointclouds2(pc2_path, pointbuffer2, numPtsToRead, beginPtsIdx);
+        ASSERT_TRUE(retval2) << "Failed to load partial range from " << pc2_path;
+
+        /// Guard against out-of-bounds indexing below: both buffers must actually
+        /// contain the point range the comparison loop is about to read.
+        ASSERT_GE(pointbuffer2.size(), numPtsToRead * 3);
+        ASSERT_GE(pointbuffer.size(), (beginPtsIdx + numPtsToRead) * 3);
 
         bool equalCheck = true;
         for (size_t i = 0; i < numPtsToRead; ++i){
@@ -122,6 +131,6 @@ TEST(TaskManagerTest, ImportPointclouds2)
             };
         }
 
-        EXPECT_TRUE(retval);
+        EXPECT_TRUE(equalCheck);
     }
 }

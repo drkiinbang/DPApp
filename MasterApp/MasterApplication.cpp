@@ -893,6 +893,22 @@ void MasterApplication::handleTaskResult(const NetworkMessage& message, const st
             ILOG << "BimPcResult received for task " << result.task_id
                 << " from " << client_id;
         }
+        else if (result_type == 3) {
+            // ICP result processing (task_id (4 bytes) + serialized icp::IcpResult),
+            // sent by SlaveApplication::sendIcpResult(). [Fix] This used to fall through
+            // to the "General result processing" branch below and be mis-deserialized as
+            // a plain ProcessingResult instead of being routed to handleIcpResult().
+            if (result_data.size() < sizeof(uint32_t)) {
+                ELOG << "Invalid ICP result message from " << client_id;
+                return;
+            }
+            uint32_t icp_task_id = 0;
+            std::memcpy(&icp_task_id, result_data.data(), sizeof(uint32_t));
+            std::vector<uint8_t> icp_result_data(
+                result_data.begin() + sizeof(uint32_t), result_data.end());
+            icp::IcpResult icp_result = icp::deserializeIcpResult(icp_result_data);
+            handleIcpResult(icp_result, icp_task_id);
+        }
         else {
             // General result processing
             ProcessingResult result = NetworkUtils::deserializeResult(result_data);

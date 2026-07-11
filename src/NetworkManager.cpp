@@ -474,8 +474,12 @@ namespace DPApp {
             }
 
             /// 3. Bounding box
-            meshChunk.min_x = reader.read<float>(); meshChunk.min_y = reader.read<float>(); meshChunk.min_z = reader.read<float>();
-            meshChunk.max_x = reader.read<float>(); meshChunk.max_y = reader.read<float>(); meshChunk.max_z = reader.read<float>();
+            /// [Fix] MeshChunk::min_x..max_z are double (see include/bim/MeshChunk.h), but this
+            /// used to read them as float, under-consuming 24 bytes and desynchronizing every
+            /// read that follows in the enclosing BimPcChunk (garbage bim_data_size -> "Buffer
+            /// overflow: insufficient data to read." when deserializing distributed BIM_PC2_DIST tasks).
+            meshChunk.min_x = reader.read<double>(); meshChunk.min_y = reader.read<double>(); meshChunk.min_z = reader.read<double>();
+            meshChunk.max_x = reader.read<double>(); meshChunk.max_y = reader.read<double>(); meshChunk.max_z = reader.read<double>();
 
             return meshChunk;
         }
@@ -549,8 +553,12 @@ namespace DPApp {
             }
 
             /// 3. Bounding Box
-            chunk.min_x = reader.read<float>(); chunk.min_y = reader.read<float>(); chunk.min_z = reader.read<float>();
-            chunk.max_x = reader.read<float>(); chunk.max_y = reader.read<float>(); chunk.max_z = reader.read<float>();
+            /// [Fix] BimPcChunk::min_x..max_z are double (see include/PointCloudTypes.h), but this
+            /// used to read them as float, under-consuming 24 bytes. Every subsequent read (starting
+            /// with bim_data_size below) was then offset into the wrong bytes, producing a garbage
+            /// size and triggering "Buffer overflow: insufficient data to read." on the Slave side.
+            chunk.min_x = reader.read<double>(); chunk.min_y = reader.read<double>(); chunk.min_z = reader.read<double>();
+            chunk.max_x = reader.read<double>(); chunk.max_y = reader.read<double>(); chunk.max_z = reader.read<double>();
 
             /// 4. MeshChunk (Nested deserialization)
             uint32_t bim_data_size = reader.read<uint32_t>();

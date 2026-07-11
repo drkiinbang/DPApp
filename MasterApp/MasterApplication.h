@@ -20,6 +20,7 @@
 #include <vector>
 #include <memory>
 #include <map>
+#include <unordered_map>
 
 #include "../include/PointCloudTypes.h"
 #include "../include/NetworkManager.h"
@@ -97,14 +98,20 @@ private:
     /// Test Task Management
     /// =========================================
 
-    std::vector<TestChunk> test_chunks_;           // Å×½ºÆ® Ã»Å© ÀúÀå
-    std::vector<TestResult> test_results_;         // Å×½ºÆ® °á°ú ÀúÀå
-    std::mutex test_mutex_;                        // Å×½ºÆ® µ¥ÀÌÅÍ µ¿±âÈ­
-    uint32_t next_test_chunk_id_ = 0;              // Àü¿ª °íÀ¯ Ã»Å© ID Ä«¿îÅÍ
+    std::vector<TestChunk> test_chunks_;           // ï¿½×½ï¿½Æ® Ã»Å© ï¿½ï¿½ï¿½ï¿½
+    std::vector<TestResult> test_results_;         // ï¿½×½ï¿½Æ® ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
+    std::mutex test_mutex_;                        // ï¿½×½ï¿½Æ® ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½È­
+    uint32_t next_test_chunk_id_ = 0;              // ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ Ã»Å© ID Ä«ï¿½ï¿½ï¿½ï¿½
     /// icp member variables
     std::map<std::string, std::shared_ptr<icp::IcpJob>> icp_jobs_;
     std::mutex icp_jobs_mutex_;
     uint32_t next_icp_task_id_ = 10000;
+    /// Maps a network-dispatched ICP task_id back to the job it belongs to, so
+    /// handleIcpResult() can find and update the right IcpJob. Guarded by icp_jobs_mutex_.
+    /// Currently always empty: nothing in this codebase dispatches ICP_FINE_ALIGNMENT tasks
+    /// to Slaves yet (processIcpJob() computes everything on the Master). See
+    /// CHANGELOG_2026-07-10.md / CHANGELOG_2026-07-11.md for the architecture decision.
+    std::unordered_map<uint32_t, std::string> icp_task_to_job_;
 
 public:
     MasterApplication();

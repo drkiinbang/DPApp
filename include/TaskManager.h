@@ -29,6 +29,8 @@
 #include "LaslibReader.hpp"
 #include "Pc2Reader.hpp"
 #include "bimtree/nanoflann.hpp"
+#include "bimtree/IcpCore.hpp"
+#include "bimtree/PseudoPointGenerator.hpp"
 #include "../../BimImport/BimImport.h"
 #include "bim/MeshChunk.h"
 
@@ -2795,6 +2797,17 @@ namespace DPApp {
         /// @param chunk BimPcChunk data (PointCloud + Mesh)
         /// @return BimPcResult Processing result
         ///
+        /// Distance threshold (meters) used to classify a point as "within tolerance" of the
+        /// BIM mesh surface. Chosen as a typical construction QC tolerance. Not currently
+        /// exposed via ProcessingTask::parameters -- if per-task configurability is needed,
+        /// thread it through the same way IcpConfig is threaded through icp::IcpChunk.
+        constexpr double kBimPcWithinThresholdMeters = 0.05;
+
+        /// Grid spacing (meters) used to sample the mesh surface into pseudo points for
+        /// nearest-neighbor search. Matches the default used by ICP registration
+        /// (see IcpConfig::pseudoPointGridSize in include/IcpTypes.h).
+        constexpr double kBimPcPseudoPointGridSize = 0.1;
+
         BimPcResult processBimPc(const ProcessingTask& task, const BimPcChunk& chunk) {
             BimPcResult result;
             result.task_id = task.task_id;
@@ -2809,44 +2822,93 @@ namespace DPApp {
                 std::cout << "Points: " << chunk.points.size() << std::endl;
                 std::cout << "Mesh faces: " << chunk.bim.faces.size() << std::endl;
 
-                /// ========================================
-                /// [ToDo] Implement actual processing logic
-                /// ========================================
-                /// Example:
-                /// - Compute distance from each point to the nearest mesh face
-                /// - Use KD-Tree for efficient spatial search
-                /// - Classify points (inside / outside the mesh)
-                /// ========================================
-
-                /// Generate dummy results
                 result.total_points_processed = static_cast<uint32_t>(chunk.points.size());
                 result.total_faces_processed = static_cast<uint32_t>(chunk.bim.faces.size());
 
-                /// Dummy distance statistics
-                result.min_distance = 0.0;
-                result.max_distance = 100.0;
-                result.avg_distance = 50.0;
-                result.std_deviation = 25.0;
+                if (chunk.points.empty() || chunk.bim.faces.empty()) {
+                    result.min_distance = 0.0;
+                    result.max_distance = 0.0;
+                    result.avg_distance = 0.0;
+                    result.std_deviation = 0.0;
+                    result.points_within_threshold = 0;
+                    result.points_outside_threshold = 0;
+                    result.success = true;
+                    std::cout << "No points or faces to process; returning empty result." << std::endl;
+                }
+                else {
+                    /// 1. Sample the mesh surface into pseudo points (same grid-sampling
+                    /// approach used by ICP registration; see PseudoPointGenerator.hpp).
+                    std::vector<std::array<double, 3>> pseudoPoints;
+                    std::vector<size_t> faceIdx;
+                    std::vector<std::array<double, 3>> facePts;
+                    std::vector<std::array<double, 3>> faceNormals;
+                    icp::generatePseudoPointsFromMesh(chunk.bim, kBimPcPseudoPointGridSize,
+                        pseudoPoints, faceIdx, facePts, faceNormals);
 
-                /// Dummy per-point results (only first few samples)
-                size_t sample_count = (std::min)(chunk.points.size(), static_cast<size_t>(100));
-                result.point_distances.resize(sample_count);
-                result.nearest_face_ids.resize(sample_count);
+                    if (pseudoPoints.empty()) {
+                        throw std::runtime_error(
+                            "No pseudo points could be generated from the mesh (degenerate faces?)");
+                    }
 
-                for (size_t i = 0; i < sample_count; ++i) {
-                    result.point_distances[i] = static_cast<double>(i % 100);   /// Dummy distance
-                    result.nearest_face_ids[i] = static_cast<int32_t>(i % 10); /// Dummy face ID
+                    /// 2. Build a KD-Tree over the pseudo points for fast nearest-neighbor search.
+                    icp::PointCloudAdaptor adaptor(pseudoPoints);
+                    icp::KdTree3D tree(3, adaptor, nanoflann::KDTreeSingleIndexAdaptorParams(50));
+                    tree.buildIndex();
+
+                    /// 3. For every input point, find the nearest point on the mesh surface
+                    /// and record the distance and the originating face id.
+                    const size_t n = chunk.points.size();
+                    result.point_distances.resize(n);
+                    result.nearest_face_ids.resize(n);
+
+                    double sum = 0.0;
+                    double sumSq = 0.0;
+                    double minDist = (std::numeric_limits<double>::max)();
+                    double maxDist = 0.0;
+                    uint32_t within = 0;
+
+                    for (size_t i = 0; i < n; ++i) {
+                        std::array<double, 3> query = {
+                            static_cast<double>(chunk.points[i].x()),
+                            static_cast<double>(chunk.points[i].y()),
+                            static_cast<double>(chunk.points[i].z())
+                        };
+
+                        size_t nearestIdx = 0;
+                        double nearestDistSq = 0.0;
+                        nanoflann::KNNResultSet<double> resultSet(1);
+                        resultSet.init(&nearestIdx, &nearestDistSq);
+                        tree.findNeighbors(resultSet, query.data(), nanoflann::SearchParams());
+
+                        double dist = std::sqrt(nearestDistSq);
+                        result.point_distances[i] = dist;
+                        result.nearest_face_ids[i] = static_cast<int32_t>(faceIdx[nearestIdx]);
+
+                        sum += dist;
+                        sumSq += dist * dist;
+                        minDist = (std::min)(minDist, dist);
+                        maxDist = (std::max)(maxDist, dist);
+                        if (dist <= kBimPcWithinThresholdMeters) ++within;
+                    }
+
+                    double mean = sum / static_cast<double>(n);
+                    double variance = (sumSq / static_cast<double>(n)) - (mean * mean);
+
+                    result.min_distance = minDist;
+                    result.max_distance = maxDist;
+                    result.avg_distance = mean;
+                    result.std_deviation = std::sqrt((std::max)(variance, 0.0));
+                    result.points_within_threshold = within;
+                    result.points_outside_threshold = static_cast<uint32_t>(n) - within;
+
+                    result.success = true;
+
+                    std::cout << "Processing completed: avg_distance=" << result.avg_distance
+                        << "m, min=" << result.min_distance << "m, max=" << result.max_distance
+                        << "m, within " << kBimPcWithinThresholdMeters << "m: "
+                        << within << "/" << n << std::endl;
                 }
 
-                /// Dummy classification results
-                result.points_within_threshold =
-                    static_cast<uint32_t>(chunk.points.size() * 0.7);
-                result.points_outside_threshold =
-                    static_cast<uint32_t>(chunk.points.size() * 0.3);
-
-                result.success = true;
-
-                std::cout << "Processing completed successfully (DUMMY)" << std::endl;
                 std::cout << "=======================================" << std::endl;
             }
             catch (const std::exception& e) {

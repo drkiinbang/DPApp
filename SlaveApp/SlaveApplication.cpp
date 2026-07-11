@@ -355,6 +355,17 @@ private:
                     server_port_ = static_cast<uint16_t>(std::stoi(argv[++i]));
                 }
             }
+            else if (arg == "-t" || arg == "--threads") {
+                /// [Fix] processing_threads_ used to be a `const size_t` hardcoded to 1,
+                /// so config/slave.ini's `processing_threads` setting had no effect no matter
+                /// what it was set to. It is now a regular member overridable from the CLI.
+                if (i + 1 < argc) {
+                    int threads = std::stoi(argv[++i]);
+                    if (threads > 0) {
+                        processing_threads_ = static_cast<size_t>(threads);
+                    }
+                }
+            }
             else if (arg == "-h" || arg == "--help") {
                 printUsage();
                 exit(0);
@@ -367,6 +378,7 @@ private:
         ILOG << "Options:";
         ILOG << "  -s, --server <address>   Master server address (default: localhost)";
         ILOG << "  -p, --port <port>        Master server port (default: 8080)";
+        ILOG << "  -t, --threads <count>    Number of processing threads (default: 1)";
         ILOG << "  -h, --help               Show this help message";
     }
 
@@ -1041,7 +1053,7 @@ private:
     std::atomic<bool> running_;
     std::string server_address_ = "localhost";
     uint16_t server_port_;
-    const size_t processing_threads_ = 1;
+    size_t processing_threads_ = 1;
 
     // Task queue
     std::queue<TaskQueueItem> task_queue_;

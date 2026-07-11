@@ -735,6 +735,40 @@ void MasterApplication::handleIcpResult(const icp::IcpResult& result, uint32_t t
         << ", success: " << (result.success ? "Yes" : "No")
         << ", RMSE: " << result.finalRMSE << ")";
 
-    /// TODO: For distributed processing, map task_id -> job_id
-    /// and update the corresponding job's chunk results
+    /// [Fix] This used to be an unimplemented TODO. It is now wired up (task_id -> job_id via
+    /// icp_task_to_job_, see MasterApplication.h) so a distributed fine-alignment chunk result
+    /// lands on the correct job. As of 2026-07-11, nothing in this codebase actually dispatches
+    /// ICP_FINE_ALIGNMENT tasks to Slaves -- POST /api/icp/start (processIcpJob()) computes
+    /// coarse and fine alignment synchronously on the Master itself. That remains the only
+    /// supported ICP path; this function is scaffolding for a future slave-distributed
+    /// fine-alignment feature and is currently unreachable in production use.
+    std::shared_ptr<icp::IcpJob> job;
+    {
+        std::lock_guard<std::mutex> lock(icp_jobs_mutex_);
+        auto task_it = icp_task_to_job_.find(task_id);
+        if (task_it == icp_task_to_job_.end()) {
+            WLOG << "[ICP] No job mapping found for task " << task_id << ", dropping result";
+            return;
+        }
+
+        auto job_it = icp_jobs_.find(task_it->second);
+        if (job_it == icp_jobs_.end()) {
+            WLOG << "[ICP] Job " << task_it->second << " for task " << task_id
+                << " no longer exists, dropping result";
+            icp_task_to_job_.erase(task_it);
+            return;
+        }
+
+        job = job_it->second;
+        icp_task_to_job_.erase(task_it);
+    }
+
+    if (result.success) {
+        job->chunkResults.push_back(result);
+        job->completedChunks++;
+    }
+    else {
+        job->failedChunks++;
+        WLOG << "[ICP] Chunk failed for job " << job->jobId << ": " << result.errorMessage;
+    }
 }

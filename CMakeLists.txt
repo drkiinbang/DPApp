@@ -1,43 +1,19 @@
 cmake_minimum_required(VERSION 3.15)
-project(DPApp VERSION 1.0.0 LANGUAGES CXX)
+project(DPApp_II LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# 컴파일러 옵션
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -O2")
-
-# 디렉토리 설정
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-
-# 인클루드 디렉토리
-include_directories(include)
-include_directories(src)
-
-# 소스 파일들
-file(GLOB_RECURSE COMMON_SOURCES "src/common/*.cpp" "src/network/*.cpp" "src/pointcloud/*.cpp")
-file(GLOB_RECURSE MASTER_SOURCES "src/master/*.cpp")
-file(GLOB_RECURSE SLAVE_SOURCES "src/slave/*.cpp")
-
-# 공통 라이브러리
-add_library(dpapp_common STATIC ${COMMON_SOURCES})
-
-# Master 실행 파일
-add_executable(master ${MASTER_SOURCES})
-target_link_libraries(master dpapp_common)
-
-# Slave 실행 파일
-add_executable(slave ${SLAVE_SOURCES})
-target_link_libraries(slave dpapp_common)
-
-# 플랫폼별 네트워크 라이브러리
-if(WIN32)
-    target_link_libraries(master ws2_32 wsock32)
-    target_link_libraries(slave ws2_32 wsock32)
-endif()
-
-if(UNIX)
-    target_link_libraries(master pthread)
-    target_link_libraries(slave pthread)
-endif()
+# This CMakeLists.txt is NOT maintained and does not build the current
+# codebase. It predates a restructuring from src/master, src/slave,
+# src/common into the current MasterApp/, SlaveApp/, src/NetworkManager.cpp
+# layout, so its source globs (src/master/*.cpp, src/slave/*.cpp,
+# src/common/*.cpp) matched no files at all.
+#
+# The only supported build is Visual Studio + DPApp.sln (Windows, x64).
+# See doc/handover/03_빌드_가이드.md for the real build procedure.
+#
+# If a working CMake build is needed for this project, it has to be written
+# from scratch against the current source layout (MasterApp/, SlaveApp/,
+# BimImport/, LasImport/, src/, include/) and vendored dependencies
+# (vendors/Eigen3, vendors/LAStools, vendors/gltf) -- that has not been done.
+message(FATAL_ERROR
+    "CMakeLists.txt is not maintained and will not produce a working build. "
+    "Use Visual Studio + DPApp.sln instead (see doc/handover/03_빌드_가이드.md).")

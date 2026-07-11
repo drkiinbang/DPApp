@@ -290,9 +290,10 @@ private:
     /// =========================================
 
     /// Start a new slave process
-    bool startSlave(const std::string& master_address, 
-        uint16_t master_port, 
-        SlaveProcessInfo& out_info) {
+    bool startSlave(const std::string& master_address,
+        uint16_t master_port,
+        SlaveProcessInfo& out_info,
+        uint32_t threads = 1) {
         std::lock_guard<std::mutex> lock(slaves_mutex_);
 
         /// Check max slaves limit
@@ -303,10 +304,16 @@ private:
         }
 
         /// Build command line
+        /// [Fix] `threads` used to be accepted by /api/slaves/start and forwarded this far,
+        /// then silently dropped -- SlaveApp.exe never received a thread count because
+        /// SlaveApplication.cpp had no -t flag and always ran with a hardcoded 1 thread.
         std::ostringstream cmd;
         cmd << slave_executable_;
         cmd << " -s " << master_address;
         cmd << " -p " << master_port;
+        if (threads > 1) {
+            cmd << " -t " << threads;
+        }
 
         std::string command = cmd.str();
         ILOG << "Starting slave: " << command;
@@ -574,9 +581,16 @@ private:
             master_port = static_cast<uint16_t>(*v);
         }
 
+        uint32_t threads = 1;
+        if (auto v = MiniJson::get<double>(*parsed, "threads")) {
+            if (*v > 0) {
+                threads = static_cast<uint32_t>(*v);
+            }
+        }
+
         /// Start slave
         SlaveProcessInfo info;
-        if (startSlave(*master_address, master_port, info)) {
+        if (startSlave(*master_address, master_port, info, threads)) {
             std::ostringstream json;
             json << "{\n";
             json << "  \"success\": true,\n";
