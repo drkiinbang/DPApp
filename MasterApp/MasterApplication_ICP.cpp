@@ -21,6 +21,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include <random>
 #include <sstream>
 #include <iomanip>
@@ -345,6 +346,8 @@ HttpResponse MasterApplication::handleIcpJobResult(const HttpRequest& req) {
             oss << ",\n  \"final_rmse\": " << job->finalRMSE;
             oss << ",\n  \"coarse_rmse\": " << job->coarseRMSE;
             oss << ",\n  \"output_path\": \"" << job->outputPath << "\"";
+            oss << ",\n  \"alignment_output_path\": \"" << job->alignmentOutputPath << "\"";
+            oss << ",\n  \"element_count\": " << job->elementResults.size();
             oss << ",\n  \"elapsed_time_sec\": " << std::fixed << std::setprecision(2) << job->getElapsedTimeSec();
             oss << ",\n  \"total_points\": " << job->totalPointCount;
         }
@@ -530,6 +533,87 @@ static icp::Transform4x4 aggregateWeightedTransforms(const std::vector<icp::IcpR
     };
 
     return icp::Transform4x4::fromRotationTranslation(Rout, Tsum.x(), Tsum.y(), Tsum.z());
+}
+
+/// Write a small helper to append a Transform4x4 as a 16-number JSON array.
+static void writeTransformJson(std::ostringstream& oss, const icp::Transform4x4& t) {
+    oss << "[";
+    for (int i = 0; i < 16; ++i) {
+        oss << t.m[i];
+        if (i < 15) oss << ", ";
+    }
+    oss << "]";
+}
+
+/// Escape a string for embedding in a JSON string literal (double quotes and backslashes --
+/// BIM element names are otherwise plain text, e.g. Korean/ASCII identifiers).
+static std::string jsonEscape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (char c : s) {
+        if (c == '"' || c == '\\') out += '\\';
+        out += c;
+    }
+    return out;
+}
+
+/// Save per-BIM-element (부재) alignment results plus the combined job-wide alignment to a
+/// JSON file next to the aligned LAS output (job->outputPath with its extension replaced by
+/// "_alignment.json"). See doc/handover for the math methodology combining per-element results
+/// into the overall alignment (weighted rotation averaging via SVD re-orthogonalization +
+/// weighted translation averaging, aggregateWeightedTransforms() above).
+static std::string saveAlignmentResults(const std::shared_ptr<icp::IcpJob>& job) {
+    std::string path;
+    size_t dotPos = job->outputPath.rfind('.');
+    path = (dotPos != std::string::npos) ? job->outputPath.substr(0, dotPos) : job->outputPath;
+    path += "_alignment.json";
+
+    std::ostringstream oss;
+    oss << "{\n";
+    oss << "  \"job_id\": \"" << job->jobId << "\",\n";
+    oss << "  \"rebase_offset\": [" << job->rebaseOffsetX << ", " << job->rebaseOffsetY << ", " << job->rebaseOffsetZ << "],\n";
+
+    oss << "  \"elements\": [\n";
+    for (size_t i = 0; i < job->elementResults.size(); ++i) {
+        const auto& e = job->elementResults[i];
+        oss << "    {\n";
+        oss << "      \"chunk_id\": " << e.chunk_id << ",\n";
+        oss << "      \"element_name\": \"" << jsonEscape(e.elementName) << "\",\n";
+        oss << "      \"element_revit_id\": " << e.elementRevitId << ",\n";
+        oss << "      \"source_point_count\": " << e.sourcePointCount << ",\n";
+        oss << "      \"target_point_count\": " << e.targetPointCount << ",\n";
+        oss << "      \"rmse\": " << e.rmse << ",\n";
+        oss << "      \"converged\": " << (e.converged ? "true" : "false") << ",\n";
+        oss << "      \"success\": " << (e.success ? "true" : "false") << ",\n";
+        oss << "      \"error_message\": \"" << jsonEscape(e.errorMessage) << "\",\n";
+        oss << "      \"transform\": ";
+        writeTransformJson(oss, e.transform);
+        oss << "\n    }";
+        if (i + 1 < job->elementResults.size()) oss << ",";
+        oss << "\n";
+    }
+    oss << "  ],\n";
+
+    oss << "  \"coarse_transform\": ";
+    writeTransformJson(oss, job->coarseTransform);
+    oss << ",\n";
+    oss << "  \"coarse_rmse\": " << job->coarseRMSE << ",\n";
+
+    oss << "  \"combined_transform\": ";
+    writeTransformJson(oss, job->finalTransform);
+    oss << ",\n";
+    oss << "  \"combined_rmse\": " << job->finalRMSE << ",\n";
+    oss << "  \"combination_method\": \"weighted rotation average (SVD re-orthogonalized, chordal L2 mean) + weighted translation average, weighted by each element's source point count; see aggregateWeightedTransforms() in MasterApplication_ICP.cpp and doc/handover for derivation\"\n";
+    oss << "}\n";
+
+    std::ofstream file(path);
+    if (!file.is_open()) {
+        WLOG << "[ICP] Failed to open alignment output file for writing: " << path;
+        return "";
+    }
+    file << oss.str();
+    file.close();
+    return path;
 }
 
 void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
@@ -733,6 +817,10 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
         /// instead of blocking.
         std::unique_lock<std::mutex> dispatchLock(icp_dispatch_mutex_, std::try_to_lock);
         bool distributed = false;
+        /// elementInfoByChunkId[i] describes the BIM element behind elementChunks[i]
+        /// (loadIcpElementChunks assigns chunk_id == index, so this doubles as a chunk_id ->
+        /// element lookup) -- used after Phase 6 to label job->elementResults.
+        std::vector<IcpElementInfo> elementInfoByChunkId;
 
         if (dispatchLock.owns_lock() && !job->cancelRequested.load()) {
             size_t slaveCount = 0;
@@ -748,7 +836,7 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
                 auto elementChunks = PointCloudLoader::loadIcpElementChunks(
                     meshes, alignedSource,
                     job->rebaseOffsetX, job->rebaseOffsetY, job->rebaseOffsetZ,
-                    job->config);
+                    job->config, &elementInfoByChunkId);
 
                 if (!elementChunks.empty()) {
                     job->totalChunks = static_cast<int>(elementChunks.size());
@@ -877,6 +965,28 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
         ILOG << "[ICP] Final transform computed from " << job->chunkResults.size()
             << " chunk(s) (" << convergedCount << " converged), RMSE: " << job->finalRMSE;
 
+        /// Record each element's own full (coarse + its own local refinement) transform,
+        /// labeled by BIM element name/id, for saving alongside the combined result below.
+        /// Only meaningful for the distributed (one-chunk-per-element) path -- the Master-only
+        /// fallback has no per-element breakdown, so this stays empty there.
+        job->elementResults.clear();
+        for (const auto& r : job->chunkResults) {
+            icp::IcpElementAlignment elem;
+            elem.chunk_id = r.chunk_id;
+            if (r.chunk_id < elementInfoByChunkId.size()) {
+                elem.elementName = elementInfoByChunkId[r.chunk_id].name;
+                elem.elementRevitId = elementInfoByChunkId[r.chunk_id].revitId;
+            }
+            elem.sourcePointCount = r.sourcePointCount;
+            elem.targetPointCount = r.targetPointCount;
+            elem.rmse = r.finalRMSE;
+            elem.converged = r.converged;
+            elem.success = r.success;
+            elem.errorMessage = r.errorMessage;
+            elem.transform = r.transform * job->coarseTransform;
+            job->elementResults.push_back(elem);
+        }
+
         /// =============================================
         /// Phase 7: Save Aligned Point Cloud
         /// =============================================
@@ -907,6 +1017,12 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
 
         ILOG << "[ICP] Aligned point cloud saved: " << job->outputPath
             << " (" << outPoints.size() << " points)";
+
+        job->alignmentOutputPath = saveAlignmentResults(job);
+        if (!job->alignmentOutputPath.empty()) {
+            ILOG << "[ICP] Per-element + combined alignment saved: " << job->alignmentOutputPath
+                << " (" << job->elementResults.size() << " element(s))";
+        }
 
         job->status = icp::IcpJobStatus::COMPLETED;
         job->endTimeMs = static_cast<double>(

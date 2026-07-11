@@ -37,6 +37,14 @@ using namespace DPApp;
 /// Forward Declarations
 /// =========================================
 
+/// Identifies which BIM element (부재) a given IcpChunk::chunk_id corresponds to, so
+/// per-chunk ICP results can be labeled and saved per element (see IcpJob::elementResults
+/// in IcpTypes.h).
+struct IcpElementInfo {
+    std::string name;
+    int revitId = 0;
+};
+
 namespace DPApp {
     namespace PointCloudLoader {
         std::vector<std::shared_ptr<BimPcChunk>> loadBimPcChunks(
@@ -46,12 +54,18 @@ namespace DPApp {
         /// coarseAlignedPoints is the Master's bulk point array, stored as float and shifted
         /// by (offsetX, offsetY, offsetZ) relative to the BIM's absolute coordinate frame (see
         /// icp::computeBimRebaseOffset / IcpJob::rebaseOffsetX in IcpTypes.h). Each element's
-        /// resulting IcpChunk::sourcePoints is unshifted back to absolute double coordinates.
+        /// resulting IcpChunk::sourcePoints stays in that same float+shifted representation
+        /// (chunk.offsetX/Y/Z records the offset; consumers widen+unshift once, at the top of
+        /// runIcp()). If outElementInfo is non-null, it is filled with one entry per chunk
+        /// actually created (same order/index as the returned vector, so outElementInfo[i]
+        /// describes chunks[i]) -- elements skipped for having too few points or a degenerate
+        /// mesh produce no chunk and are omitted here too.
         std::vector<std::shared_ptr<icp::IcpChunk>> loadIcpElementChunks(
             const std::vector<chunkbim::MeshChunk>& elements,
             const std::vector<std::array<float, 3>>& coarseAlignedPoints,
             double offsetX, double offsetY, double offsetZ,
-            const icp::IcpConfig& config);
+            const icp::IcpConfig& config,
+            std::vector<IcpElementInfo>* outElementInfo = nullptr);
     }
 }
 

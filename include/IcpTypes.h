@@ -424,6 +424,31 @@ namespace icp {
     }
 
     //=========================================================================
+    // IcpElementAlignment - Per-BIM-element (부재) alignment result
+    //=========================================================================
+
+    /// One BIM element's individually-estimated alignment, kept alongside the combined
+    /// job-wide result so callers can inspect/save per-element quality (e.g. one element's
+    /// fine alignment converging poorly doesn't have to be guessed at from the combined RMSE
+    /// alone). `transform` here is the chunk's *local* refinement only (IcpResult::transform,
+    /// composed with the job's coarse transform the same way aggregateWeightedTransforms
+    /// combines all chunks) -- see CHANGELOG/doc for the combination math.
+    struct IcpElementAlignment {
+        uint32_t chunk_id = 0;
+        std::string elementName;
+        int elementRevitId = 0;
+        int sourcePointCount = 0;
+        int targetPointCount = 0;
+        double rmse = 0.0;
+        bool converged = false;
+        bool success = false;
+        std::string errorMessage;
+        Transform4x4 transform;
+
+        IcpElementAlignment() : transform(Transform4x4::identity()) {}
+    };
+
+    //=========================================================================
     // IcpJob - Master-side job management structure
     //=========================================================================
 
@@ -477,6 +502,15 @@ namespace icp {
         Transform4x4 finalTransform;
         double finalRMSE = 0.0;
 
+        /// Per-BIM-element (부재) alignment results, one per successfully-processed chunk
+        /// (empty when fine alignment ran as a single Master-only pass instead of per-element
+        /// chunks). Saved to disk alongside the combined result -- see
+        /// alignmentOutputPath/saveAlignmentResults() in MasterApplication_ICP.cpp.
+        std::vector<IcpElementAlignment> elementResults;
+
+        /// Path to the saved per-element + combined alignment JSON file (set once written)
+        std::string alignmentOutputPath;
+
         /// Statistics
         size_t totalPointCount = 0;
         size_t totalMeshTriangles = 0;
@@ -520,6 +554,8 @@ namespace icp {
             , failedChunks(other.failedChunks)
             , finalTransform(other.finalTransform)
             , finalRMSE(other.finalRMSE)
+            , elementResults(other.elementResults)
+            , alignmentOutputPath(other.alignmentOutputPath)
             , totalPointCount(other.totalPointCount)
             , totalMeshTriangles(other.totalMeshTriangles)
             , totalPseudoPoints(other.totalPseudoPoints)

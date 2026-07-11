@@ -500,9 +500,11 @@ namespace DPApp {
             const std::vector<chunkbim::MeshChunk>& elements,
             const std::vector<std::array<float, 3>>& coarseAlignedPoints,
             double offsetX, double offsetY, double offsetZ,
-            const icp::IcpConfig& config)
+            const icp::IcpConfig& config,
+            std::vector<IcpElementInfo>* outElementInfo)
         {
             std::vector<std::shared_ptr<icp::IcpChunk>> chunks;
+            if (outElementInfo) outElementInfo->clear();
 
             try {
                 size_t numElements = elements.size();
@@ -578,6 +580,9 @@ namespace DPApp {
                     chunk->calculateTargetBounds();
 
                     chunks.push_back(chunk);
+                    if (outElementInfo) {
+                        outElementInfo->push_back({ boundedElements[i].name, boundedElements[i].id });
+                    }
                 }
 
                 std::cout << "loadIcpElementChunks: " << chunks.size() << " chunks created from "
