@@ -42,6 +42,16 @@ namespace DPApp {
         std::vector<std::shared_ptr<BimPcChunk>> loadBimPcChunks(
             const std::string& bim_folder,
             const std::string& pointcloud_file);
+
+        /// coarseAlignedPoints is the Master's bulk point array, stored as float and shifted
+        /// by (offsetX, offsetY, offsetZ) relative to the BIM's absolute coordinate frame (see
+        /// icp::computeBimRebaseOffset / IcpJob::rebaseOffsetX in IcpTypes.h). Each element's
+        /// resulting IcpChunk::sourcePoints is unshifted back to absolute double coordinates.
+        std::vector<std::shared_ptr<icp::IcpChunk>> loadIcpElementChunks(
+            const std::vector<chunkbim::MeshChunk>& elements,
+            const std::vector<std::array<float, 3>>& coarseAlignedPoints,
+            double offsetX, double offsetY, double offsetZ,
+            const icp::IcpConfig& config);
     }
 }
 
@@ -108,10 +118,16 @@ private:
     uint32_t next_icp_task_id_ = 10000;
     /// Maps a network-dispatched ICP task_id back to the job it belongs to, so
     /// handleIcpResult() can find and update the right IcpJob. Guarded by icp_jobs_mutex_.
-    /// Currently always empty: nothing in this codebase dispatches ICP_FINE_ALIGNMENT tasks
-    /// to Slaves yet (processIcpJob() computes everything on the Master). See
-    /// CHANGELOG_2026-07-10.md / CHANGELOG_2026-07-11.md for the architecture decision.
+    /// Populated by processIcpJob() when it distributes fine alignment across Slaves (one
+    /// chunk per BIM element); see CHANGELOG_2026-07-11.md.
     std::unordered_map<uint32_t, std::string> icp_task_to_job_;
+    /// task_manager_ is a single shared resource re-created by initializeTaskManager() for
+    /// whichever session (bimpc / test / distributed ICP) is currently using it. This mutex
+    /// is held for the full duration of a distributed ICP job's dispatch+wait+aggregate phase
+    /// so a second concurrent ICP job can't call initializeTaskManager() and pull the
+    /// TaskManager out from under the first one. A job that can't acquire it immediately
+    /// falls back to Master-only fine alignment rather than blocking on this lock.
+    std::mutex icp_dispatch_mutex_;
 
 public:
     MasterApplication();

@@ -15,6 +15,7 @@
 #include "../include/IcpTypes.h"
 #include "../include/bimtree/IcpCore.hpp"
 #include "../include/bimtree/IcpSerialization.hpp"
+#include "../include/bimtree/PseudoPointGenerator.hpp"
 
 #include <iostream>
 #include <atomic>
@@ -394,28 +395,50 @@ namespace DPApp {
                     return chunks;
                 }
 
-                /// 2. Load point cloud data
-                std::vector<pctree::XYZPoint> pc;
-                if (!loadLasFile(pointcloud_file, pc)) {
+                for (auto& element : bimData) {
+                    element.calculateBounds();
+                }
+
+                /// 2. Load point cloud data, then rebase to the BIM's centroid and narrow to
+                /// float for the Master's bulk resident copy (the real memory-saving point --
+                /// this array can be hundreds of millions of points for a large site).
+                std::vector<pctree::XYZPoint> pcAbsolute;
+                if (!loadLasFile(pointcloud_file, pcAbsolute)) {
                     return chunks;
                 }
 
+                std::array<double, 3> rebaseOffset = icp::computeBimRebaseOffset(bimData);
+                std::vector<std::array<float, 3>> pc;
+                pc.reserve(pcAbsolute.size());
+                for (const auto& p : pcAbsolute) {
+                    pc.push_back({
+                        static_cast<float>(p[0] - rebaseOffset[0]),
+                        static_cast<float>(p[1] - rebaseOffset[1]),
+                        static_cast<float>(p[2] - rebaseOffset[2]) });
+                }
+                pcAbsolute.clear();
+                pcAbsolute.shrink_to_fit();
+
                 size_t numChunks = bimData.size();
 
-                /// Pre-create chunks and calculate BIM bounding boxes before moving
+                /// Pre-create chunks (bounds already calculated above)
                 for (size_t i = 0; i < numChunks; ++i) {
                     chunks.emplace_back(std::make_shared<BimPcChunk>());
                     auto& bimpc_chunk = chunks.back();
                     bimpc_chunk->chunk_id = static_cast<uint32_t>(i);
-                    bimData[i].calculateBounds();
                     bimpc_chunk->bim = std::move(bimData[i]);
                 }
 
-                /// Assign each point to the BIM chunk whose bounding box contains it.
+                /// Assign each point to the BIM chunk whose bounding box contains it. `pc` is
+                /// shifted (float, absolute - rebaseOffset); unshift back to absolute double
+                /// coordinates here so the comparison/storage below matches chunk.bim's
+                /// (unshifted) frame -- BimPcChunk always holds absolute-frame data.
                 /// If a point falls outside all boxes, assign it to the nearest chunk center.
                 const double margin = 1.0;
                 for (const auto& pt : pc) {
-                    double px = pt[0], py = pt[1], pz = pt[2];
+                    double px = static_cast<double>(pt[0]) + rebaseOffset[0];
+                    double py = static_cast<double>(pt[1]) + rebaseOffset[1];
+                    double pz = static_cast<double>(pt[2]) + rebaseOffset[2];
 
                     int best = 0;
                     double best_dist_sq = std::numeric_limits<double>::max();
@@ -436,7 +459,7 @@ namespace DPApp {
                         if (d < best_dist_sq) { best_dist_sq = d; best = static_cast<int>(i); }
                     }
 
-                    chunks[best]->points.push_back(pt);
+                    chunks[best]->points.push_back(Point3D(px, py, pz));
                 }
 
                 for (auto& bimpc_chunk : chunks) {
@@ -451,6 +474,109 @@ namespace DPApp {
             }
             catch (const std::exception& e) {
                 std::cerr << "Error loading BimPcChunks: " << e.what() << std::endl;
+            }
+
+            return chunks;
+        }
+
+        /// Build one IcpChunk per BIM element (Revit Element ID -- each GLTF node/mesh loaded
+        /// by loadGltf() is one structural component of the plant/structure), so fine alignment
+        /// can be distributed to Slaves one element at a time instead of running as a single
+        /// Master-side pass over the whole point cloud.
+        ///
+        /// For each element: clip the (already coarse-aligned) point cloud to that element's
+        /// bounding box (expanded by config.maxCorrespondenceDistance as margin), and generate
+        /// pseudo target points from just that element's mesh. Elements with too few nearby
+        /// points (< config.minCorrespondences) or a degenerate mesh are skipped -- there is
+        /// nothing meaningful to align there. A point can end up in more than one element's
+        /// chunk when their (margin-expanded) boxes overlap; unlike BimPc's distance-calc
+        /// chunking (where every point must land in exactly one chunk), that's fine here --
+        /// a boundary point is a legitimate correspondence candidate for either neighbor.
+        std::vector<std::shared_ptr<icp::IcpChunk>> loadIcpElementChunks(
+            const std::vector<chunkbim::MeshChunk>& elements,
+            const std::vector<std::array<float, 3>>& coarseAlignedPoints,
+            double offsetX, double offsetY, double offsetZ,
+            const icp::IcpConfig& config)
+        {
+            std::vector<std::shared_ptr<icp::IcpChunk>> chunks;
+
+            try {
+                size_t numElements = elements.size();
+                if (numElements == 0) {
+                    std::cerr << "loadIcpElementChunks: no BIM elements provided" << std::endl;
+                    return chunks;
+                }
+
+                /// Compute (and cache) each element's bounding box up front.
+                std::vector<chunkbim::MeshChunk> boundedElements = elements;
+                for (auto& element : boundedElements) {
+                    element.calculateBounds();
+                }
+
+                /// Clip points into every element's (margin-expanded) box. coarseAlignedPoints
+                /// is shifted (float, absolute - offset); elements are absolute (unshifted), so
+                /// shift each element's box down by the same offset for the comparison, and
+                /// widen + unshift each matched point back to absolute double coordinates --
+                /// IcpChunk always holds absolute-frame data.
+                const double margin = (std::max)(config.maxCorrespondenceDistance, 0.1);
+                std::vector<std::vector<std::array<double, 3>>> elementPoints(numElements);
+
+                for (const auto& pt : coarseAlignedPoints) {
+                    double px = static_cast<double>(pt[0]) + offsetX;
+                    double py = static_cast<double>(pt[1]) + offsetY;
+                    double pz = static_cast<double>(pt[2]) + offsetZ;
+                    for (size_t i = 0; i < numElements; ++i) {
+                        const auto& bim = boundedElements[i];
+                        if (px >= bim.min_x - margin && px <= bim.max_x + margin &&
+                            py >= bim.min_y - margin && py <= bim.max_y + margin &&
+                            pz >= bim.min_z - margin && pz <= bim.max_z + margin) {
+                            elementPoints[i].push_back({ px, py, pz });
+                        }
+                    }
+                }
+
+                size_t skippedTooFewPoints = 0;
+                size_t skippedDegenerateMesh = 0;
+
+                for (size_t i = 0; i < numElements; ++i) {
+                    if (static_cast<int>(elementPoints[i].size()) < config.minCorrespondences) {
+                        ++skippedTooFewPoints;
+                        continue;
+                    }
+
+                    std::vector<std::array<double, 3>> pseudoPoints;
+                    std::vector<size_t> faceIdx;
+                    std::vector<std::array<double, 3>> facePts;
+                    std::vector<std::array<double, 3>> faceNormals;
+                    icp::generatePseudoPointsFromMesh(boundedElements[i], config.pseudoPointGridSize,
+                        pseudoPoints, faceIdx, facePts, faceNormals);
+
+                    if (pseudoPoints.empty()) {
+                        ++skippedDegenerateMesh;
+                        continue;
+                    }
+
+                    auto chunk = std::make_shared<icp::IcpChunk>();
+                    chunk->chunk_id = static_cast<uint32_t>(chunks.size());
+                    chunk->sourcePoints = std::move(elementPoints[i]);
+                    chunk->targetPoints = std::move(pseudoPoints);
+                    chunk->faceIndices = std::move(faceIdx);
+                    chunk->faceNormals = std::move(faceNormals);
+                    chunk->facePts = std::move(facePts);
+                    chunk->config = config;
+                    chunk->calculateSourceBounds();
+                    chunk->calculateTargetBounds();
+
+                    chunks.push_back(chunk);
+                }
+
+                std::cout << "loadIcpElementChunks: " << chunks.size() << " chunks created from "
+                    << numElements << " BIM elements ("
+                    << skippedTooFewPoints << " skipped: too few nearby points, "
+                    << skippedDegenerateMesh << " skipped: degenerate mesh)" << std::endl;
+            }
+            catch (const std::exception& e) {
+                std::cerr << "Error loading IcpChunks: " << e.what() << std::endl;
             }
 
             return chunks;
@@ -907,6 +1033,23 @@ void MasterApplication::handleTaskResult(const NetworkMessage& message, const st
             std::vector<uint8_t> icp_result_data(
                 result_data.begin() + sizeof(uint32_t), result_data.end());
             icp::IcpResult icp_result = icp::deserializeIcpResult(icp_result_data);
+
+            /// [Fix] handleIcpResult() only updates the IcpJob's own bookkeeping
+            /// (chunkResults/completedChunks/icp_task_to_job_). Without also telling
+            /// task_manager_ the task finished, the slave stays marked "busy" forever from
+            /// TaskManager's point of view, breaking load-balanced dispatch for later tasks.
+            if (task_manager_) {
+                if (icp_result.success) {
+                    ProcessingResult simple_result;
+                    simple_result.task_id = icp_task_id;
+                    simple_result.chunk_id = icp_result.chunk_id;
+                    simple_result.success = true;
+                    task_manager_->completeTask(icp_task_id, simple_result);
+                } else {
+                    task_manager_->failTask(icp_task_id, icp_result.errorMessage);
+                }
+            }
+
             handleIcpResult(icp_result, icp_task_id);
         }
         else {
@@ -1028,6 +1171,9 @@ void MasterApplication::sendAssignedTasks() {
         bool is_bimpc_task = (task_info.task_type == TaskType::BIM_PC2_DIST &&
             task_info.bimpc_chunk_data != nullptr);
 
+        bool is_icp_task = (task_info.task_type == TaskType::ICP_FINE_ALIGNMENT &&
+            task_info.icp_chunk_data != nullptr);
+
         if (is_test_task) {
             // Test chunk data serialization
             std::lock_guard<std::mutex> lock(test_mutex_);
@@ -1046,6 +1192,12 @@ void MasterApplication::sendAssignedTasks() {
             ILOG << "Task " << task_info.task_id << " has BimPcChunk data ("
                 << task_info.bimpc_chunk_data->points.size() << " points, "
                 << task_info.bimpc_chunk_data->bim.faces.size() << " faces)";
+        }
+        else if (is_icp_task) {
+            chunk_data = icp::serializeIcpChunk(*task_info.icp_chunk_data);
+            ILOG << "Task " << task_info.task_id << " has IcpChunk data ("
+                << task_info.icp_chunk_data->sourcePoints.size() << " source points, "
+                << task_info.icp_chunk_data->targetPoints.size() << " target points)";
         }
         else if (task_info.chunk_data) {
             chunk_data = NetworkUtils::serializeChunk(*task_info.chunk_data);

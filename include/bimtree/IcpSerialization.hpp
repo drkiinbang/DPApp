@@ -26,10 +26,14 @@ namespace icp {
     /// Serialize Transform4x4 to binary buffer
     /// @param transform Transform to serialize
     /// @param buffer Output buffer (appended)
+    /// [Fix] Transform4x4::m is double[16] (128 bytes), not float[16] (64 bytes). This used to
+    /// memcpy only 64 bytes, silently truncating the matrix -- never caught because this code
+    /// path had never been exercised (ICP has always run Master-only, with no network transfer
+    /// of IcpChunk/IcpResult, until distributed fine alignment was implemented).
     inline void serializeTransform(const Transform4x4& transform, std::vector<uint8_t>& buffer) {
         size_t startSize = buffer.size();
-        buffer.resize(startSize + sizeof(float) * 16);
-        std::memcpy(buffer.data() + startSize, transform.m, sizeof(float) * 16);
+        buffer.resize(startSize + sizeof(double) * 16);
+        std::memcpy(buffer.data() + startSize, transform.m, sizeof(double) * 16);
     }
 
     /// Deserialize Transform4x4 from binary data
@@ -38,8 +42,8 @@ namespace icp {
     /// @return Deserialized Transform4x4
     inline Transform4x4 deserializeTransform(const uint8_t* data, size_t& offset) {
         Transform4x4 result;
-        std::memcpy(result.m, data + offset, sizeof(float) * 16);
-        offset += sizeof(float) * 16;
+        std::memcpy(result.m, data + offset, sizeof(double) * 16);
+        offset += sizeof(double) * 16;
         return result;
     }
 
@@ -48,37 +52,40 @@ namespace icp {
     //=========================================================================
 
     /// Serialize IcpConfig to binary buffer
+    /// [Fix] The 5 threshold fields (convergenceThreshold, maxCorrespondenceDistance,
+    /// outlierRejectionThreshold, normalAngleThreshold, pseudoPointGridSize) are all `double`
+    /// in IcpConfig, not `float`; this used to memcpy only 4 of each field's 8 bytes.
     inline void serializeConfig(const IcpConfig& config, std::vector<uint8_t>& buffer) {
         size_t startSize = buffer.size();
-        
+
         /// Calculate required size
         size_t configSize = sizeof(int) * 3 +      // maxIterations, downsampleRatio, minCorrespondences
-                           sizeof(float) * 5 +     // 5 float thresholds
+                           sizeof(double) * 5 +    // 5 double thresholds
                            sizeof(uint8_t) * 2;    // 2 bool flags
-        
+
         buffer.resize(startSize + configSize);
         uint8_t* ptr = buffer.data() + startSize;
-        
+
         /// Write integers
-        std::memcpy(ptr, &config.maxIterations, sizeof(int)); 
+        std::memcpy(ptr, &config.maxIterations, sizeof(int));
         ptr += sizeof(int);
-        std::memcpy(ptr, &config.downsampleRatio, sizeof(int)); 
+        std::memcpy(ptr, &config.downsampleRatio, sizeof(int));
         ptr += sizeof(int);
-        std::memcpy(ptr, &config.minCorrespondences, sizeof(int)); 
+        std::memcpy(ptr, &config.minCorrespondences, sizeof(int));
         ptr += sizeof(int);
-        
-        /// Write floats
-        std::memcpy(ptr, &config.convergenceThreshold, sizeof(float)); 
-        ptr += sizeof(float);
-        std::memcpy(ptr, &config.maxCorrespondenceDistance, sizeof(float)); 
-        ptr += sizeof(float);
-        std::memcpy(ptr, &config.outlierRejectionThreshold, sizeof(float)); 
-        ptr += sizeof(float);
-        std::memcpy(ptr, &config.normalAngleThreshold, sizeof(float)); 
-        ptr += sizeof(float);
-        std::memcpy(ptr, &config.pseudoPointGridSize, sizeof(float)); 
-        ptr += sizeof(float);
-        
+
+        /// Write doubles
+        std::memcpy(ptr, &config.convergenceThreshold, sizeof(double));
+        ptr += sizeof(double);
+        std::memcpy(ptr, &config.maxCorrespondenceDistance, sizeof(double));
+        ptr += sizeof(double);
+        std::memcpy(ptr, &config.outlierRejectionThreshold, sizeof(double));
+        ptr += sizeof(double);
+        std::memcpy(ptr, &config.normalAngleThreshold, sizeof(double));
+        ptr += sizeof(double);
+        std::memcpy(ptr, &config.pseudoPointGridSize, sizeof(double));
+        ptr += sizeof(double);
+
         /// Write bools as uint8_t
         *ptr++ = config.useNormalFiltering ? 1 : 0;
         *ptr++ = config.verbose ? 1 : 0;
@@ -87,31 +94,31 @@ namespace icp {
     /// Deserialize IcpConfig from binary data
     inline IcpConfig deserializeConfig(const uint8_t* data, size_t& offset) {
         IcpConfig config;
-        
+
         /// Read integers
-        std::memcpy(&config.maxIterations, data + offset, sizeof(int)); 
+        std::memcpy(&config.maxIterations, data + offset, sizeof(int));
         offset += sizeof(int);
-        std::memcpy(&config.downsampleRatio, data + offset, sizeof(int)); 
+        std::memcpy(&config.downsampleRatio, data + offset, sizeof(int));
         offset += sizeof(int);
-        std::memcpy(&config.minCorrespondences, data + offset, sizeof(int)); 
+        std::memcpy(&config.minCorrespondences, data + offset, sizeof(int));
         offset += sizeof(int);
-        
-        /// Read floats
-        std::memcpy(&config.convergenceThreshold, data + offset, sizeof(float)); 
-        offset += sizeof(float);
-        std::memcpy(&config.maxCorrespondenceDistance, data + offset, sizeof(float)); 
-        offset += sizeof(float);
-        std::memcpy(&config.outlierRejectionThreshold, data + offset, sizeof(float)); 
-        offset += sizeof(float);
-        std::memcpy(&config.normalAngleThreshold, data + offset, sizeof(float)); 
-        offset += sizeof(float);
-        std::memcpy(&config.pseudoPointGridSize, data + offset, sizeof(float)); 
-        offset += sizeof(float);
-        
+
+        /// Read doubles
+        std::memcpy(&config.convergenceThreshold, data + offset, sizeof(double));
+        offset += sizeof(double);
+        std::memcpy(&config.maxCorrespondenceDistance, data + offset, sizeof(double));
+        offset += sizeof(double);
+        std::memcpy(&config.outlierRejectionThreshold, data + offset, sizeof(double));
+        offset += sizeof(double);
+        std::memcpy(&config.normalAngleThreshold, data + offset, sizeof(double));
+        offset += sizeof(double);
+        std::memcpy(&config.pseudoPointGridSize, data + offset, sizeof(double));
+        offset += sizeof(double);
+
         /// Read bools
         config.useNormalFiltering = (data[offset++] != 0);
         config.verbose = (data[offset++] != 0);
-        
+
         return config;
     }
 
@@ -121,13 +128,17 @@ namespace icp {
     
     /// Binary format:
     /// [chunk_id: 4 bytes]
-    /// [sourcePoints count: 4 bytes][sourcePoints data: count * 12 bytes]
-    /// [targetPoints count: 4 bytes][targetPoints data: count * 12 bytes]
-    /// [targetNormals count: 4 bytes][targetNormals data: count * 12 bytes]
-    /// [initialTransform: 64 bytes]
-    /// [config: ~30 bytes]
+    /// [sourcePoints count: 4 bytes][sourcePoints data: count * 24 bytes]
+    /// [targetPoints count: 4 bytes][targetPoints data: count * 24 bytes]
+    /// [targetNormals count: 4 bytes][targetNormals data: count * 24 bytes]
+    /// [initialTransform: 128 bytes]
+    /// [config: ~68 bytes]
     /// [source bbox: 24 bytes (6 floats)]
     /// [target bbox: 24 bytes (6 floats)]
+    ///
+    /// [Fix] IcpChunk's point arrays (sourcePoints/targetPoints/faceNormals/facePts) are all
+    /// std::vector<std::array<double,3>> (24 bytes/point), not float (12 bytes/point). This
+    /// used to memcpy assuming 12-byte points against 24-byte data, corrupting every point.
 
     /// Serialize IcpChunk to binary buffer
     inline std::vector<uint8_t> serializeIcpChunk(const IcpChunk& chunk) {
@@ -135,12 +146,12 @@ namespace icp {
 
         /// Estimate total size for reservation
         size_t estimatedSize = sizeof(uint32_t) * 5 +  // chunk_id + 4 counts
-            chunk.sourcePoints.size() * sizeof(float) * 3 +
-            chunk.targetPoints.size() * sizeof(float) * 3 +
+            chunk.sourcePoints.size() * sizeof(double) * 3 +
+            chunk.targetPoints.size() * sizeof(double) * 3 +
             chunk.faceIndices.size() * sizeof(uint64_t) +
-            chunk.faceNormals.size() * sizeof(float) * 3 +
-            sizeof(float) * 16 +     // transform
-            64 +                     // config (overestimate)
+            chunk.faceNormals.size() * sizeof(double) * 3 +
+            sizeof(double) * 16 +    // transform
+            80 +                     // config (overestimate)
             sizeof(float) * 12;      // bboxes
         buffer.reserve(estimatedSize);
 
@@ -151,23 +162,23 @@ namespace icp {
         /// 2. Source points
         uint32_t sourceCount = static_cast<uint32_t>(chunk.sourcePoints.size());
         size_t pos = buffer.size();
-        buffer.resize(pos + sizeof(uint32_t) + sourceCount * sizeof(float) * 3);
+        buffer.resize(pos + sizeof(uint32_t) + sourceCount * sizeof(double) * 3);
         std::memcpy(buffer.data() + pos, &sourceCount, sizeof(uint32_t));
         pos += sizeof(uint32_t);
         if (sourceCount > 0) {
             std::memcpy(buffer.data() + pos, chunk.sourcePoints.data(),
-                sourceCount * sizeof(float) * 3);
+                sourceCount * sizeof(double) * 3);
         }
 
         /// 3. Target points
         uint32_t targetCount = static_cast<uint32_t>(chunk.targetPoints.size());
         pos = buffer.size();
-        buffer.resize(pos + sizeof(uint32_t) + targetCount * sizeof(float) * 3);
+        buffer.resize(pos + sizeof(uint32_t) + targetCount * sizeof(double) * 3);
         std::memcpy(buffer.data() + pos, &targetCount, sizeof(uint32_t));
         pos += sizeof(uint32_t);
         if (targetCount > 0) {
             std::memcpy(buffer.data() + pos, chunk.targetPoints.data(),
-                targetCount * sizeof(float) * 3);
+                targetCount * sizeof(double) * 3);
         }
 
         /// 4. Face indices (size_t → uint64_t for cross-platform)
@@ -186,23 +197,23 @@ namespace icp {
         /// 5. Face normals (all normals from mesh faces)
         uint32_t faceNormalCount = static_cast<uint32_t>(chunk.faceNormals.size());
         pos = buffer.size();
-        buffer.resize(pos + sizeof(uint32_t) + faceNormalCount * sizeof(float) * 3);
+        buffer.resize(pos + sizeof(uint32_t) + faceNormalCount * sizeof(double) * 3);
         std::memcpy(buffer.data() + pos, &faceNormalCount, sizeof(uint32_t));
         pos += sizeof(uint32_t);
         if (faceNormalCount > 0) {
             std::memcpy(buffer.data() + pos, chunk.faceNormals.data(),
-                faceNormalCount * sizeof(float) * 3);
+                faceNormalCount * sizeof(double) * 3);
         }
 
         /// 6. Face points (one per face)
         uint32_t facePtsCount = static_cast<uint32_t>(chunk.facePts.size());
         pos = buffer.size();
-        buffer.resize(pos + sizeof(uint32_t) + facePtsCount * sizeof(float) * 3);
+        buffer.resize(pos + sizeof(uint32_t) + facePtsCount * sizeof(double) * 3);
         std::memcpy(buffer.data() + pos, &facePtsCount, sizeof(uint32_t));
         pos += sizeof(uint32_t);
         if (facePtsCount > 0) {
             std::memcpy(buffer.data() + pos, chunk.facePts.data(),
-                facePtsCount * sizeof(float) * 3);
+                facePtsCount * sizeof(double) * 3);
         }
 
         /// 7. Initial transform
@@ -242,14 +253,15 @@ namespace icp {
         offset += sizeof(uint32_t);
 
         /// 2. Source points
+        /// [Fix] points are std::array<double,3> (24 bytes/point), not float (12 bytes/point).
         uint32_t sourceCount;
         std::memcpy(&sourceCount, ptr + offset, sizeof(uint32_t));
         offset += sizeof(uint32_t);
         chunk.sourcePoints.resize(sourceCount);
         if (sourceCount > 0) {
             std::memcpy(chunk.sourcePoints.data(), ptr + offset,
-                sourceCount * sizeof(float) * 3);
-            offset += sourceCount * sizeof(float) * 3;
+                sourceCount * sizeof(double) * 3);
+            offset += sourceCount * sizeof(double) * 3;
         }
 
         /// 3. Target points
@@ -259,8 +271,8 @@ namespace icp {
         chunk.targetPoints.resize(targetCount);
         if (targetCount > 0) {
             std::memcpy(chunk.targetPoints.data(), ptr + offset,
-                targetCount * sizeof(float) * 3);
-            offset += targetCount * sizeof(float) * 3;
+                targetCount * sizeof(double) * 3);
+            offset += targetCount * sizeof(double) * 3;
         }
 
         /// 4. Face indices
@@ -284,23 +296,26 @@ namespace icp {
         chunk.faceNormals.resize(faceNormalCount);
         if (faceNormalCount > 0) {
             std::memcpy(chunk.faceNormals.data(), ptr + offset,
-                faceNormalCount * sizeof(float) * 3);
-            offset += faceNormalCount * sizeof(float) * 3;
+                faceNormalCount * sizeof(double) * 3);
+            offset += faceNormalCount * sizeof(double) * 3;
         }
 
-        /// 6. Initial transform
-        chunk.initialTransform = deserializeTransform(ptr, offset);
-
         /// 6. Face points
+        /// [Fix] This used to be read *before* the initial transform below, but
+        /// serializeIcpChunk() writes face points *before* the transform -- the field order
+        /// here was swapped relative to the writer, corrupting both fields.
         uint32_t facePtsCount;
         std::memcpy(&facePtsCount, ptr + offset, sizeof(uint32_t));
         offset += sizeof(uint32_t);
         chunk.facePts.resize(facePtsCount);
         if (facePtsCount > 0) {
             std::memcpy(chunk.facePts.data(), ptr + offset,
-                facePtsCount * sizeof(float) * 3);
-            offset += facePtsCount * sizeof(float) * 3;
+                facePtsCount * sizeof(double) * 3);
+            offset += facePtsCount * sizeof(double) * 3;
         }
+
+        /// 7. Initial transform
+        chunk.initialTransform = deserializeTransform(ptr, offset);
 
         /// 8. Config
         chunk.config = deserializeConfig(ptr, offset);
@@ -342,28 +357,29 @@ namespace icp {
         std::vector<uint8_t> buffer;
         
         size_t estimatedSize = sizeof(uint32_t) +      // chunk_id
-                              sizeof(float) * 32 +     // 2 transforms
-                              sizeof(float) * 2 +      // RMSE values
+                              sizeof(double) * 32 +    // 2 transforms
+                              sizeof(double) * 2 +     // RMSE values
                               sizeof(int) * 4 +        // int counters
                               sizeof(uint8_t) * 2 +    // bool flags
                               sizeof(double) +         // processing time
                               sizeof(uint32_t) +       // error message length
                               result.errorMessage.size();
         buffer.reserve(estimatedSize);
-        
+
         /// 1. Chunk ID
         buffer.resize(sizeof(uint32_t));
         std::memcpy(buffer.data(), &result.chunk_id, sizeof(uint32_t));
-        
+
         /// 2. Transform matrices
         serializeTransform(result.transform, buffer);
         serializeTransform(result.localTransform, buffer);
-        
+
         /// 3. RMSE values
+        /// [Fix] finalRMSE/initialRMSE are double, not float.
         size_t pos = buffer.size();
-        buffer.resize(pos + sizeof(float) * 2);
-        std::memcpy(buffer.data() + pos, &result.finalRMSE, sizeof(float));
-        std::memcpy(buffer.data() + pos + sizeof(float), &result.initialRMSE, sizeof(float));
+        buffer.resize(pos + sizeof(double) * 2);
+        std::memcpy(buffer.data() + pos, &result.finalRMSE, sizeof(double));
+        std::memcpy(buffer.data() + pos + sizeof(double), &result.initialRMSE, sizeof(double));
         
         /// 4. Integer counters
         pos = buffer.size();
@@ -411,10 +427,10 @@ namespace icp {
         result.localTransform = deserializeTransform(ptr, offset);
         
         /// 3. RMSE values
-        std::memcpy(&result.finalRMSE, ptr + offset, sizeof(float));
-        offset += sizeof(float);
-        std::memcpy(&result.initialRMSE, ptr + offset, sizeof(float));
-        offset += sizeof(float);
+        std::memcpy(&result.finalRMSE, ptr + offset, sizeof(double));
+        offset += sizeof(double);
+        std::memcpy(&result.initialRMSE, ptr + offset, sizeof(double));
+        offset += sizeof(double);
         
         /// 4. Integer counters
         const int* intPtr = reinterpret_cast<const int*>(ptr + offset);
@@ -451,20 +467,20 @@ namespace icp {
     /// Get serialized size of IcpChunk (approximate)
     inline size_t getSerializedSize(const IcpChunk& chunk) {
         return sizeof(uint32_t) * 5 +  // chunk_id + 4 counts
-            chunk.sourcePoints.size() * sizeof(float) * 3 +
-            chunk.targetPoints.size() * sizeof(float) * 3 +
+            chunk.sourcePoints.size() * sizeof(double) * 3 +
+            chunk.targetPoints.size() * sizeof(double) * 3 +
             chunk.faceIndices.size() * sizeof(uint64_t) +
-            chunk.faceNormals.size() * sizeof(float) * 3 +
-            sizeof(float) * 16 +    // transform
-            64 +                    // config
+            chunk.faceNormals.size() * sizeof(double) * 3 +
+            sizeof(double) * 16 +   // transform
+            80 +                    // config
             sizeof(float) * 12;     // bboxes
     }
 
     /// Get serialized size of IcpResult (approximate)
     inline size_t getSerializedSize(const IcpResult& result) {
         return sizeof(uint32_t) +      // chunk_id
-               sizeof(float) * 32 +    // 2 transforms
-               sizeof(float) * 2 +     // RMSE
+               sizeof(double) * 32 +   // 2 transforms
+               sizeof(double) * 2 +    // RMSE
                sizeof(int) * 4 +       // counters
                sizeof(uint8_t) * 2 +   // flags
                sizeof(double) +        // time

@@ -147,6 +147,29 @@ namespace icp {
         }
     };
 
+    /// Given a rigid transform valid for absolute-frame points (R*p_abs + t ~= q_abs), derive
+    /// the equivalent transform for points already shifted by a rebase offset
+    /// (p_shifted = p_abs - offset), such that applying it directly to p_shifted yields a
+    /// result in the same shifted frame (q_shifted = q_abs - offset):
+    ///   t_shifted = t_absolute - (I - R) * offset = t_absolute - offset + R * offset
+    /// Rotation is unchanged by a common translation offset. Used only to apply an
+    /// already-computed (absolute-frame) ICP transform directly to the Master's bulk,
+    /// offset-rebased float point array without widening the whole array to double first --
+    /// the ICP computation itself always operates on absolute-frame (unshifted) chunk data.
+    inline Transform4x4 toShiftedFrame(const Transform4x4& absoluteTransform,
+        double offsetX, double offsetY, double offsetZ) {
+        Transform4x4 result = absoluteTransform;
+        double R[9];
+        absoluteTransform.getRotation(R);
+        double rOffsetX = R[0] * offsetX + R[1] * offsetY + R[2] * offsetZ;
+        double rOffsetY = R[3] * offsetX + R[4] * offsetY + R[5] * offsetZ;
+        double rOffsetZ = R[6] * offsetX + R[7] * offsetY + R[8] * offsetZ;
+        result.m[12] = absoluteTransform.m[12] - offsetX + rOffsetX;
+        result.m[13] = absoluteTransform.m[13] - offsetY + rOffsetY;
+        result.m[14] = absoluteTransform.m[14] - offsetZ + rOffsetZ;
+        return result;
+    }
+
     //=========================================================================
     // IcpConfig - ICP Algorithm Configuration
     //=========================================================================
@@ -404,10 +427,19 @@ namespace icp {
         std::string lasFilePath;
         std::string bimFolderPath;
 
-        /// LAS offset (applied after loading)
+        /// LAS offset (user-supplied manual pre-shift, applied after loading)
         double offsetX = 0.0;
         double offsetY = 0.0;
         double offsetZ = 0.0;
+
+        /// Rebase offset (computed automatically from the BIM centroid, distinct from the
+        /// manual offsetX/Y/Z above). Point-cloud coordinates are stored/transmitted shifted
+        /// by this amount (as float) to preserve sub-mm precision near the origin; the final
+        /// transform is corrected back to the original frame exactly once, when the job
+        /// completes (see aggregateWeightedTransforms usage in processIcpJob).
+        double rebaseOffsetX = 0.0;
+        double rebaseOffsetY = 0.0;
+        double rebaseOffsetZ = 0.0;
 
         /// Output file path for aligned point cloud
         std::string outputPath;
@@ -463,6 +495,9 @@ namespace icp {
             , offsetX(other.offsetX)
             , offsetY(other.offsetY)
             , offsetZ(other.offsetZ)
+            , rebaseOffsetX(other.rebaseOffsetX)
+            , rebaseOffsetY(other.rebaseOffsetY)
+            , rebaseOffsetZ(other.rebaseOffsetZ)
             , outputPath(other.outputPath)
             , config(other.config)
             , status(other.status)

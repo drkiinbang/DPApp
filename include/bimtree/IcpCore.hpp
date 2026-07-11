@@ -600,6 +600,27 @@ namespace icp {
         return result;
     }
 
+    /// Apply transformation to a float-stored point cloud (copy version). Each point is
+    /// widened to double for the transform math (precision), then narrowed back to float for
+    /// storage -- used for the Master's bulk (offset-rebased) point cloud arrays, which stay
+    /// float in memory even though the transform itself is always double.
+    inline std::vector<std::array<float, 3>> transformPointCloudCopy(
+        const std::vector<std::array<float, 3>>& points,
+        const Transform4x4& transform)
+    {
+        std::vector<std::array<float, 3>> result;
+        result.reserve(points.size());
+
+        for (const auto& p : points) {
+            double tx, ty, tz;
+            transform.transformPoint(
+                static_cast<double>(p[0]), static_cast<double>(p[1]), static_cast<double>(p[2]),
+                tx, ty, tz);
+            result.push_back({ static_cast<float>(tx), static_cast<float>(ty), static_cast<float>(tz) });
+        }
+        return result;
+    }
+
     //=========================================================================
     // Downsampling
     //=========================================================================
@@ -644,6 +665,54 @@ namespace icp {
         }
 
         return downPts;
+    }
+
+    /// Downsample a float-stored point cloud by uniform selection (every N-th point). Plain
+    /// element copy, no precision-sensitive math -- used for the Master's bulk (offset-rebased)
+    /// point cloud arrays.
+    inline std::vector<std::array<float, 3>> downsampleUniform(
+        const std::vector<std::array<float, 3>>& points,
+        int ratio)
+    {
+        if (ratio <= 0) return {};
+        if (ratio == 1) return points;
+
+        std::vector<std::array<float, 3>> downPts;
+        auto numSamples = points.size() / ratio + 1;
+        downPts.reserve(numSamples);
+
+        for (size_t i = 0; i < points.size(); i += ratio) {
+            downPts.push_back(points[i]);
+        }
+
+        return downPts;
+    }
+
+    /// Widen a float point array to double (e.g. when handing a downsampled subset off to
+    /// IcpChunk, which stores double for use by the (unmodified) ICP correspondence/transform
+    /// estimation code below).
+    inline std::vector<std::array<double, 3>> widenToDouble(
+        const std::vector<std::array<float, 3>>& points)
+    {
+        std::vector<std::array<double, 3>> result;
+        result.reserve(points.size());
+        for (const auto& p : points) {
+            result.push_back({ static_cast<double>(p[0]), static_cast<double>(p[1]), static_cast<double>(p[2]) });
+        }
+        return result;
+    }
+
+    /// Narrow a double point array to float (e.g. right after loading/offset-rebasing the full
+    /// LAS point cloud, before it settles into the Master's bulk float storage).
+    inline std::vector<std::array<float, 3>> narrowToFloat(
+        const std::vector<std::array<double, 3>>& points)
+    {
+        std::vector<std::array<float, 3>> result;
+        result.reserve(points.size());
+        for (const auto& p : points) {
+            result.push_back({ static_cast<float>(p[0]), static_cast<float>(p[1]), static_cast<float>(p[2]) });
+        }
+        return result;
     }
 
     /// Downsample point cloud using voxel grid

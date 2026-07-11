@@ -120,7 +120,8 @@ namespace icp {
         return distSq(sub(p, proj));
     }
 
-    /// Generate pseudo points from a single MeshChunk
+    /// Generate pseudo points from a single MeshChunk (always in the mesh's own absolute
+    /// coordinate frame -- the mesh itself is never offset-shifted).
     inline void generatePseudoPointsFromMesh(
         const chunkbim::MeshChunk& mesh,
         double gridSize,
@@ -254,6 +255,26 @@ namespace icp {
             total += mesh.faces.size();
         }
         return total;
+    }
+
+    /// Compute a rebase offset for a set of BIM elements: the center of their combined
+    /// bounding box. Used as the double-precision "origin" that point-cloud and pseudo-point
+    /// coordinates are shifted by before being stored/transmitted as float, so both stay near
+    /// zero (preserving sub-mm precision) regardless of the plant's absolute site coordinates.
+    /// Each element's bounds must already be up to date (calculateBounds() called).
+    inline std::array<double, 3> computeBimRebaseOffset(const std::vector<chunkbim::MeshChunk>& elements) {
+        if (elements.empty()) return { 0.0, 0.0, 0.0 };
+
+        double min_x = elements[0].min_x, min_y = elements[0].min_y, min_z = elements[0].min_z;
+        double max_x = elements[0].max_x, max_y = elements[0].max_y, max_z = elements[0].max_z;
+
+        for (const auto& e : elements) {
+            min_x = (std::min)(min_x, e.min_x); max_x = (std::max)(max_x, e.max_x);
+            min_y = (std::min)(min_y, e.min_y); max_y = (std::max)(max_y, e.max_y);
+            min_z = (std::min)(min_z, e.min_z); max_z = (std::max)(max_z, e.max_z);
+        }
+
+        return { (min_x + max_x) * 0.5, (min_y + max_y) * 0.5, (min_z + max_z) * 0.5 };
     }
 
 } // namespace icp

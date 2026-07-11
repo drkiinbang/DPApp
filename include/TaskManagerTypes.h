@@ -25,6 +25,7 @@
 #include <optional>
 
 #include "PointCloudTypes.h"
+#include "IcpTypes.h"
 
 namespace DPApp {
 
@@ -67,6 +68,7 @@ namespace DPApp {
         std::vector<uint8_t> parameters;
         std::shared_ptr<PointCloudChunk> chunk_data;
         std::shared_ptr<BimPcChunk> bimpc_chunk_data;
+        std::shared_ptr<icp::IcpChunk> icp_chunk_data;
 
         TaskInfo() : task_id(0), chunk_id(0), task_type(TaskType::CONVERT_PTS),
             priority(TaskPriority::NORMAL), status(TaskStatus::PENDING),
@@ -212,6 +214,32 @@ namespace DPApp {
             std::cout << "Task added (PointCloud chunk): " << task_id
                 << " (" << taskStr(current_task_type_) << ")"
                 << " - points: " << pc_chunk->points.size()
+                << std::endl;
+
+            return task_id;
+        }
+
+        uint32_t addTask(std::shared_ptr<icp::IcpChunk> icp_chunk) {
+            std::lock_guard<std::mutex> lock(tasks_mutex_);
+
+            uint32_t task_id = next_task_id_++;
+
+            TaskInfo task_info;
+            task_info.task_id = task_id;
+            task_info.chunk_id = icp_chunk->chunk_id;
+            task_info.task_type = current_task_type_;
+            task_info.priority = TaskPriority::NORMAL;
+            task_info.parameters = task_parameters_;
+            task_info.chunk_data = nullptr;
+            task_info.bimpc_chunk_data = nullptr;
+            task_info.icp_chunk_data = icp_chunk;
+
+            tasks_[task_id] = std::move(task_info);
+
+            std::cout << "Task added (Icp): " << task_id
+                << " (" << taskStr(current_task_type_) << ")"
+                << " - source points: " << icp_chunk->sourcePoints.size()
+                << ", target points: " << icp_chunk->targetPoints.size()
                 << std::endl;
 
             return task_id;
