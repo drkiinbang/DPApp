@@ -13,20 +13,20 @@ namespace chunkbim
 
 	struct Face
 	{
-		/// part id (model file id)
+		/// 부재(part) id (모델 파일 id)
 		int partId;
-		/// Ids of corresponding vertices
+		/// 대응하는 정점(vertex)들의 id
 		std::array<unsigned int, 3> vtxIds;
-		/// Ids of corresponding pseudo pts
+		/// 대응하는 가상점(pseudo point)들의 id
 		std::vector<unsigned int> pseudoPtsIds;
 
 		pctree::MatrixForMesh planeOri;
 		geo::TempBaryCentVar baryTemp;
 
 		bool rotAvailability = false;
-		/// face availability
+		/// face 유효 여부
 		bool availability = true;
-		/// Barycentric temp availability
+		/// barycentric 임시 변수 유효 여부
 		bool baryAvailability = false;
 
 		Face() {}

@@ -53,15 +53,15 @@ MBR BimInfo::get_mbr(const bool is_offset_applied, const float* offset)
   XYZ to{ std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest() };
   XYZ from{ std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max() };
 
-  // Iterate through all faces
+  // 모든 face를 순회
   for (const auto& face : faces)
   {
-    // Iterate through all vertices of the face
+    // face의 모든 정점을 순회
     for (std::size_t vertex_idx = 0; vertex_idx < 3; vertex_idx++)
     {
       Point point = face.getVertex(vertex_idx);
 
-      // Apply offset if necessary
+      // 필요하면 offset 적용
       if (is_offset_applied)
       {
         point.setX(point.getX() - offset[0]);
@@ -69,7 +69,7 @@ MBR BimInfo::get_mbr(const bool is_offset_applied, const float* offset)
         point.setZ(point.getZ() - offset[2]);
       }
 
-      // Update MBR bounds
+      // MBR 범위 갱신
       from.x = std::min(from.x, point.getX());
       from.y = std::min(from.y, point.getY());
       from.z = std::min(from.z, point.getZ());
@@ -89,6 +89,7 @@ bool BimInfo::save(int id, std::string description, const bool is_offset_applied
         return false;
     }
 
+    /// 버퍼 레이아웃(순서대로):
     /// BUFFER_SIZE_RECORD_LEN
     /// ID_RECORD_LEN
     /// TRANSLATION_RECORD_LEN
@@ -98,11 +99,11 @@ bool BimInfo::save(int id, std::string description, const bool is_offset_applied
 
     char* buffer = new char[buf_size];
 
-    // 1. Buffer size
+    // 1. 버퍼 크기
     reinterpret_cast<int*>(buffer)[0] = static_cast<int>(buf_size);
-    // 2. Node ID
+    // 2. 노드 ID
     reinterpret_cast<int*>(buffer)[1] = id;
-    // 3. Translation
+    // 3. 이동(translation)
     std::size_t translate_pos = cacluate_translation_position();
     //for (int i = 0; i < 3; i++)
     //{
@@ -111,7 +112,7 @@ bool BimInfo::save(int id, std::string description, const bool is_offset_applied
     
     memcpy(buffer + translate_pos, offset, sizeof(float) * 3);
     
-    // 4. Description
+    // 4. 설명(description)
     memcpy(buffer + cacluate_description_position(), description.c_str(), DESCRIPTION_RECORD_LEN);
 //#ifdef _WIN32
 //    strcpy_s(buffer + cacluate_description_position(), DESCRIPTION_RECORD_LEN, info.c_str());    
@@ -119,7 +120,7 @@ bool BimInfo::save(int id, std::string description, const bool is_offset_applied
 //    strncpy(buffer + cacluate_description_position(), info.c_str(), DESCRIPTION_RECORD_LEN);
 //#endif       
 
-    // 5. Position Data
+    // 5. 위치(position) 데이터
     std::size_t data_pos = calculate_data_position();
 
     for (std::size_t face_idx = 0; face_idx < faces.size(); face_idx++) 
@@ -154,11 +155,11 @@ bool BimInfo::saveTree(int id, std::string description, bool is_offset_applied, 
     std::size_t buf_size = calculate_buffer_size();
     char* buffer = new char[buf_size];
 
-    // 1. Buffer size
+    // 1. 버퍼 크기
     reinterpret_cast<int*>(buffer)[0] = static_cast<int>(buf_size);
-    // 2. Node ID
+    // 2. 노드 ID
     reinterpret_cast<int*>(buffer)[1] = id;
-    // 3. Translation
+    // 3. 이동(translation)
     std::size_t translate_pos = cacluate_translation_position();
     //for (int i = 0; i < 3; i++)
     //{
@@ -167,7 +168,7 @@ bool BimInfo::saveTree(int id, std::string description, bool is_offset_applied, 
 
     memcpy(buffer + translate_pos, offset, sizeof(float) * 3);
 
-    // 4. Description
+    // 4. 설명(description)
     memcpy(buffer + cacluate_description_position(), description.c_str(), DESCRIPTION_RECORD_LEN);
     //#ifdef _WIN32
     //    strcpy_s(buffer + cacluate_description_position(), DESCRIPTION_RECORD_LEN, info.c_str());    
@@ -175,7 +176,7 @@ bool BimInfo::saveTree(int id, std::string description, bool is_offset_applied, 
     //    strncpy(buffer + cacluate_description_position(), info.c_str(), DESCRIPTION_RECORD_LEN);
     //#endif       
 
-        // 5. Position Data
+        // 5. 위치(position) 데이터
     std::size_t data_pos = calculate_data_position();
 
     for (std::size_t face_idx = 0; face_idx < faces.size(); face_idx++)

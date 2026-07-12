@@ -1,4 +1,4 @@
-// RestApiServer.h - Header-Only REST API Server
+// RestApiServer.h - 헤더 전용(header-only) REST API 서버
 #pragma once
 
 #include "../include/RuntimeConfig.h"
@@ -18,7 +18,7 @@
 #include <sstream>
 #include <cstring>
 
-// Windows-specific includes
+// Windows 전용 include
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -36,7 +36,7 @@ struct SecurityConfig {
 	std::vector<std::string> allowed_origins;
 	size_t max_request_size = 64 * 1024;  /// 64KB
 	size_t max_json_depth = 10;
-	size_t max_filename_length = 1024;    /// File path length, 1MB
+	size_t max_filename_length = 1024;    /// 파일 경로 길이, 1MB
 };
 
 struct HttpRequest {
@@ -79,7 +79,7 @@ public:
 		cfg_ = DPApp::RuntimeConfig::loadFromEnv();
 		pool_ = std::make_unique<DPApp::ThreadPool>(static_cast<size_t>(cfg_.rest_threadpool_size));
 
-		/// Security configuration
+		/// 보안 설정
 		if (cfg_.api_key == "") {
 			security_config_.enable_auth = false;
 			security_config_.api_key = "";
@@ -244,7 +244,7 @@ private:
 			return false;
 		}
 
-		/// Validate API key
+		/// API 키 검증
 		std::string expected = "Bearer " + security_config_.api_key;
 		return auth_header->second == expected;
 	}
@@ -290,7 +290,7 @@ private:
 		route.method = method;
 		route.handler = handler;
 
-		// Extract parameters from pattern (e.g., /api/slaves/{id})
+		// 패턴에서 매개변수 추출 (예: /api/slaves/{id})
 		std::string regex_pattern = pattern;
 		std::regex param_regex(R"(\{([^}]+)\})");
 		std::sregex_iterator iter(pattern.begin(), pattern.end(), param_regex);
@@ -350,7 +350,7 @@ private:
 		char buffer[8192];
 		int bytes_received = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
 
-		/// Check the length of bytes_received
+		/// bytes_received의 길이 확인
 		if (bytes_received > static_cast<int>(security_config_.max_request_size)) {
 			sendErrorAndClose(static_cast<int>(client_socket), 413, "Request too large");
 			return;
@@ -374,7 +374,7 @@ private:
 		HttpRequest request;
 		request.is_valid = true;
 
-		/// 1. Check empty request
+		/// 1. 빈 요청 확인
 		if (request_str.empty()) {
 			request.is_valid = false;
 			request.parse_error = "Empty request";
@@ -384,29 +384,29 @@ private:
 		std::istringstream iss(request_str);
 		std::string line;
 
-		/// 2. Failure in reading the first line
+		/// 2. 첫 줄 읽기 실패 확인
 		if (!std::getline(iss, line)) {
 			request.is_valid = false;
 			request.parse_error = "Cannot read request line";
 			return request;
 		}
 
-		/// 2. Parse the first line
+		/// 2. 첫 줄 파싱
 		std::istringstream first_line(line);
 		first_line >> request.method >> request.path >> request.version;
-		/// Check empty method
+		/// method가 비어 있는지 확인
 		if (request.method.empty()) {
 			request.is_valid = false;
 			request.parse_error = "Missing HTTP method";
 			return request;
 		}
-		/// Check empty path
+		/// path가 비어 있는지 확인
 		if (request.path.empty()) {
 			request.is_valid = false;
 			request.parse_error = "Missing request path";
 			return request;
 		}
-		/// Check the availability of method
+		/// 지원하는 method인지 확인
 		if (request.method != "GET" && request.method != "POST" &&
 			request.method != "PUT" && request.method != "DELETE" &&
 			request.method != "OPTIONS") {
@@ -415,7 +415,7 @@ private:
 			return request;
 		}
 
-		// Parse query parameters
+		// 쿼리 매개변수 파싱
 		size_t query_pos = request.path.find('?');
 		if (query_pos != std::string::npos) {
 			std::string query = request.path.substr(query_pos + 1);
@@ -423,7 +423,7 @@ private:
 			request.query_params = parseQueryString(query);
 		}
 
-		/// 5. Parse headers
+		/// 5. 헤더 파싱
 		while (std::getline(iss, line) && line != "\r" && !line.empty()) {
 			size_t colon_pos = line.find(':');
 
@@ -453,17 +453,17 @@ private:
 			request.headers[key] = value;
 		}
 
-		/// Parse body
+		/// 본문 파싱
 		std::string body_line;
 		while (std::getline(iss, body_line)) {
 			request.body += body_line + "\n";
 		}
 
 		if (!request.body.empty()) {
-			request.body.pop_back(); // Remove last newline
+			request.body.pop_back(); // 마지막 개행 제거
 		}
 
-		/// 6. Validate content-Length (not essential)
+		/// 6. Content-Length 검증 (필수는 아님)
 		auto content_length_it = request.headers.find("Content-Length");
 		if (content_length_it != request.headers.end()) {
 			try {
@@ -511,7 +511,7 @@ private:
 
 		std::lock_guard<std::mutex> lock(routes_mutex_);
 
-		// Handle OPTIONS requests (CORS preflight)
+		// OPTIONS 요청 처리 (CORS preflight)
 		if (request.method == "OPTIONS") {
 			HttpResponse response;
 			response.status_code = 200;
@@ -540,7 +540,7 @@ private:
 		if (std::regex_match(request.path, matches, route.pattern)) {
 			matched_request = request;
 
-			// Extract path parameters
+			// path 매개변수 추출
 			for (size_t i = 0; i < route.param_names.size() && i + 1 < matches.size(); ++i) {
 				matched_request.path_params[route.param_names[i]] = matches[i + 1].str();
 			}

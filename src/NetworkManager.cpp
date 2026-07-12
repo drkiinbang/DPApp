@@ -1,4 +1,4 @@
-// inet_ntoa 경고 ?�결
+// inet_ntoa 경고 해결
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 
 #include "../include/NetworkManager.h"
@@ -16,10 +16,10 @@ namespace DPApp {
     const int heartbeat_interval = 10;
 
     //========================================
-    // NetworkMessage Implementation
+    // NetworkMessage 구현
     //========================================
     NetworkMessage::NetworkMessage(MessageType type, std::vector<uint8_t> payload)
-        : data(std::move(payload)) { /// [Fix] Move payload into member variable
+        : data(std::move(payload)) { /// [수정] payload를 멤버 변수로 move
         header.type = type;
         header.data_length = static_cast<uint32_t>(data.size()); // use member .size()
         calculateChecksum();
@@ -69,7 +69,7 @@ namespace DPApp {
 
 
     //========================================
-    // NetworkUtils Implementation
+    // NetworkUtils 구현
     //========================================
     namespace NetworkUtils {
 
@@ -82,7 +82,7 @@ namespace DPApp {
             size_t total_bytes_received = 0;
 
             while (total_bytes_received < bytes_to_receive) {
-                /// Fix char* casting and clarify remaining byte calculation
+                /// char* 캐스팅을 명확히 하고, 남은(수신해야 할) 바이트 수 계산을 명확히 함
                 int bytes_received = recv(socket_fd,
                     reinterpret_cast<char*>(buffer.data()) + total_bytes_received,
                     static_cast<int>(bytes_to_receive - total_bytes_received), 0);
@@ -104,7 +104,7 @@ namespace DPApp {
                         continue;
                     }
 #endif
-                    /// Provide more detailed logging
+                    /// 좀 더 상세한 로그를 남긴다
                     ILOG << "Disconnected: error code " << error;
                     return false;
                 }
@@ -146,25 +146,25 @@ namespace DPApp {
         }
 
         /// ================================================================
-        /// Task Serialization
+        /// Task 직렬화
         /// ================================================================
         std::vector<uint8_t> serializeTask(const ProcessingTask& task) {
             std::vector<uint8_t> data;
             BinaryWriter writer(data);
 
-            /// 1. Task ID and Chunk ID
+            /// 1. Task ID와 Chunk ID
             writer.write(task.task_id);
             writer.write(task.chunk_id);
 
-            /// 2. Task Type
+            /// 2. Task 종류
             writer.write(static_cast<uint8_t>(task.task_type));
 
-            /// 3. Parameters (Batch Write)
+            /// 3. Parameters (일괄 쓰기)
             uint64_t param_len = static_cast<uint64_t>(task.parameters.size());
             writer.write(param_len);
 
             if (param_len > 0) {
-                /// Write the entire parameter buffer at once
+                /// parameter 버퍼 전체를 한 번에 쓴다
                 writer.writeBytes(task.parameters.data(), static_cast<size_t>(param_len));
             }
 
@@ -172,23 +172,23 @@ namespace DPApp {
         }
 
         /// ================================================================
-        /// Task Deserialization
+        /// Task 역직렬화
         /// ================================================================
         ProcessingTask deserializeTask(const std::vector<uint8_t>& data) {
             BinaryReader reader(data);
             ProcessingTask task;
 
-            /// 1. Task ID and Chunk ID
+            /// 1. Task ID와 Chunk ID
             task.task_id = reader.read<uint32_t>();
             task.chunk_id = reader.read<uint32_t>();
 
-            /// 2. Task Type
+            /// 2. Task 종류
             task.task_type = static_cast<TaskType>(reader.read<uint8_t>());
 
-            /// 3. Parameters (Batch Read)
+            /// 3. Parameters (일괄 읽기)
             uint64_t param_len = reader.read<uint64_t>();
             if (param_len > 0) {
-                /// Get a direct pointer to the data buffer (Zero-copy or single memcpy)
+                /// 데이터 버퍼를 가리키는 포인터를 바로 얻는다 (제로카피 또는 단일 memcpy)
                 const void* ptr = reader.readBytesRef(static_cast<size_t>(param_len));
                 const uint8_t* byte_ptr = static_cast<const uint8_t*>(ptr);
                 task.parameters.assign(byte_ptr, byte_ptr + param_len);
@@ -198,13 +198,13 @@ namespace DPApp {
         }
 
         /// ================================================================
-        /// Result Serialization
+        /// Result 직렬화
         /// ================================================================
         std::vector<uint8_t> serializeResult(const ProcessingResult& result) {
             std::vector<uint8_t> data;
             BinaryWriter writer(data);
 
-            /// 1. Headers
+            /// 1. 헤더
             writer.write(result.task_id);
             writer.write(result.chunk_id);
             writer.write(static_cast<uint8_t>(result.success ? 1 : 0));
@@ -217,15 +217,15 @@ namespace DPApp {
             writer.write(points_len);
             writer.write(result_data_len);
 
-            /// 2. Error Message
+            /// 2. 오류 메시지
             if (error_msg_len > 0) {
                 writer.writeBytes(result.error_message.data(), static_cast<size_t>(error_msg_len));
             }
 
-            /// 3. Processed Points (Optimized Batch Write)
+            /// 3. 처리된 포인트 (일괄 쓰기로 최적화)
             if (points_len > 0) {
-                /// Since Point3D might not be a POD type (contains vector), we flatten it first.
-                /// Prepare a contiguous float buffer [x, y, z, x, y, z, ...]
+                /// Point3D는 POD 타입이 아닐 수 있으므로(vector를 포함) 먼저 평탄화(flatten)한다.
+                /// 연속된 float 버퍼 [x, y, z, x, y, z, ...] 형태로 준비한다
                 std::vector<float> raw_floats;
                 raw_floats.reserve(points_len * 3);
                 for (const auto& point : result.processed_points) {
@@ -233,7 +233,7 @@ namespace DPApp {
                     raw_floats.push_back(point.y());
                     raw_floats.push_back(point.z());
                 }
-                /// Write all floats in one go (fastest on Intel/AMD)
+                /// 모든 float를 한 번에 쓴다 (Intel/AMD에서 가장 빠름)
                 writer.writeBytes(raw_floats.data(), raw_floats.size() * sizeof(float));
             }
 
@@ -246,13 +246,13 @@ namespace DPApp {
         }
 
         /// ================================================================
-        /// Result Deserialization
+        /// Result 역직렬화
         /// ================================================================
         ProcessingResult deserializeResult(const std::vector<uint8_t>& data) {
             BinaryReader reader(data);
             ProcessingResult result;
 
-            /// 1. Headers
+            /// 1. 헤더
             result.task_id = reader.read<uint32_t>();
             result.chunk_id = reader.read<uint32_t>();
             result.success = (reader.read<uint8_t>() != 0);
@@ -261,22 +261,22 @@ namespace DPApp {
             uint64_t points_len = reader.read<uint64_t>();
             uint64_t result_data_len = reader.read<uint64_t>();
 
-            /// 2. Error Message
+            /// 2. 오류 메시지
             if (error_msg_len > 0) {
                 const void* ptr = reader.readBytesRef(static_cast<size_t>(error_msg_len));
                 result.error_message.assign(static_cast<const char*>(ptr), static_cast<size_t>(error_msg_len));
             }
 
-            /// 3. Processed Points (Optimized Batch Read)
+            /// 3. 처리된 포인트 (일괄 읽기로 최적화)
             if (points_len > 0) {
                 result.processed_points.resize(static_cast<size_t>(points_len));
 
-                /// Calculate total size for all points (3 floats per point)
+                /// 모든 포인트의 전체 크기 계산 (포인트당 float 3개)
                 size_t total_floats = static_cast<size_t>(points_len) * 3;
                 size_t total_bytes = total_floats * sizeof(float);
 
-                /// Get direct pointer to raw memory (No per-point function call overhead)
-                /// Since we are on Intel/AMD (Little Endian), we can cast bytes directly to float*
+                /// 원시 메모리를 가리키는 포인터를 바로 얻는다 (포인트마다 함수 호출하는 오버헤드 없음)
+                /// Intel/AMD(리틀 엔디안) 환경이므로 바이트를 float*로 바로 캐스팅해도 안전하다
                 const uint8_t* raw_bytes = static_cast<const uint8_t*>(reader.readBytesRef(total_bytes));
 
                 for (size_t i = 0; i < static_cast<size_t>(points_len); ++i) {
@@ -299,13 +299,13 @@ namespace DPApp {
         }
 
         /// ================================================================
-        /// Chunk Serialization
+        /// Chunk 직렬화
         /// ================================================================
         std::vector<uint8_t> serializeChunk(const PointCloudChunk& chunk) {
             std::vector<uint8_t> data;
             BinaryWriter writer(data);
 
-            /// 1. Chunk Metadata
+            /// 1. Chunk 메타데이터
             writer.write(chunk.chunk_id);
             uint64_t points_count = static_cast<uint64_t>(chunk.points.size());
             writer.write(points_count);
@@ -319,9 +319,9 @@ namespace DPApp {
                 writer.writeBytes(chunk.header.filename.data(), static_cast<size_t>(filename_len));
             }
 
-            /// 2. Points Data (Optimized Batch Write)
+            /// 2. 포인트 데이터 (일괄 쓰기로 최적화)
             if (points_count > 0) {
-                /// Flatten point data into a continuous float buffer
+                /// 포인트 데이터를 연속된 float 버퍼로 평탄화(flatten)한다
                 std::vector<float> raw_floats;
                 raw_floats.reserve(points_count * 3);
                 for (const auto& point : chunk.points) {
@@ -329,7 +329,7 @@ namespace DPApp {
                     raw_floats.push_back(point.y());
                     raw_floats.push_back(point.z());
                 }
-                /// Bulk write to the buffer
+                /// 버퍼에 한꺼번에(bulk) 쓴다
                 writer.writeBytes(raw_floats.data(), raw_floats.size() * sizeof(float));
             }
 
@@ -337,13 +337,13 @@ namespace DPApp {
         }
 
         /// ================================================================
-        /// Chunk Deserialization
+        /// Chunk 역직렬화
         /// ================================================================
         PointCloudChunk deserializeChunk(const std::vector<uint8_t>& data) {
             BinaryReader reader(data);
             PointCloudChunk chunk;
 
-            /// 1. Chunk Metadata
+            /// 1. Chunk 메타데이터
             chunk.chunk_id = reader.read<uint32_t>();
             uint64_t points_count = reader.read<uint64_t>();
 
@@ -356,15 +356,15 @@ namespace DPApp {
                 chunk.header.filename.assign(static_cast<const char*>(ptr), static_cast<size_t>(filename_len));
             }
 
-            /// 2. Points Data (Optimized Batch Read)
+            /// 2. 포인트 데이터 (일괄 읽기로 최적화)
             if (points_count > 0) {
                 chunk.points.resize(static_cast<size_t>(points_count));
 
                 size_t total_floats = static_cast<size_t>(points_count) * 3;
                 size_t total_bytes = total_floats * sizeof(float);
 
-                /// Get pointer to raw bytes and cast to float*
-                /// This assumes Little Endian architecture (Intel/AMD standard)
+                /// 원시 바이트를 가리키는 포인터를 얻어 float*로 캐스팅한다
+                /// 리틀 엔디안 아키텍처(Intel/AMD 표준)를 가정한다
                 const uint8_t* raw_bytes = static_cast<const uint8_t*>(reader.readBytesRef(total_bytes));
 
                 for (size_t i = 0; i < static_cast<size_t>(points_count); ++i) {
@@ -380,36 +380,36 @@ namespace DPApp {
         }
 
         /// ================================================================
-        /// MeshChunk Serialization (Optimized Batch Write)
+        /// MeshChunk 직렬화 (일괄 쓰기로 최적화)
         /// ================================================================
         std::vector<uint8_t> serializeMeshChunk(const chunkbim::MeshChunk& meshChunk) {
             std::vector<uint8_t> data;
             BinaryWriter writer(data);
 
-            /// 1. ID and Name
+            /// 1. ID와 이름
             writer.write(meshChunk.id);
             writer.writeString(meshChunk.name);
 
-            /// 2. Faces (Batch Write) - vertices[3] ?�용
+            /// 2. Faces (일괄 쓰기) - vertices[3] 사용
             uint32_t face_count = static_cast<uint32_t>(meshChunk.faces.size());
             writer.write(face_count);
 
             if (face_count > 0) {
-                /// Normals (3 floats per face)
+                /// 법선(Normal) (face당 float 3개)
                 std::vector<float> raw_normals;
                 raw_normals.reserve(face_count * 3);
 
-                /// Face vertices (9 floats per face: 3 vertices * 3 coords)
+                /// face 정점 (face당 float 9개: 정점 3개 * 좌표 3개)
                 std::vector<float> raw_face_vertices;
                 raw_face_vertices.reserve(face_count * 9);
 
                 for (const auto& face : meshChunk.faces) {
-                    /// Normals
+                    /// 법선
                     raw_normals.push_back(face.normal.x());
                     raw_normals.push_back(face.normal.y());
                     raw_normals.push_back(face.normal.z());
 
-                    /// Face vertices (3 vertices)
+                    /// face 정점 (3개)
                     for (int v = 0; v < 3; ++v) {
                         raw_face_vertices.push_back(face.vertices[v].x());
                         raw_face_vertices.push_back(face.vertices[v].y());
@@ -421,7 +421,7 @@ namespace DPApp {
                 writer.writeBytes(raw_face_vertices.data(), raw_face_vertices.size() * sizeof(float));
             }
 
-            /// 3. Bounding box
+            /// 3. 바운딩 박스
             writer.write(meshChunk.min_x); writer.write(meshChunk.min_y); writer.write(meshChunk.min_z);
             writer.write(meshChunk.max_x); writer.write(meshChunk.max_y); writer.write(meshChunk.max_z);
 
@@ -429,39 +429,39 @@ namespace DPApp {
         }
 
         /// ================================================================
-        /// MeshChunk Deserialization (Optimized Batch Read)
+        /// MeshChunk 역직렬화 (일괄 읽기로 최적화)
         /// ================================================================
         chunkbim::MeshChunk deserializeMeshChunk(const std::vector<uint8_t>& data) {
             BinaryReader reader(data);
             chunkbim::MeshChunk meshChunk;
 
-            /// 1. ID and Name
+            /// 1. ID와 이름
             meshChunk.id = reader.read<int>();
             meshChunk.name = reader.readString();
 
-            /// 2. Faces (Batch Read) - vertices[3] ?�용
+            /// 2. Faces (일괄 읽기) - vertices[3] 사용
             uint32_t face_count = reader.read<uint32_t>();
 
             if (face_count > 0) {
                 meshChunk.faces.resize(face_count);
 
-                /// Read Normals (Batch): 3 floats per face
+                /// 법선 읽기 (일괄): face당 float 3개
                 size_t normals_bytes = static_cast<size_t>(face_count) * 3 * sizeof(float);
                 const uint8_t* raw_normal_bytes = static_cast<const uint8_t*>(reader.readBytesRef(normals_bytes));
 
-                /// Read Face Vertices (Batch): 9 floats per face (3 vertices * 3 coords)
+                /// face 정점 읽기 (일괄): face당 float 9개 (정점 3개 * 좌표 3개)
                 size_t face_vertices_bytes = static_cast<size_t>(face_count) * 9 * sizeof(float);
                 const uint8_t* raw_vtx_bytes = static_cast<const uint8_t*>(reader.readBytesRef(face_vertices_bytes));
 
                 for (uint32_t i = 0; i < face_count; ++i) {
-                    /// Normal
+                    /// 법선
                     float nx, ny, nz;
                     std::memcpy(&nx, raw_normal_bytes + (i * 3 + 0) * sizeof(float), sizeof(float));
                     std::memcpy(&ny, raw_normal_bytes + (i * 3 + 1) * sizeof(float), sizeof(float));
                     std::memcpy(&nz, raw_normal_bytes + (i * 3 + 2) * sizeof(float), sizeof(float));
                     meshChunk.faces[i].normal = pctree::XYZPoint(nx, ny, nz);
 
-                    /// Face vertices (3 vertices)
+                    /// face 정점 (3개)
                     for (int v = 0; v < 3; ++v) {
                         float vx, vy, vz;
                         size_t offset = (i * 9 + v * 3) * sizeof(float);
@@ -473,11 +473,11 @@ namespace DPApp {
                 }
             }
 
-            /// 3. Bounding box
-            /// [Fix] MeshChunk::min_x..max_z are double (see include/bim/MeshChunk.h), but this
-            /// used to read them as float, under-consuming 24 bytes and desynchronizing every
-            /// read that follows in the enclosing BimPcChunk (garbage bim_data_size -> "Buffer
-            /// overflow: insufficient data to read." when deserializing distributed BIM_PC2_DIST tasks).
+            /// 3. 바운딩 박스
+            /// [수정] MeshChunk::min_x..max_z는 double 타입인데(include/bim/MeshChunk.h 참고),
+            /// 예전에는 여기서 float로 읽어서 24바이트를 덜 읽었고, 그 결과 이를 감싸는 BimPcChunk에서
+            /// 뒤따르는 모든 읽기가 어긋나 버렸다(엉뚱한 bim_data_size 값 -> 분산 BIM_PC2_DIST 작업을
+            /// 역직렬화할 때 "Buffer overflow: insufficient data to read." 오류 발생).
             meshChunk.min_x = reader.read<double>(); meshChunk.min_y = reader.read<double>(); meshChunk.min_z = reader.read<double>();
             meshChunk.max_x = reader.read<double>(); meshChunk.max_y = reader.read<double>(); meshChunk.max_z = reader.read<double>();
 
@@ -485,17 +485,17 @@ namespace DPApp {
         }
 
         /// ================================================================
-        /// BimPcChunk Serialization (Reusing optimized logic)
+        /// BimPcChunk 직렬화 (최적화된 로직 재사용)
         /// ================================================================
         std::vector<uint8_t> serializeBimPcChunk(const BimPcChunk& chunk) {
             std::vector<uint8_t> data;
             BinaryWriter writer(data);
 
-            /// 1. Meta data
+            /// 1. 메타데이터
             writer.write(chunk.chunk_id);
 
-            /// 2. Point Cloud (Optimized Batch Write) -- chunk.points is already float,
-            /// shifted by (offsetX, offsetY, offsetZ); write as-is.
+            /// 2. 포인트 클라우드 (일괄 쓰기로 최적화) -- chunk.points는 이미 float이고
+            /// (offsetX, offsetY, offsetZ)만큼 이미 shift되어 있으므로 그대로 쓴다.
             uint32_t point_count = static_cast<uint32_t>(chunk.points.size());
             writer.write(point_count);
 
@@ -510,18 +510,18 @@ namespace DPApp {
                 writer.writeBytes(raw_floats.data(), raw_floats.size() * sizeof(float));
             }
 
-            /// 3. Bounding Box
+            /// 3. 바운딩 박스
             writer.write(chunk.min_x); writer.write(chunk.min_y); writer.write(chunk.min_z);
             writer.write(chunk.max_x); writer.write(chunk.max_y); writer.write(chunk.max_z);
 
-            /// 4. Rebase offset (double, exact)
+            /// 4. Rebase offset (double, 정확한 값)
             writer.write(chunk.offsetX); writer.write(chunk.offsetY); writer.write(chunk.offsetZ);
 
-            /// 5. MeshChunk (Nested serialization). `bim` itself is always absolute/unshifted
-            /// (used broadly beyond just this chunk), but the bytes actually sent over the wire
-            /// benefit from the same offset-rebase precision trick as the point cloud -- shift a
-            /// temporary copy down by the chunk's offset before narrowing to float (inside
-            /// serializeMeshChunk), and shift back up after deserializing (see below).
+            /// 5. MeshChunk (중첩 직렬화). `bim` 자체는 항상 절대좌표/unshifted 상태를 유지한다
+            /// (이 청크뿐 아니라 여러 곳에서 폭넓게 쓰이기 때문). 다만 실제로 네트워크로 나가는
+            /// 바이트는 포인트클라우드와 동일한 offset-rebase 정밀도 트릭의 혜택을 볼 수 있으므로,
+            /// 임시 복사본을 청크의 offset만큼 아래로 shift한 뒤(내부적으로 serializeMeshChunk에서
+            /// float로 narrow) 전송하고, 역직렬화 후 다시 위로 shift해 복원한다(아래 참고).
             chunkbim::MeshChunk shiftedBim = chunk.bim;
             for (auto& face : shiftedBim.faces) {
                 for (auto& v : face.vertices) {
@@ -541,24 +541,24 @@ namespace DPApp {
         }
 
         /// ================================================================
-        /// BimPcChunk Deserialization (Reusing optimized logic)
+        /// BimPcChunk 역직렬화 (최적화된 로직 재사용)
         /// ================================================================
         BimPcChunk deserializeBimPcChunk(const std::vector<uint8_t>& data) {
             BinaryReader reader(data);
             BimPcChunk chunk;
 
-            /// 1. Meta data
+            /// 1. 메타데이터
             chunk.chunk_id = reader.read<uint32_t>();
 
-            /// 2. Point Cloud (Optimized Batch Read) -- stays float, shifted; unshifting happens
-            /// once, at the top of processBimPc(), not here.
+            /// 2. 포인트 클라우드 (일괄 읽기로 최적화) -- float, shift된 상태 그대로 유지하며,
+            /// unshift(offset 복원)는 여기서 하지 않고 processBimPc() 맨 앞에서 한 번만 수행한다.
             uint32_t point_count = reader.read<uint32_t>();
 
             if (point_count > 0) {
                 chunk.points.resize(point_count);
                 size_t total_bytes = static_cast<size_t>(point_count) * 3 * sizeof(float);
 
-                /// Batch read floats directly from buffer
+                /// 버퍼에서 float를 바로 일괄 읽기
                 const float* raw_floats = static_cast<const float*>(reader.readBytesRef(total_bytes));
 
                 for (uint32_t i = 0; i < point_count; ++i) {
@@ -566,19 +566,19 @@ namespace DPApp {
                 }
             }
 
-            /// 3. Bounding Box
-            /// [Fix] BimPcChunk::min_x..max_z are double (see include/PointCloudTypes.h), but this
-            /// used to read them as float, under-consuming 24 bytes. Every subsequent read (starting
-            /// with bim_data_size below) was then offset into the wrong bytes, producing a garbage
-            /// size and triggering "Buffer overflow: insufficient data to read." on the Slave side.
+            /// 3. 바운딩 박스
+            /// [수정] BimPcChunk::min_x..max_z는 double 타입인데(include/PointCloudTypes.h 참고),
+            /// 예전에는 여기서 float로 읽어서 24바이트를 덜 읽었다. 그 결과 이어지는 모든 읽기(바로
+            /// 아래 bim_data_size부터)가 잘못된 바이트 위치를 가리키게 되어 엉뚱한 크기 값이 되고,
+            /// Slave 쪽에서 "Buffer overflow: insufficient data to read." 오류를 일으켰다.
             chunk.min_x = reader.read<double>(); chunk.min_y = reader.read<double>(); chunk.min_z = reader.read<double>();
             chunk.max_x = reader.read<double>(); chunk.max_y = reader.read<double>(); chunk.max_z = reader.read<double>();
 
             /// 4. Rebase offset
             chunk.offsetX = reader.read<double>(); chunk.offsetY = reader.read<double>(); chunk.offsetZ = reader.read<double>();
 
-            /// 5. MeshChunk (Nested deserialization) -- shift back up to absolute coordinates
-            /// (see serializeBimPcChunk for why the wire bytes are shifted down before narrowing).
+            /// 5. MeshChunk (중첩 역직렬화) -- 절대좌표로 되돌리기 위해 다시 위로 shift한다
+            /// (전송 바이트를 narrow하기 전에 아래로 shift하는 이유는 serializeBimPcChunk 참고).
             uint32_t bim_data_size = reader.read<uint32_t>();
             const void* bim_ptr = reader.readBytesRef(bim_data_size);
             const uint8_t* byte_ptr = static_cast<const uint8_t*>(bim_ptr);
@@ -597,50 +597,50 @@ namespace DPApp {
         }
 
         /// ================================================================
-        /// BimPcResult Serialization (Optimized Batch Write)
+        /// BimPcResult 직렬화 (일괄 쓰기로 최적화)
         /// ================================================================
         std::vector<uint8_t> serializeBimPcResult(const BimPcResult& result) {
             std::vector<uint8_t> data;
             BinaryWriter writer(data);
 
-            /// 1. Task info and Success flag
+            /// 1. Task 정보와 성공 여부
             writer.write(result.task_id);
             writer.write(result.chunk_id);
             writer.write(static_cast<uint8_t>(result.success ? 1 : 0));
 
-            /// 2. Error Message
+            /// 2. 오류 메시지
             writer.writeString(result.error_message);
 
-            /// 3. Statistics
+            /// 3. 통계
             writer.write(result.total_points_processed);
             writer.write(result.total_faces_processed);
             writer.write(result.processing_time_ms);
 
-            /// 4. Distance results
+            /// 4. 거리 계산 결과
             writer.write(result.min_distance);
             writer.write(result.max_distance);
             writer.write(result.avg_distance);
             writer.write(result.std_deviation);
 
-            /// 5. Point Distances (Batch Write - vector<double> is continuous)
+            /// 5. 포인트별 거리 (일괄 쓰기 - vector<double>은 메모리상 연속됨)
             uint32_t dist_count = static_cast<uint32_t>(result.point_distances.size());
             writer.write(dist_count);
             if (dist_count > 0) {
                 writer.writeBytes(result.point_distances.data(), dist_count * sizeof(double));
             }
 
-            /// 6. Nearest Face IDs (Batch Write - vector<int32_t> is continuous)
+            /// 6. 최근접 Face ID (일괄 쓰기 - vector<int32_t>는 메모리상 연속됨)
             uint32_t face_id_count = static_cast<uint32_t>(result.nearest_face_ids.size());
             writer.write(face_id_count);
             if (face_id_count > 0) {
                 writer.writeBytes(result.nearest_face_ids.data(), face_id_count * sizeof(int32_t));
             }
 
-            /// 7. Classification
+            /// 7. 분류(classification) 결과
             writer.write(result.points_within_threshold);
             writer.write(result.points_outside_threshold);
 
-            /// 8. Extra Data
+            /// 8. 추가 데이터
             uint32_t extra_len = static_cast<uint32_t>(result.extra_data.size());
             writer.write(extra_len);
             if (extra_len > 0) {
@@ -651,43 +651,43 @@ namespace DPApp {
         }
 
         /// ================================================================
-        /// BimPcResult Deserialization (Optimized Batch Read)
+        /// BimPcResult 역직렬화 (일괄 읽기로 최적화)
         /// ================================================================
         BimPcResult deserializeBimPcResult(const std::vector<uint8_t>& data) {
             BinaryReader reader(data);
             BimPcResult result;
 
-            /// 1. Task info and Success flag
+            /// 1. Task 정보와 성공 여부
             result.task_id = reader.read<uint32_t>();
             result.chunk_id = reader.read<uint32_t>();
             result.success = (reader.read<uint8_t>() != 0);
 
-            /// 2. Error Message
+            /// 2. 오류 메시지
             result.error_message = reader.readString();
 
-            /// 3. Statistics
+            /// 3. 통계
             result.total_points_processed = reader.read<uint32_t>();
             result.total_faces_processed = reader.read<uint32_t>();
             result.processing_time_ms = reader.read<double>();
 
-            /// 4. Distance results
+            /// 4. 거리 계산 결과
             result.min_distance = reader.read<double>();
             result.max_distance = reader.read<double>();
             result.avg_distance = reader.read<double>();
             result.std_deviation = reader.read<double>();
 
-            /// 5. Point Distances (Batch Read)
+            /// 5. 포인트별 거리 (일괄 읽기)
             uint32_t dist_count = reader.read<uint32_t>();
             if (dist_count > 0) {
                 size_t bytes = dist_count * sizeof(double);
                 const void* ptr = reader.readBytesRef(bytes);
 
                 result.point_distances.resize(dist_count);
-                /// Simple memcpy is safe here because double is a POD type
+                /// double은 POD 타입이므로 단순 memcpy로도 안전하다
                 std::memcpy(result.point_distances.data(), ptr, bytes);
             }
 
-            /// 6. Nearest Face IDs (Batch Read)
+            /// 6. 최근접 Face ID (일괄 읽기)
             uint32_t face_id_count = reader.read<uint32_t>();
             if (face_id_count > 0) {
                 size_t bytes = face_id_count * sizeof(int32_t);
@@ -697,11 +697,11 @@ namespace DPApp {
                 std::memcpy(result.nearest_face_ids.data(), ptr, bytes);
             }
 
-            /// 7. Classification
+            /// 7. 분류(classification) 결과
             result.points_within_threshold = reader.read<uint32_t>();
             result.points_outside_threshold = reader.read<uint32_t>();
 
-            /// 8. Extra Data
+            /// 8. 추가 데이터
             uint32_t extra_len = reader.read<uint32_t>();
             if (extra_len > 0) {
                 const void* ptr = reader.readBytesRef(extra_len);
@@ -716,7 +716,7 @@ namespace DPApp {
     } // namespace NetworkUtils
 
     //========================================
-    // NetworkServer Implementation
+    // NetworkServer 구현
     //========================================
     NetworkServer::NetworkServer() : server_socket_(-1), port_(0), running_(false), shutdown_requested_(false) {
         cfg_ = DPApp::RuntimeConfig::loadFromEnv();
@@ -857,8 +857,8 @@ namespace DPApp {
             if (it == clients_.end() || !it->second->is_active) return false;
             client = it->second;
         }
-        /// [Fix] Same hazard as NetworkClient::sendMessage(): the task-dispatch path and
-        /// heartbeatThread() can both reach this for the same client concurrently.
+        /// [수정] NetworkClient::sendMessage()와 동일한 위험 요소: task 전송 경로와
+        /// heartbeatThread()가 동시에 같은 client에 대해 이 함수에 도달할 수 있다.
         std::lock_guard<std::mutex> send_lock(client->send_mutex);
         return NetworkUtils::sendAll(client->socket_fd, message.serialize());
     }
@@ -927,7 +927,7 @@ namespace DPApp {
     bool NetworkServer::broadcastMessage(const NetworkMessage& message) {
         std::vector<std::shared_ptr<ClientConnection>> targets;
 
-        /// 1. Acquire the lock and copy only the target list
+        /// 1. 락을 잡고 대상 목록만 복사한다
         {
             std::lock_guard<std::mutex> lock(clients_mutex_);
             for (const auto& [id, conn] : clients_) {
@@ -935,13 +935,12 @@ namespace DPApp {
             }
         }
 
-        /// 2. Send without holding clients_mutex_, but still serialized per-socket.
-        /// [Fix] This used to call sendAll() directly with no per-socket locking (per the
-        /// comment that used to be here); a client's own send_mutex now guards it, matching
-        /// sendMessage() above, so a broadcast can't interleave with a heartbeat or task send
-        /// to the same client.
+        /// 2. clients_mutex_는 잡지 않은 채로 전송하되, 소켓별로는 여전히 직렬화한다.
+        /// [수정] 예전에는 (여기 있던 주석대로) 소켓별 락 없이 sendAll()을 바로 호출했다;
+        /// 이제는 client 자신의 send_mutex로 보호하여 위 sendMessage()와 동일하게 맞춰서,
+        /// 같은 client에 대한 broadcast가 heartbeat나 task 전송과 뒤섞이지 않도록 한다.
         bool all_success = true;
-        auto data = message.serialize(); /// Perform serialization only once
+        auto data = message.serialize(); /// 직렬화는 한 번만 수행
 
         for (const auto& conn : targets) {
             std::lock_guard<std::mutex> send_lock(conn->send_mutex);
@@ -960,7 +959,7 @@ namespace DPApp {
     }
 
     //========================================
-    // NetworkClient Implementation
+    // NetworkClient 구현
     //========================================
     NetworkClient::NetworkClient() : client_socket_(-1), connected_(false), shutdown_requested_(false) {
 #ifdef _WIN32
@@ -985,10 +984,10 @@ namespace DPApp {
         server_addr.sin_family = AF_INET;
         server_addr.sin_port = htons(port);
 
-        /// inet_pton() only accepts numeric dotted-decimal addresses (e.g. "127.0.0.1");
-        /// it silently fails (leaving sin_addr as 0.0.0.0) for hostnames like "localhost",
-        /// which used to make every connection attempt to a named host fail. Resolve via
-        /// getaddrinfo() first, which handles both numeric addresses and hostnames.
+        /// inet_pton()은 "127.0.0.1"과 같은 숫자 형태(dotted-decimal) 주소만 받아들인다;
+        /// "localhost"처럼 호스트 이름이 주어지면 조용히 실패해서(sin_addr가 0.0.0.0으로 남음)
+        /// 이름으로 된 호스트에 대한 연결 시도가 모두 실패하게 만들었다. 그래서 숫자 주소와
+        /// 호스트 이름을 모두 처리할 수 있는 getaddrinfo()로 먼저 주소를 해석(resolve)한다.
         if (inet_pton(AF_INET, address.c_str(), &server_addr.sin_addr) != 1) {
             addrinfo hints{};
             hints.ai_family = AF_INET;
@@ -1025,26 +1024,26 @@ namespace DPApp {
         shutdown_requested_ = true;
         connected_ = false;
 
-        // 먼�? ?�켓???�아??블록??recv/send ?�제
+        // 먼저 소켓을 닫아서 블록된 recv/send 해제
         cleanupSocket();
 
-        // client_thread 종료 ?��?(?�?�아???�용)
+        // client_thread 종료 대기 (타임아웃 사용)
         if (client_thread_.joinable()) {
-            for (int i = 0; i < 30; ++i) {  // 최�? 3�??��?
+            for (int i = 0; i < 30; ++i) {  // 최대 3초 대기
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
             try {
                 if (client_thread_.joinable()) {
-                    client_thread_.detach();  // ?�?�아????detach
+                    client_thread_.detach();  // 타임아웃 시 detach
                     WLOG << "Client thread detached after timeout";
                 }
             }
             catch (...) {}
         }
 
-        // heartbeat_thread 종료 ?��?(?�?�아???�용)
+        // heartbeat_thread 종료 대기 (타임아웃 사용)
         if (heartbeat_thread_.joinable()) {
-            for (int i = 0; i < 20; ++i) {  // 최�? 2�??��?
+            for (int i = 0; i < 20; ++i) {  // 최대 2초 대기
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
             try {
@@ -1078,9 +1077,9 @@ namespace DPApp {
 
     bool NetworkClient::sendMessage(const NetworkMessage& message) {
         if (!connected_) return false;
-        /// [Fix] Serialize concurrent senders (processing threads with -t > 1, and the
-        /// independent heartbeat thread) so sendAll()'s possibly-multiple send() calls for
-        /// one message can't interleave with another thread's send() calls on the same socket.
+        /// [수정] 동시에 보내는 여러 스레드(-t > 1일 때의 처리 스레드들, 그리고 별도의
+        /// heartbeat 스레드)를 직렬화한다. sendAll()이 메시지 하나를 위해 send()를 여러 번
+        /// 호출할 수 있는데, 같은 소켓에 대한 다른 스레드의 send() 호출과 뒤섞이면 안 되기 때문이다.
         std::lock_guard<std::mutex> lock(send_mutex_);
         return NetworkUtils::sendAll(client_socket_, message.serialize());
     }

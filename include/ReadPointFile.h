@@ -36,12 +36,12 @@ namespace ptsfile {
         std::istringstream iss(firstLine);
         size_t pointCount = 0;
         if (iss >> pointCount && iss.eof()) {
-            /// The first line contains the number of lines(points)
+            /// 첫 줄이 전체 줄(점) 개수를 담고 있는 경우
             return pointCount;
         }
 
-        /// Count all lines
-        pointCount = 1; /// The first line is already included.
+        /// 모든 줄을 직접 세어야 하는 경우
+        pointCount = 1; /// 첫 줄은 이미 포함되어 있음.
         std::string line;
         while (std::getline(file, line)) {
             trim(line);

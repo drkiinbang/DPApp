@@ -1,11 +1,11 @@
 /**
  * @file MasterApplication_ICP.cpp
- * @brief ICP REST API implementation
+ * @brief ICP REST API 구현
  *
- * This file contains:
- * - ICP REST API route setup
- * - ICP Job management (start, status, cancel)
- * - ICP Result handling from Slaves
+ * 이 파일이 담고 있는 내용:
+ * - ICP REST API 라우트 설정
+ * - ICP 작업(Job) 관리 (시작, 상태조회, 취소)
+ * - Slave로부터 받은 ICP 결과 처리
  */
 
 #include "MasterApplication.h"
@@ -15,7 +15,7 @@
 #include "../include/bimtree/PseudoPointGenerator.hpp"
 #include "../include/LaslibWriter.hpp"
 
- /// Data loading from DLLs
+ /// DLL로부터의 데이터 로딩
 #include "../LasImport/LasImport.h"
 #include "../BimImport/BimImport.h"
 
@@ -27,36 +27,36 @@
 #include <iomanip>
 
 /// =========================================
-/// ICP REST API Route Setup
+/// ICP REST API 라우트 설정
 /// =========================================
 
 void MasterApplication::setupIcpApiRoutes() {
-    /// POST /api/icp/start - Start new ICP job
+    /// POST /api/icp/start - 새 ICP 작업 시작
     api_server_->POST("/api/icp/start", [this](const HttpRequest& req) {
         return handleIcpStart(req);
         });
 
-    /// GET /api/icp/jobs - List all ICP jobs
+    /// GET /api/icp/jobs - 전체 ICP 작업 목록 조회
     api_server_->GET("/api/icp/jobs", [this](const HttpRequest& req) {
         return handleIcpJobs(req);
         });
 
-    /// GET /api/icp/jobs/{id} - Get job status
+    /// GET /api/icp/jobs/{id} - 작업 상태 조회
     api_server_->GET("/api/icp/jobs/{id}", [this](const HttpRequest& req) {
         return handleIcpJobStatus(req);
         });
 
-    /// GET /api/icp/jobs/{id}/result - Get job result
+    /// GET /api/icp/jobs/{id}/result - 작업 결과 조회
     api_server_->GET("/api/icp/jobs/{id}/result", [this](const HttpRequest& req) {
         return handleIcpJobResult(req);
         });
 
-    /// POST /api/icp/jobs/{id}/cancel - Cancel job
+    /// POST /api/icp/jobs/{id}/cancel - 작업 취소
     api_server_->POST("/api/icp/jobs/{id}/cancel", [this](const HttpRequest& req) {
         return handleIcpJobCancel(req);
         });
 
-    /// GET /api/icp/jobs/{id}/stats - Get job statistics
+    /// GET /api/icp/jobs/{id}/stats - 작업 통계 조회
     api_server_->GET("/api/icp/jobs/{id}/stats", [this](const HttpRequest& req) {
         return handleIcpJobStats(req);
         });
@@ -65,7 +65,7 @@ void MasterApplication::setupIcpApiRoutes() {
 }
 
 /// =========================================
-/// Job ID Generation
+/// 작업 ID 생성
 /// =========================================
 
 std::string MasterApplication::generateIcpJobId() {
@@ -85,14 +85,14 @@ std::string MasterApplication::generateIcpJobId() {
 }
 
 /// =========================================
-/// REST API Handlers
+/// REST API 핸들러
 /// =========================================
 
 HttpResponse MasterApplication::handleIcpStart(const HttpRequest& req) {
     ILOG << "[ICP] POST /api/icp/start";
 
     try {
-        /// Parse JSON body
+        /// JSON 본문 파싱
         auto json_opt = MiniJson::parse_object_ex(req.body);
         if (!json_opt) {
             return createErrorResponse(400, "Invalid JSON body");
@@ -109,14 +109,14 @@ HttpResponse MasterApplication::handleIcpStart(const HttpRequest& req) {
         std::string las_file = *las_file_opt;
         std::string bim_folder = *bim_folder_opt;
 
-        /// Create new ICP job
+        /// 새 ICP 작업 생성
         auto job = std::make_shared<icp::IcpJob>();
         job->jobId = generateIcpJobId();
         job->lasFilePath = las_file;
         job->bimFolderPath = bim_folder;
         job->status = icp::IcpJobStatus::PENDING;
 
-        /// Optional output path (not used for now, but kept for future)
+        /// 선택적 출력 경로 (생략 시 las_file 기준으로 자동 생성)
         auto output_opt = MiniJson::get_ex<std::string>(json, "output_path");
         if (output_opt) {
             job->outputPath = *output_opt;
@@ -131,7 +131,7 @@ HttpResponse MasterApplication::handleIcpStart(const HttpRequest& req) {
             }
         }
 
-        /// Optional config overrides
+        /// 선택적 설정값 재정의
         auto config_opt = MiniJson::get_object(json, "config");
         if (config_opt) {
             auto& cfg = *config_opt;
@@ -151,7 +151,7 @@ HttpResponse MasterApplication::handleIcpStart(const HttpRequest& req) {
             if (grid_size) job->config.pseudoPointGridSize = *grid_size;
         }
 
-        /// Optional LAS offset (dx, dy, dz)
+        /// 선택적 LAS offset (dx, dy, dz)
         auto offset_opt = MiniJson::get_object(json, "offset");
         if (offset_opt) {
             auto& off = *offset_opt;
@@ -165,12 +165,12 @@ HttpResponse MasterApplication::handleIcpStart(const HttpRequest& req) {
             if (dz) job->offsetZ = *dz;
         }
 
-        /// Record start time
+        /// 시작 시각 기록
         job->startTimeMs = static_cast<double>(
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count());
 
-        /// Store job
+        /// 작업 저장
         {
             std::lock_guard<std::mutex> lock(icp_jobs_mutex_);
             icp_jobs_[job->jobId] = job;
@@ -179,12 +179,12 @@ HttpResponse MasterApplication::handleIcpStart(const HttpRequest& req) {
         ILOG << "[ICP] Job created: " << job->jobId
             << " (LAS: " << las_file << ", BIM: " << bim_folder << ")";
 
-        /// Start processing in background thread
+        /// 백그라운드 스레드에서 처리 시작
         std::thread([this, job]() {
             processIcpJob(job);
             }).detach();
 
-        /// Return response
+        /// 응답 반환
         std::ostringstream oss;
         oss << "{\n";
         oss << "  \"success\": true,\n";
@@ -390,7 +390,7 @@ HttpResponse MasterApplication::handleIcpJobCancel(const HttpRequest& req) {
             return createErrorResponse(400, "Job already finished");
         }
 
-        /// Request cancellation
+        /// 취소 요청
         job->cancelRequested.store(true);
         ILOG << "[ICP] Cancellation requested for job: " << job_id;
 
@@ -467,16 +467,17 @@ HttpResponse MasterApplication::handleIcpJobStats(const HttpRequest& req) {
 }
 
 /// =========================================
-/// ICP Job Processing (Background Thread)
+/// ICP 작업 처리 (백그라운드 스레드)
 /// =========================================
 
-/// Combine multiple per-chunk ICP results (e.g. one per BIM element) into a single rigid
-/// transform, weighted by each chunk's source point count. Rotations don't average linearly,
-/// so the weighted-average 3x3 rotation block is re-orthogonalized via SVD onto the nearest
-/// proper rotation matrix (the standard "chordal L2 mean" approach for averaging rotations
-/// that are all close to each other, which they should be here since every chunk is
-/// estimating the same global rigid transform from a different, spatially local, subset of
-/// correspondences). With exactly one result this reduces to that result's own transform.
+/// 여러 청크(예: BIM 부재당 하나씩)의 ICP 결과를 각 청크의 source 점 개수로
+/// 가중치를 준 하나의 강체 변환으로 통합한다. 회전은 선형적으로 평균낼 수
+/// 없으므로, 가중 평균한 3x3 회전 블록을 SVD로 가장 가까운 올바른 회전 행렬로
+/// 재직교화(re-orthogonalize)한다(서로 가까운 회전들을 평균내는 표준적인
+/// "chordal L2 mean" 방식 -- 모든 청크가 서로 다른, 공간적으로 국소적인 대응점
+/// 부분집합으로부터 동일한 전역 강체 변환을 추정하고 있으므로 이 회전들은
+/// 서로 가까울 것으로 기대된다). 결과가 정확히 1개뿐이면 그 결과 자신의
+/// 변환으로 그대로 축소된다.
 static icp::Transform4x4 aggregateWeightedTransforms(const std::vector<icp::IcpResult>& results) {
     if (results.empty()) {
         return icp::Transform4x4::identity();
@@ -514,13 +515,13 @@ static icp::Transform4x4 aggregateWeightedTransforms(const std::vector<icp::IcpR
     Rsum /= totalWeight;
     Tsum /= totalWeight;
 
-    /// Project the weighted-average rotation back onto SO(3) (nearest proper rotation matrix).
+    /// 가중 평균한 회전을 SO(3) 위로 재투영 (가장 가까운 올바른 회전 행렬로).
     Eigen::JacobiSVD<Eigen::Matrix3d> svd(Rsum, Eigen::ComputeFullU | Eigen::ComputeFullV);
     Eigen::Matrix3d U = svd.matrixU();
     Eigen::Matrix3d V = svd.matrixV();
     Eigen::Matrix3d Ravg = U * V.transpose();
 
-    /// Guard against a reflection (det = -1) instead of a proper rotation (det = +1).
+    /// 올바른 회전(det = +1) 대신 반사(reflection, det = -1)가 나오는 것을 방지.
     if (Ravg.determinant() < 0.0) {
         V.col(2) *= -1.0;
         Ravg = U * V.transpose();
@@ -535,7 +536,7 @@ static icp::Transform4x4 aggregateWeightedTransforms(const std::vector<icp::IcpR
     return icp::Transform4x4::fromRotationTranslation(Rout, Tsum.x(), Tsum.y(), Tsum.z());
 }
 
-/// Write a small helper to append a Transform4x4 as a 16-number JSON array.
+/// Transform4x4을 16개 숫자로 이루어진 JSON 배열로 덧붙여 쓰는 작은 헬퍼.
 static void writeTransformJson(std::ostringstream& oss, const icp::Transform4x4& t) {
     oss << "[";
     for (int i = 0; i < 16; ++i) {
@@ -545,8 +546,9 @@ static void writeTransformJson(std::ostringstream& oss, const icp::Transform4x4&
     oss << "]";
 }
 
-/// Escape a string for embedding in a JSON string literal (double quotes and backslashes --
-/// BIM element names are otherwise plain text, e.g. Korean/ASCII identifiers).
+/// JSON 문자열 리터럴에 안전하게 삽입할 수 있도록 문자열을 이스케이프한다
+/// (큰따옴표와 백슬래시 -- BIM 부재 이름은 그 외에는 평범한 텍스트, 예를 들어
+/// 한글/ASCII 식별자다).
 static std::string jsonEscape(const std::string& s) {
     std::string out;
     out.reserve(s.size());
@@ -557,11 +559,11 @@ static std::string jsonEscape(const std::string& s) {
     return out;
 }
 
-/// Save per-BIM-element (부재) alignment results plus the combined job-wide alignment to a
-/// JSON file next to the aligned LAS output (job->outputPath with its extension replaced by
-/// "_alignment.json"). See doc/handover for the math methodology combining per-element results
-/// into the overall alignment (weighted rotation averaging via SVD re-orthogonalization +
-/// weighted translation averaging, aggregateWeightedTransforms() above).
+/// BIM 부재별 정합 결과와 작업 전체의 통합 정합 결과를 정합된 LAS 출력 파일 옆에
+/// JSON 파일로 저장한다 (job->outputPath의 확장자를 "_alignment.json"으로 교체한
+/// 경로). 부재별 결과를 전체 정합으로 통합하는 수학적 방법론(SVD 재직교화를 통한
+/// 가중 회전 평균 + 가중 이동 평균, 위의 aggregateWeightedTransforms())은
+/// doc/handover 참고.
 static std::string saveAlignmentResults(const std::shared_ptr<icp::IcpJob>& job) {
     std::string path;
     size_t dotPos = job->outputPath.rfind('.');
@@ -621,8 +623,8 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
 
     try {
         /// =============================================
-        /// Phase 1: Loading BIM/GLTF Data (loaded first so the rebase offset -- the BIM's own
-        /// bounding-box center -- can be computed before the point cloud is loaded/shifted)
+        /// 1단계: BIM/GLTF 데이터 로딩 (포인트클라우드를 로딩/이동시키기 전에 재배치(rebase)
+        /// offset -- BIM 자신의 바운딩 박스 중심 -- 을 계산할 수 있도록 이것부터 먼저 로딩한다)
         /// =============================================
         job->status = icp::IcpJobStatus::LOADING_DATA;
         ILOG << "[ICP] Loading GLTF from: " << job->bimFolderPath;
@@ -633,7 +635,7 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
             return;
         }
 
-        /// Load GLTF meshes
+        /// GLTF 메시 로딩
         std::vector<chunkbim::MeshChunk> meshes;
         if (!loadGltf(job->bimFolderPath, meshes)) {
             throw std::runtime_error("Failed to load GLTF from: " + job->bimFolderPath);
@@ -654,7 +656,7 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
             << job->rebaseOffsetX << ", " << job->rebaseOffsetY << ", " << job->rebaseOffsetZ << ")";
 
         /// =============================================
-        /// Phase 2: Loading LAS Data
+        /// 2단계: LAS 데이터 로딩
         /// =============================================
         ILOG << "[ICP] Loading LAS file: " << job->lasFilePath;
 
@@ -663,7 +665,7 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
             return;
         }
 
-        /// Load LAS file
+        /// LAS 파일 로딩
         std::vector<chunkpc::PointCloudChunk> lasChunks;
         const uint32_t maxPointsPerChunk = 100000;
 
@@ -671,13 +673,13 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
             throw std::runtime_error("Failed to load LAS file: " + job->lasFilePath);
         }
 
-        /// Convert to ICP format (absolute frame, double -- transient)
+        /// ICP 포맷으로 변환 (절대좌표, double -- 일시적으로만 사용)
         std::vector<std::array<double, 3>> sourcePointsAbsolute = icp::convertPointCloudToIcp(lasChunks);
         job->totalPointCount = sourcePointsAbsolute.size();
 
         ILOG << "[ICP] LAS loaded: " << job->totalPointCount << " points";
 
-        /// Apply manual offset (existing, user-supplied feature -- distinct from rebaseOffset)
+        /// 수동 offset 적용 (기존부터 있던, 사용자가 직접 지정하는 기능 -- rebaseOffset과는 별개)
         if (job->offsetX != 0.0 || job->offsetY != 0.0 || job->offsetZ != 0.0) {
             ILOG << "[ICP] Applying offset: dx=" << job->offsetX
                 << ", dy=" << job->offsetY
@@ -690,13 +692,12 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
             }
         }
 
-        /// Rebase to the BIM centroid and narrow to float for the Master's bulk resident copy
-        /// -- the real memory-saving point (this array can be hundreds of millions of points
-        /// for a large site). All actual ICP computation below still happens in double
-        /// precision on small, absolute-frame chunks built from this bulk array; the shift only
-        /// needs to be reconciled algebraically (icp::toShiftedFrame) at the two points further
-        /// down where an already-computed absolute-frame transform is applied directly to this
-        /// bulk array.
+        /// BIM 중심점 기준으로 재배치(rebase)하고 Master의 대량 상주 사본을 위해 float로
+        /// 축소한다 -- 실제로 메모리를 절약하는 핵심 부분이다(대형 현장에서는 이 배열이
+        /// 수억 개의 점이 될 수 있다). 아래의 실제 ICP 연산은 모두 이 대량 배열로부터
+        /// 만들어지는 작고 절대좌표인 청크들에 대해 여전히 double 정밀도로 이루어진다;
+        /// 이동(shift)은 이미 계산된(절대좌표 기준) 변환을 이 대량 배열에 직접 적용하는
+        /// 아래쪽 두 지점에서만 대수적으로(icp::toShiftedFrame) 보정해 주면 된다.
         for (auto& pt : sourcePointsAbsolute) {
             pt[0] -= job->rebaseOffsetX;
             pt[1] -= job->rebaseOffsetY;
@@ -707,7 +708,7 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
         sourcePointsAbsolute.shrink_to_fit();
 
         /// =============================================
-        /// Phase 3: Generate Pseudo Points from Mesh
+        /// 3단계: 메시로부터 가상점(pseudo point) 생성
         /// =============================================
         job->status = icp::IcpJobStatus::GENERATING_PSEUDO;
         ILOG << "[ICP] Generating pseudo points (grid size: " << job->config.pseudoPointGridSize << "m)...";
@@ -717,14 +718,13 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
             return;
         }
 
-        /// Generated in the same shifted frame as `sourcePoints` (offset passed through), so
-        /// they can be narrowed to float and stored directly into IcpChunk fields below with no
-        /// further conversion.
+        /// `sourcePoints`와 동일한 이동된 좌표계로 생성된다(offset을 그대로 전달했으므로),
+        /// 따라서 아래에서 별도 변환 없이 바로 float로 축소해 IcpChunk 필드에 저장할 수 있다.
         std::vector<std::array<double, 3>> pseudoFacePoints;
         std::vector<size_t> pseudoFaceIdx;
         std::vector<std::array<double, 3>> facePts;
         std::vector<std::array<double, 3>> targetNormals;
-        /// [ToDo] use directly meshes, instead of extraction
+        /// [ToDo] 추출하는 대신 meshes를 직접 사용할 것
         icp::generatePseudoPoints(meshes, job->config.pseudoPointGridSize, pseudoFacePoints, pseudoFaceIdx, facePts, targetNormals,
             job->rebaseOffsetX, job->rebaseOffsetY, job->rebaseOffsetZ);
 
@@ -736,7 +736,7 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
         }
 
         /// =============================================
-        /// Phase 4: Coarse Alignment (on Master)
+        /// 4단계: Coarse(전역) 정합 (Master에서 실행)
         /// =============================================
         job->status = icp::IcpJobStatus::COARSE_ALIGNMENT;
         ILOG << "[ICP] Running coarse alignment...";
@@ -748,15 +748,15 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
             return;
         }
 
-        /// Downsample for coarse alignment: point cloud. `sourcePoints` is already float,
-        /// shifted by the job's rebase offset -- IcpChunk fields are the same representation,
-        /// so the downsampled result can be assigned directly with no widen/unshift needed.
-        int coarseDownsampleRatio = job->config.downsampleRatio * 2;  /// More aggressive for coarse
+        /// coarse 정합을 위해 포인트클라우드를 다운샘플링. `sourcePoints`는 이미 job의
+        /// 재배치 offset만큼 이동된 float 상태이며 -- IcpChunk 필드도 동일한 표현이므로,
+        /// 다운샘플링 결과를 승격/offset 복원 없이 바로 대입할 수 있다.
+        int coarseDownsampleRatio = job->config.downsampleRatio * 2;  /// coarse는 더 적극적으로
         auto coarseSource = icp::downsampleUniform(sourcePoints, coarseDownsampleRatio);
 
         ILOG << "[ICP] Coarse alignment(pc vs pseudo bim pts): " << coarseSource.size() << " vs " << pseudoFacePoints.size() << " points";
 
-        /// Create coarse chunk
+        /// coarse 청크 생성
         icp::IcpChunk coarseChunk;
         coarseChunk.chunk_id = 0;
         coarseChunk.sourcePoints = std::move(coarseSource);
@@ -765,12 +765,12 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
         coarseChunk.faceNormals = icp::narrowToFloat(targetNormals);
         coarseChunk.facePts = icp::narrowToFloat(facePts);
         coarseChunk.config = job->config;
-        coarseChunk.config.maxCorrespondenceDistance *= 2.0;  /// Larger distance for coarse
+        coarseChunk.config.maxCorrespondenceDistance *= 2.0;  /// coarse는 더 큰 거리 임계값 사용
         coarseChunk.offsetX = job->rebaseOffsetX;
         coarseChunk.offsetY = job->rebaseOffsetY;
         coarseChunk.offsetZ = job->rebaseOffsetZ;
 
-        /// Run coarse ICP
+        /// coarse ICP 실행
         icp::IcpResult coarseResult = icp::runIcp(coarseChunk, job->cancelRequested);
 
         job->coarseTransform = coarseResult.transform;
@@ -787,8 +787,8 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
             << ", time=" << (job->coarseAlignmentTimeMs / 1000.0) << "s";
 
         /// =============================================
-        /// Phase 5: Fine Alignment (distributed across Slaves, one chunk per BIM element,
-        /// when possible; falls back to a single Master-side pass otherwise)
+        /// 5단계: Fine(정밀) 정합 (가능하면 BIM 부재당 청크 하나씩 Slave들에 분산 처리;
+        /// 그렇지 않으면 Master 단일 패스로 대체(fallback))
         /// =============================================
         job->status = icp::IcpJobStatus::FINE_ALIGNMENT;
 
@@ -799,27 +799,26 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
             return;
         }
 
-        /// Apply coarse transform to source points -- every chunk (distributed or fallback)
-        /// starts from this coarse-aligned frame, refining from an identity initialTransform.
-        /// job->coarseTransform was computed on absolute-frame chunk data (see Phase 4 above),
-        /// so convert it to the equivalent shifted-frame transform before applying it directly
-        /// to the (float, shifted) bulk array -- this avoids widening the whole bulk array to
-        /// double just to apply one matrix.
+        /// coarse 변환을 source 점들에 적용 -- (분산이든 대체든) 모든 청크는 이 coarse
+        /// 정합된 좌표계를 시작점으로 하여, initialTransform을 항등행렬로 두고 미세조정한다.
+        /// job->coarseTransform은 절대좌표 청크 데이터로 계산되었으므로(위 4단계 참고),
+        /// (float, 이동된) 대량 배열에 직접 적용하기 전에 이동된 좌표계용 등가 변환으로
+        /// 변환해 둔다 -- 이렇게 하면 행렬 하나 적용하자고 대량 배열 전체를 double로
+        /// 승격시키지 않아도 된다.
         icp::Transform4x4 coarseTransformShifted = icp::toShiftedFrame(
             job->coarseTransform, job->rebaseOffsetX, job->rebaseOffsetY, job->rebaseOffsetZ);
         auto alignedSource = icp::transformPointCloudCopy(sourcePoints, coarseTransformShifted);
 
-        /// Try to distribute fine alignment across connected Slaves, one chunk per BIM
-        /// element (Revit Element ID). icp_dispatch_mutex_ serializes use of task_manager_
-        /// across concurrent ICP jobs, since it is a single shared resource (see the comment
-        /// on icp_dispatch_mutex_ in MasterApplication.h) -- if it's busy with another job,
-        /// or if no slaves are connected, this job falls back to Master-only processing
-        /// instead of blocking.
+        /// 연결된 Slave들에 fine 정합을 BIM 부재(Revit Element ID)당 청크 하나씩 분산시켜
+        /// 본다. icp_dispatch_mutex_는 task_manager_가 단일 공유 자원이므로(MasterApplication.h의
+        /// icp_dispatch_mutex_ 주석 참고) 동시에 실행되는 ICP 작업들 사이에서 그 사용을
+        /// 직렬화한다 -- 다른 작업이 이미 쓰고 있거나 연결된 Slave가 없으면, 이 락을
+        /// 기다리며 블로킹하는 대신 Master 단독 처리로 대체(fallback)한다.
         std::unique_lock<std::mutex> dispatchLock(icp_dispatch_mutex_, std::try_to_lock);
         bool distributed = false;
-        /// elementInfoByChunkId[i] describes the BIM element behind elementChunks[i]
-        /// (loadIcpElementChunks assigns chunk_id == index, so this doubles as a chunk_id ->
-        /// element lookup) -- used after Phase 6 to label job->elementResults.
+        /// elementInfoByChunkId[i]는 elementChunks[i] 뒤에 있는 BIM 부재를 설명한다
+        /// (loadIcpElementChunks가 chunk_id == 인덱스로 배정하므로, 이는 동시에 chunk_id ->
+        /// 부재 조회 역할도 한다) -- 6단계 이후 job->elementResults에 이름을 붙이는 데 쓰인다.
         std::vector<IcpElementInfo> elementInfoByChunkId;
 
         if (dispatchLock.owns_lock() && !job->cancelRequested.load()) {
@@ -854,10 +853,10 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
                     ILOG << "[ICP] " << elementChunks.size() << " element chunks queued for job "
                         << job->jobId;
 
-                    /// Wait for all chunk results (or cancellation / timeout). Slaves run each
-                    /// chunk to full local convergence and report one IcpResult per chunk, so
-                    /// no per-iteration network round trip is needed here -- just polling for
-                    /// the queue to drain.
+                    /// 모든 청크 결과를 기다린다 (또는 취소/타임아웃). Slave들은 각 청크를
+                    /// 로컬 수렴까지 완전히 실행한 뒤 청크당 IcpResult 하나를 보고하므로,
+                    /// 반복(iteration)마다 네트워크 왕복이 필요하지 않다 -- 그저 큐가
+                    /// 비워지기를 폴링(polling)하면 된다.
                     auto waitStart = std::chrono::steady_clock::now();
                     const auto maxWait = std::chrono::seconds(
                         (std::max)(cfg_.task_timeout_seconds, 300));
@@ -889,17 +888,17 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
         }
 
         if (!distributed) {
-            /// Fallback: single Master-side pass over the whole (downsampled) point cloud,
-            /// exactly as before this feature existed.
+            /// 대체(Fallback): 이 기능이 있기 전과 완전히 동일하게, 전체 (다운샘플링된)
+            /// 포인트클라우드에 대해 Master 단일 패스를 실행한다.
             ILOG << "[ICP] Running fine alignment on Master (no slaves distributed to)...";
 
 #ifdef _DEBUG
-            ///[ToDo] replace it with a proper value
-            coarseChunk.config.downsampleRatio = 1;  /// Larger distance for coarse
+            ///[ToDo] 적절한 값으로 교체할 것
+            coarseChunk.config.downsampleRatio = 1;  /// coarse는 더 큰 거리 임계값 사용
 #endif
 
-            /// `alignedSource` is already float, shifted by the job's rebase offset -- IcpChunk
-            /// fields are the same representation, so no widen/unshift is needed here.
+            /// `alignedSource`는 이미 job의 재배치 offset만큼 이동된 float 상태다 -- IcpChunk
+            /// 필드도 동일한 표현이므로 여기서 승격/offset 복원이 필요 없다.
             auto fineSource = icp::downsampleUniform(alignedSource, job->config.downsampleRatio);
 
             ILOG << "[ICP] Fine alignment(pc vs pseudo bim pts): " << fineSource.size() << " vs " << pseudoFacePoints.size() << " points";
@@ -932,7 +931,7 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
             fineEndTime - fineStartTime).count();
 
         /// =============================================
-        /// Phase 6: Aggregate Results
+        /// 6단계: 결과 통합
         /// =============================================
         job->status = icp::IcpJobStatus::AGGREGATING;
         ILOG << "[ICP] Aggregating results from " << job->chunkResults.size() << " chunk(s)...";
@@ -941,11 +940,10 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
             throw std::runtime_error("Fine alignment produced no successful chunk results");
         }
 
-        /// Weighted average of the per-chunk transforms (weighted by each chunk's source
-        /// point count), with the rotation re-orthogonalized via SVD so the result is a
-        /// proper rotation matrix rather than just an element-wise average. When there is
-        /// exactly one chunk result (the fallback path), this reduces to that chunk's own
-        /// transform -- same behavior as before distributed fine alignment existed.
+        /// 청크별 변환들의 가중 평균(각 청크의 source 점 개수로 가중치를 줌)을 구하되,
+        /// 결과가 단순 원소별 평균이 아니라 올바른 회전 행렬이 되도록 회전 성분은 SVD로
+        /// 재직교화한다. 청크 결과가 정확히 1개(대체 경로)인 경우에는 그 청크 자신의
+        /// 변환으로 그대로 축소된다 -- 분산 fine 정합이 있기 전과 동일한 동작이다.
         icp::Transform4x4 combinedFineTransform = aggregateWeightedTransforms(job->chunkResults);
 
         double weightedRmseSum = 0.0;
@@ -958,17 +956,17 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
             if (r.converged) ++convergedCount;
         }
 
-        /// Combine coarse and fine transforms
+        /// coarse와 fine 변환을 결합
         job->finalTransform = combinedFineTransform * job->coarseTransform;
         job->finalRMSE = (totalWeight > 0.0) ? (weightedRmseSum / totalWeight) : 0.0;
 
         ILOG << "[ICP] Final transform computed from " << job->chunkResults.size()
             << " chunk(s) (" << convergedCount << " converged), RMSE: " << job->finalRMSE;
 
-        /// Record each element's own full (coarse + its own local refinement) transform,
-        /// labeled by BIM element name/id, for saving alongside the combined result below.
-        /// Only meaningful for the distributed (one-chunk-per-element) path -- the Master-only
-        /// fallback has no per-element breakdown, so this stays empty there.
+        /// 각 부재 자신의 전체 변환(coarse + 그 부재만의 로컬 미세조정)을 BIM 부재 이름/id로
+        /// 이름 붙여 기록해 둔다, 아래에서 통합 결과와 함께 저장하기 위해. 분산(부재당 청크
+        /// 하나) 경로에서만 의미가 있다 -- Master 단독 대체 경로는 부재별 세부 내역이 없으므로
+        /// 여기서는 비어 있는 채로 남는다.
         job->elementResults.clear();
         for (const auto& r : job->chunkResults) {
             icp::IcpElementAlignment elem;
@@ -988,15 +986,15 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
         }
 
         /// =============================================
-        /// Phase 7: Save Aligned Point Cloud
+        /// 7단계: 정합된 포인트클라우드 저장
         /// =============================================
         job->status = icp::IcpJobStatus::SAVING_RESULT;
         ILOG << "[ICP] Applying final transform to " << sourcePoints.size()
             << " points and saving to: " << job->outputPath;
 
-        /// job->finalTransform is absolute-frame (built entirely from absolute-frame chunk
-        /// results, see Phase 6) -- convert to the equivalent shifted-frame transform before
-        /// applying it directly to the (float, shifted) bulk array, same reasoning as Phase 5.
+        /// job->finalTransform은 절대좌표 기준이다(전적으로 절대좌표 청크 결과들로부터
+        /// 만들어짐, 6단계 참고) -- (float, 이동된) 대량 배열에 직접 적용하기 전에 이동된
+        /// 좌표계용 등가 변환으로 변환해 둔다, 5단계와 동일한 이유다.
         icp::Transform4x4 finalTransformShifted = icp::toShiftedFrame(
             job->finalTransform, job->rebaseOffsetX, job->rebaseOffsetY, job->rebaseOffsetZ);
         auto alignedFullResSource = icp::transformPointCloudCopy(sourcePoints, finalTransformShifted);
@@ -1045,16 +1043,16 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
 }
 
 /// =========================================
-/// Synthetic Test Data Generator
+/// 합성 테스트 데이터 생성기
 /// =========================================
 
-/// Generate a synthetic laser-scan point cloud from a BIM mesh: sample dense points on the
-/// mesh surface (as if a scanner had measured it), apply a known "ground truth" rigid
-/// transform (rotation about Z + translation) to simulate a real misalignment, optionally add
-/// Gaussian noise to simulate scan measurement error, and save the result as a .las file. The
-/// injected transform is printed so it can be compared against ICP's recovered `final_transform`
-/// to validate correctness -- lets tests start with a handful of BIM elements (fast) and scale
-/// up toward the full model before finally validating against real measured data.
+/// BIM 메시로부터 합성 레이저스캔 포인트클라우드를 생성한다: 메시 표면 위에 조밀한
+/// 점들을 샘플링하고(스캐너가 실측한 것처럼), 알려진 "ground truth" 강체 변환(Z축
+/// 회전 + 이동)을 적용해 실제 시공 오차를 시뮬레이션하고, 선택적으로 가우시안
+/// 노이즈를 더해 스캔 측정 오차를 시뮬레이션한 뒤, 결과를 .las 파일로 저장한다.
+/// 주입한 변환값을 출력하여 ICP가 복원한 `final_transform`과 비교해 정확성을
+/// 검증할 수 있게 한다 -- 소수의 BIM 부재(빠름)로 테스트를 시작해서 전체 모델
+/// 규모까지 늘려가며 검증한 뒤, 마지막으로 실제 계측 데이터로 검증할 수 있다.
 void MasterApplication::runGenerateSyntheticPointCloud(
     const std::string& bim_folder, const std::string& output_las,
     int num_elements, double grid_size, double noise_sigma,
@@ -1073,8 +1071,8 @@ void MasterApplication::runGenerateSyntheticPointCloud(
             ILOG << "[gensynth] Using first " << num_elements << " element(s) for this run";
         }
 
-        /// Sample dense points on the mesh surface (absolute frame, no offset -- this is a
-        /// standalone test-data tool, not part of the distributed ICP pipeline).
+        /// 메시 표면 위에 조밀한 점들을 샘플링 (절대좌표, offset 없음 -- 이 도구는 분산
+        /// ICP 파이프라인의 일부가 아니라 독립적인 테스트 데이터 도구다).
         std::vector<std::array<double, 3>> points, facePts, faceNormals;
         std::vector<size_t> faceIdx;
         icp::generatePseudoPoints(meshes, grid_size, points, faceIdx, facePts, faceNormals);
@@ -1086,11 +1084,11 @@ void MasterApplication::runGenerateSyntheticPointCloud(
         ILOG << "[gensynth] Generated " << points.size() << " synthetic scan points "
             << "(grid_size=" << grid_size << "m)";
 
-        /// Ground-truth transform: rotation about Z (yaw) + translation. The rotation is
-        /// applied about the *selected elements' own centroid*, not the absolute coordinate
-        /// origin -- these BIM elements can sit hundreds of meters from the origin in real site
-        /// coordinates, so rotating about the origin would displace them by meters (lever-arm
-        /// effect) instead of producing a realistic small misalignment.
+        /// Ground-truth 변환: Z축 회전(yaw) + 이동. 이 회전은 절대좌표 원점이 아니라
+        /// *선택된 부재들 자신의 중심점*을 기준으로 적용한다 -- 실제 현장 좌표에서 이
+        /// BIM 부재들은 원점으로부터 수백 미터 떨어져 있을 수 있으므로, 원점 기준으로
+        /// 회전시키면 현실적인 작은 오차가 아니라 수 미터 단위로 부재가 밀려나 버린다
+        /// (지렛대 효과, lever-arm effect).
         for (auto& mesh : meshes) {
             mesh.calculateBounds();
         }
@@ -1104,13 +1102,13 @@ void MasterApplication::runGenerateSyntheticPointCloud(
         };
         icp::Transform4x4 rotation = icp::Transform4x4::fromRotationTranslation(R, 0.0, 0.0, 0.0);
 
-        std::mt19937 rng(12345); /// fixed seed for reproducibility
+        std::mt19937 rng(12345); /// 재현 가능성을 위한 고정 시드
         std::normal_distribution<double> noise(0.0, noise_sigma);
 
         std::vector<las::PointData> outPoints;
         outPoints.reserve(points.size());
         for (const auto& p : points) {
-            /// Shift to rotation center, rotate, shift back, then translate.
+            /// 회전 중심으로 이동시킨 뒤 회전, 다시 원위치로 이동, 그 후 이동(translation) 적용.
             double cx = p[0] - rotationCenter[0];
             double cy = p[1] - rotationCenter[1];
             double cz = p[2] - rotationCenter[2];
@@ -1135,12 +1133,11 @@ void MasterApplication::runGenerateSyntheticPointCloud(
 
         ILOG << "[gensynth] Saved " << outPoints.size() << " points to " << output_las;
 
-        /// The synthetic scan is `groundTruth(mesh)` -- i.e. the mesh, rotated/shifted. When ICP
-        /// later aligns this scan (as source) back to the mesh (as target), its recovered
-        /// final_transform should approximate the *inverse* of the transform applied here, not
-        /// the transform itself. Print both the applied (rotation_z, shift) parameters and the
-        /// equivalent absolute-frame inverse (R, t) that final_transform should match, so no
-        /// mental inversion is needed when comparing.
+        /// 이 합성 스캔은 `groundTruth(mesh)`다 -- 즉 메시를 회전/이동시킨 것. 나중에 ICP가
+        /// 이 스캔을(source로) 다시 메시로(target으로) 정합할 때, 복원되는 final_transform은
+        /// 여기서 적용한 변환 자체가 아니라 그 *역변환*에 근사해야 한다. 비교할 때 머릿속으로
+        /// 역변환을 계산할 필요가 없도록, 적용한 (rotation_z, shift) 매개변수와 final_transform이
+        /// 일치해야 할 절대좌표 기준 등가 역변환(R, t)을 함께 출력한다.
         double tEquivX = rotationCenter[0] - (R[0] * rotationCenter[0] + R[1] * rotationCenter[1] + R[2] * rotationCenter[2]) + shift_x;
         double tEquivY = rotationCenter[1] - (R[3] * rotationCenter[0] + R[4] * rotationCenter[1] + R[5] * rotationCenter[2]) + shift_y;
         double tEquivZ = rotationCenter[2] - (R[6] * rotationCenter[0] + R[7] * rotationCenter[1] + R[8] * rotationCenter[2]) + shift_z;
@@ -1167,7 +1164,7 @@ void MasterApplication::runGenerateSyntheticPointCloud(
 }
 
 /// =========================================
-/// ICP Result Handling (from Slaves)
+/// ICP 결과 처리 (Slave로부터 수신)
 /// =========================================
 
 void MasterApplication::handleIcpResult(const icp::IcpResult& result, uint32_t task_id) {
@@ -1176,13 +1173,14 @@ void MasterApplication::handleIcpResult(const icp::IcpResult& result, uint32_t t
         << ", success: " << (result.success ? "Yes" : "No")
         << ", RMSE: " << result.finalRMSE << ")";
 
-    /// [Fix] This used to be an unimplemented TODO. It is now wired up (task_id -> job_id via
-    /// icp_task_to_job_, see MasterApplication.h) so a distributed fine-alignment chunk result
-    /// lands on the correct job. As of 2026-07-11, nothing in this codebase actually dispatches
-    /// ICP_FINE_ALIGNMENT tasks to Slaves -- POST /api/icp/start (processIcpJob()) computes
-    /// coarse and fine alignment synchronously on the Master itself. That remains the only
-    /// supported ICP path; this function is scaffolding for a future slave-distributed
-    /// fine-alignment feature and is currently unreachable in production use.
+    /// [수정 이력] 예전에는 미구현 TODO였다. 지금은 (MasterApplication.h의
+    /// icp_task_to_job_를 통한 task_id -> job_id 매핑으로) 제대로 연결되어 있어서, 분산
+    /// fine 정합 청크 결과가 올바른 작업(job)에 도달한다. processIcpJob()의 5단계가
+    /// ICP_FINE_ALIGNMENT 태스크를 실제로 task_manager_->addTask()를 통해 Slave들에
+    /// 분배하고 icp_task_to_job_에 등록하므로, 이 함수는 더 이상 도달 불가능한
+    /// 스캐폴딩이 아니라 그 분산 fine 정합 결과가 실제로 들어오는 경로다(연결된
+    /// Slave가 없으면 processIcpJob()이 Master 단독 처리로 대체하므로 이 함수는
+    /// 호출되지 않는다).
     std::shared_ptr<icp::IcpJob> job;
     {
         std::lock_guard<std::mutex> lock(icp_jobs_mutex_);

@@ -6,6 +6,9 @@
 #include "face.h"
 #include "mbr.h"
 
+/// 하나의 BIM 부재(요소)를 구성하는 face(삼각형) 목록과, 그것을 커스텀 바이너리
+/// 포맷(.nodes2)으로 저장/조회하는 기능을 담당하는 클래스. 실제 구현(버퍼 레이아웃,
+/// 오프셋 계산 등)은 BimInfo.cpp를 참고.
 class BimInfo {
  public:
   BimInfo() = default;

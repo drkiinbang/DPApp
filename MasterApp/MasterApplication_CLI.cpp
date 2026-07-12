@@ -1,18 +1,18 @@
 /**
  * @file MasterApplication_CLI.cpp
- * @brief Command Line Interface implementation
+ * @brief 명령줄 인터페이스(CLI) 구현
  *
- * This file contains:
- * - Command line parsing
- * - Console command processing
- * - Status printing functions
- * - Results display and saving
+ * 이 파일이 담고 있는 내용:
+ * - 명령줄 인자 파싱
+ * - 콘솔 명령어 처리
+ * - 상태 출력 함수
+ * - 결과 표시 및 저장
  */
 
 #include "MasterApplication.h"
 
  /// =========================================
- /// Command Line Parsing
+ /// 명령줄 인자 파싱
  /// =========================================
 
 void MasterApplication::parseCommandLine(int argc, char* argv[]) {
@@ -100,7 +100,7 @@ void MasterApplication::printHelp() {
 }
 
 /// =========================================
-/// Command Processing
+/// 명령어 처리
 /// =========================================
 
 void MasterApplication::processCommand(const std::string& command) {
@@ -258,7 +258,7 @@ void MasterApplication::processCommand(const std::string& command) {
 }
 
 /// =========================================
-/// Slave Control
+/// Slave 제어
 /// =========================================
 
 void MasterApplication::shutdownSlave(const std::string& slave_id) {
@@ -295,7 +295,7 @@ void MasterApplication::shutdownAllSlaves() {
 }
 
 /// =========================================
-/// Status Printing
+/// 상태 출력
 /// =========================================
 
 void MasterApplication::printSystemStatus() {
@@ -393,7 +393,7 @@ void MasterApplication::printResults() {
 }
 
 /// =========================================
-/// Results Management
+/// 결과 관리
 /// =========================================
 
 void MasterApplication::saveResults(const std::string& filename) {
@@ -442,7 +442,7 @@ void MasterApplication::clearCompletedTasks() {
 }
 
 /// =========================================
-/// Test Commands Implementation
+/// 테스트 명령어 구현
 /// =========================================
 
 void MasterApplication::runTestCommand(const std::string& args) {
@@ -460,14 +460,14 @@ void MasterApplication::runTestCommand(const std::string& args) {
         uint32_t count = 1;
         uint32_t time_ms = 10000;
         iss >> count;
-        if (iss >> time_ms) {}  // optional
+        if (iss >> time_ms) {}  // 선택적 인자
         runTestEcho(count, time_ms);
     }
     else if (sub_cmd == "compute") {
         uint32_t count = 1;
         uint32_t time_ms = 10000;
         iss >> count;
-        if (iss >> time_ms) {}  // optional
+        if (iss >> time_ms) {}  // 선택적 인자
         runTestCompute(count, time_ms);
     }
     else if (sub_cmd == "delay") {
@@ -475,7 +475,7 @@ void MasterApplication::runTestCommand(const std::string& args) {
         uint32_t extra_ms = 5000;
         uint32_t time_ms = 10000;
         iss >> count >> extra_ms;
-        if (iss >> time_ms) {}  // optional
+        if (iss >> time_ms) {}  // 선택적 인자
         runTestDelay(count, extra_ms, time_ms);
     }
     else if (sub_cmd == "fail") {
@@ -483,7 +483,7 @@ void MasterApplication::runTestCommand(const std::string& args) {
         uint32_t fail_n = 2;
         uint32_t time_ms = 10000;
         iss >> count >> fail_n;
-        if (iss >> time_ms) {}  // optional
+        if (iss >> time_ms) {}  // 선택적 인자
         runTestFail(count, fail_n, time_ms);
     }
     else {
@@ -526,7 +526,7 @@ void MasterApplication::printTestHelp() {
 void MasterApplication::runTestEcho(uint32_t count, uint32_t base_time_ms) {
     ILOG << "Starting TEST_ECHO: " << count << " tasks, " << base_time_ms << "ms each";
 
-    // TaskManager �ʱ�ȭ (���� ������)
+    // TaskManager 초기화 (아직 없는 경우에만)
     if (!task_manager_) {
         if (!initializeTaskManager(TaskType::TEST_ECHO)) {
             ELOG << "Failed to initialize TaskManager for TEST_ECHO";
@@ -534,11 +534,11 @@ void MasterApplication::runTestEcho(uint32_t count, uint32_t base_time_ms) {
         }
     }
 
-    // �׽�Ʈ ûũ ����
+    // 테스트 청크 생성
     std::vector<TestChunk> chunks;
     for (uint32_t i = 0; i < count; ++i) {
         TestChunk chunk = TestChunk::generate(i, 100, base_time_ms);
-        // TEST_ECHO: expected_output�� input�� �����ؾ� ��
+        // TEST_ECHO: expected_output은 input과 동일해야 함
         chunk.expected_output = chunk.input_numbers;
         chunks.push_back(chunk);
     }
@@ -622,18 +622,18 @@ void MasterApplication::createTestTasks(TaskType test_type, const std::vector<Te
         return;
     }
 
-    // TaskManager�� Task �߰�
-    for (auto chunk : chunks) {  // ���纻 ��� (chunk_id ���� ����)
-        // ���� ���� chunk_id �Ҵ�
+    // TaskManager에 Task 추가
+    for (auto chunk : chunks) {  // 복사본 사용 (chunk_id 갱신을 위해)
+        // 새로운 chunk_id 할당
         {
             std::lock_guard<std::mutex> lock(test_mutex_);
             chunk.chunk_id = next_test_chunk_id_++;
-            test_chunks_.push_back(chunk);  // ������ chunk_id�� ����
+            test_chunks_.push_back(chunk);  // 갱신된 chunk_id로 저장
         }
 
         auto pc_chunk = std::make_shared<PointCloudChunk>();
         pc_chunk->chunk_id = chunk.chunk_id;
-        // points�� ����� - ���� �����ʹ� TestChunk���� ����
+        // points는 비워둠 - 실제 데이터는 TestChunk에서 관리
 
         uint32_t task_id = task_manager_->addTask(pc_chunk);
 
@@ -668,7 +668,7 @@ void MasterApplication::printTestStatus() {
             success_count++;
             total_time += result.processing_time_ms;
 
-            // ����
+            // 검증
             for (const auto& chunk : test_chunks_) {
                 if (chunk.chunk_id == result.chunk_id) {
                     TestResult mutable_result = result;

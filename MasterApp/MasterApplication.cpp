@@ -1,13 +1,13 @@
 ﻿/**
  * @file MasterApplication.cpp
- * @brief Core implementation of MasterApplication
+ * @brief MasterApplication의 핵심 구현
  *
- * This file contains:
- * - Constructor/Destructor
- * - Initialization and lifecycle management
- * - Network message handlers
- * - Task assignment and processing loops
- * - PointCloud loading and BimPc processing
+ * 이 파일이 담고 있는 내용:
+ * - 생성자/소멸자
+ * - 초기화 및 생명주기 관리
+ * - 네트워크 메시지 핸들러
+ * - 태스크 분배 및 처리 루프
+ * - 포인트클라우드 로딩 및 BimPc 처리
  */
 
 #include "MasterApplication.h"
@@ -20,14 +20,19 @@
 #include <iostream>
 #include <atomic>
 
- /// [ToDo] Delete the follwing lines for clean-up
-  /// Aftet completing compile test, comment out the follwing lines
+ /// [ToDo] 정리를 위해 아래 줄들을 삭제할 것
+  /// 컴파일 테스트 완료 후 아래 줄들은 주석 처리할 것
+  /// [참고] 아래는 Phase 1~3 개발 당시 각 단계가 정상적으로 컴파일/동작하는지
+  /// 확인하기 위해 짜둔 검증용 코드이며, 전부 주석 처리되어 비활성 상태다
+  /// (main()에서의 호출부도 모두 주석 처리됨 -- 아래쪽 "Phase 1 test" 등 참고).
+  /// 실제 운영 코드에서는 쓰이지 않는 죽은 코드(dead code)이지만, 새로운
+  /// 타입/직렬화를 추가할 때 참고할 수 있는 예시로 남겨둔 것으로 보인다.
 #ifdef _DEBUG
 
 /*
 #ifdef _DEBUG
 void testIcpTypesCompile() {
-    // Transform4x4 test
+    // Transform4x4 테스트
     icp::Transform4x4 t1 = icp::Transform4x4::identity();
     icp::Transform4x4 t2 = icp::Transform4x4::translation(1.0, 2.0, 3.0);
     icp::Transform4x4 t3 = t1 * t2;
@@ -38,13 +43,13 @@ void testIcpTypesCompile() {
     double tx, ty, tz;
     t3.getTranslation(tx, ty, tz);
 
-    // IcpConfig test
+    // IcpConfig 테스트
     icp::IcpConfig config;
     config.maxIterations = 100;
     config.convergenceThreshold = 1e-6;
     bool valid = config.isValid();
 
-    // IcpChunk test
+    // IcpChunk 테스트
     icp::IcpChunk chunk;
     chunk.chunk_id = 1;
     chunk.sourcePoints.push_back({ 1.0, 2.0, 3.0 });
@@ -54,7 +59,7 @@ void testIcpTypesCompile() {
     size_t size = chunk.getApproximateSize();
     bool chunkValid = chunk.isValid();
 
-    // IcpResult test
+    // IcpResult 테스트
     icp::IcpResult result;
     result.chunk_id = 1;
     result.success = true;
@@ -64,11 +69,11 @@ void testIcpTypesCompile() {
     double improvement = result.getImprovementRatio();
     bool good = result.isGood(0.05);
 
-    // IcpJobStatus test
+    // IcpJobStatus 테스트
     icp::IcpJobStatus status = icp::IcpJobStatus::PENDING;
     const char* statusStr = icp::statusToString(status);
 
-    // IcpJob test
+    // IcpJob 테스트
     icp::IcpJob job;
     job.jobId = "test_job_001";
     job.lasFilePath = "C:/data/test.las";
@@ -78,15 +83,15 @@ void testIcpTypesCompile() {
     bool finished = job.isFinished();
     bool running = job.isRunning();
 
-    // IcpStatistics test
+    // IcpStatistics 테스트
     icp::IcpStatistics stats = icp::IcpStatistics::fromJob(job);
 
-    // TaskType test (PointCloudTypes.h modification check)
+    // TaskType 테스트 (PointCloudTypes.h 수정 확인용)
     DPApp::TaskType icpTask = DPApp::TaskType::ICP_FINE_ALIGNMENT;
     const char* taskName = DPApp::taskStr(icpTask);
     DPApp::TaskType parsed = DPApp::strTask("icp_fine");
 
-    // Suppress unused variable warnings
+    // 미사용 변수 경고 억제
     (void)x; (void)y; (void)z;
     (void)tx; (void)ty; (void)tz;
     (void)valid; (void)size; (void)chunkValid;
@@ -103,7 +108,7 @@ void testIcpTypesCompile() {
 void testIcpCoreCompile() {
     std::cout << "=== Phase 2 IcpCore Test ===" << std::endl;
 
-    /// 1. Test data generation
+    /// 1. 테스트 데이터 생성
     std::vector<std::array<double, 3>> sourcePoints = {
         {0.0, 0.0, 0.0},
         {1.0, 0.0, 0.0},
@@ -115,24 +120,24 @@ void testIcpCoreCompile() {
         {1.0, 1.0, 1.0}
     };
 
-    /// Target = Source + (0.1, 0.2, 0.3) translation
+    /// Target = Source에 (0.1, 0.2, 0.3) 이동을 적용한 것
     std::vector<std::array<double, 3>> targetPoints;
     for (const auto& p : sourcePoints) {
         targetPoints.push_back({ p[0] + 0.1, p[1] + 0.2, p[2] + 0.3 });
     }
 
-    /// 2. KD-Tree test
+    /// 2. KD-Tree 테스트
     icp::PointCloudAdaptor adaptor(targetPoints);
     icp::KdTree3D tree(3, adaptor, nanoflann::KDTreeSingleIndexAdaptorParams(10));
     tree.buildIndex();
     std::cout << "KD-Tree built successfully" << std::endl;
 
-    /// 3. Correspondence finding test
+    /// 3. 대응점 탐색 테스트
     std::vector<icp::Correspondence> correspondences;
     icp::findCorrespondences(sourcePoints, tree, 1.0, correspondences);
     std::cout << "Found " << correspondences.size() << " correspondences" << std::endl;
 
-    /// 4. SVD transform estimation test
+    /// 4. SVD 변환 추정 테스트
     icp::Transform4x4 transform = icp::estimateRigidTransformSVD(
         sourcePoints, targetPoints, correspondences);
 
@@ -141,15 +146,15 @@ void testIcpCoreCompile() {
     std::cout << "Estimated translation: (" << tx << ", " << ty << ", " << tz << ")" << std::endl;
     std::cout << "Expected translation: (0.1, 0.2, 0.3)" << std::endl;
 
-    /// 5. RMSE calculation test
+    /// 5. RMSE 계산 테스트
     double rmse = icp::computeRMSE(correspondences);
     std::cout << "Initial RMSE: " << rmse << std::endl;
 
-    /// 6. Downsampling test
+    /// 6. 다운샘플링 테스트
     auto downsampled = icp::downsampleUniform(sourcePoints, 2);
     std::cout << "Downsampled: " << sourcePoints.size() << " -> " << downsampled.size() << std::endl;
 
-    /// 7. Full ICP test
+    /// 7. 전체 ICP 테스트
     icp::IcpChunk chunk;
     chunk.chunk_id = 1;
     chunk.sourcePoints = sourcePoints;
@@ -175,7 +180,7 @@ void testIcpCoreCompile() {
     result.transform.getTranslation(tx, ty, tz);
     std::cout << "Final translation: (" << tx << ", " << ty << ", " << tz << ")" << std::endl;
 
-    /// 8. Result aggregation test
+    /// 8. 결과 통합 테스트
     std::vector<icp::IcpResult> results = { result };
     icp::Transform4x4 aggregated = icp::aggregateResultsWeighted(results);
     const icp::IcpResult* best = icp::selectBestResult(results);
@@ -183,23 +188,23 @@ void testIcpCoreCompile() {
     std::cout << "\nAggregation test: " << (best != nullptr ? "OK" : "Failed") << std::endl;
     std::cout << "=== Phase 2 Test Complete ===" << std::endl;
 
-    (void)aggregated;  // Suppress warning
+    (void)aggregated;  // 경고 억제
 }
 */
 
-/// Floating point comparison helper
+/// 부동소수점 비교 헬퍼
 inline bool doubleEquals(double a, double b, double epsilon = 1e-6) {
     return std::abs(a - b) < epsilon;
 }
 
-/// [ToDo] Delete serialization test if no longer needed
-/// Phase 3 serialization test
+/// [ToDo] 더 이상 필요 없으면 직렬화 테스트 삭제할 것
+/// Phase 3 직렬화 테스트
 void testIcpSerializationCompile() {
     std::cout << "=== Phase 3 Serialization Test ===" << std::endl;
 
     bool allPassed = true;
 
-    /// 1. Transform4x4 serialization test
+    /// 1. Transform4x4 직렬화 테스트
     {
         icp::Transform4x4 original = icp::Transform4x4::translation(1.5, 2.5, 3.5);
 
@@ -218,7 +223,7 @@ void testIcpSerializationCompile() {
         allPassed &= match;
     }
 
-    /// 2. IcpConfig serialization test
+    /// 2. IcpConfig 직렬화 테스트
     {
         icp::IcpConfig original;
         original.maxIterations = 100;
@@ -245,7 +250,7 @@ void testIcpSerializationCompile() {
         allPassed &= match;
     }
 
-    /// 3. IcpChunk serialization test
+    /// 3. IcpChunk 직렬화 테스트
     {
         icp::IcpChunk original;
         original.chunk_id = 42;
@@ -271,7 +276,7 @@ void testIcpSerializationCompile() {
             doubleEquals(original.source_min_x, restored.source_min_x) &&
             doubleEquals(original.source_max_x, restored.source_max_x);
 
-        /// Point data check
+        /// 점 데이터 확인
         if (match && original.sourcePoints.size() > 0) {
             match = doubleEquals(original.sourcePoints[0][0], restored.sourcePoints[0][0]) &&
                 doubleEquals(original.sourcePoints[0][1], restored.sourcePoints[0][1]) &&
@@ -283,7 +288,7 @@ void testIcpSerializationCompile() {
         allPassed &= match;
     }
 
-    /// 4. IcpResult serialization test
+    /// 4. IcpResult 직렬화 테스트
     {
         icp::IcpResult original;
         original.chunk_id = 123;
@@ -298,7 +303,7 @@ void testIcpSerializationCompile() {
         original.converged = true;
         original.success = true;
         original.processingTimeMs = 123.456;
-        original.errorMessage = "";  // Empty message
+        original.errorMessage = "";  // 빈 메시지
 
         std::vector<uint8_t> buffer = icp::serializeIcpResult(original);
         icp::IcpResult restored = icp::deserializeIcpResult(buffer);
@@ -319,7 +324,7 @@ void testIcpSerializationCompile() {
         allPassed &= match;
     }
 
-    /// 5. IcpResult with error message serialization test
+    /// 5. 오류 메시지가 있는 IcpResult 직렬화 테스트
     {
         icp::IcpResult original;
         original.chunk_id = 999;
@@ -340,7 +345,7 @@ void testIcpSerializationCompile() {
         allPassed &= match;
     }
 
-    /// 6. NetworkUtils wrapper test
+    /// 6. NetworkUtils 래퍼(wrapper) 테스트
     {
         icp::IcpChunk chunk;
         chunk.chunk_id = 777;
@@ -362,12 +367,12 @@ void testIcpSerializationCompile() {
 #endif
 
 /// =========================================
-/// Global variable (for signal handler)
+/// 전역 변수 (시그널 핸들러용)
 /// =========================================
 MasterApplication* g_app = nullptr;
 
 /// =========================================
-/// PointCloudLoader namespace implementation
+/// PointCloudLoader 네임스페이스 구현
 /// =========================================
 
 namespace DPApp {
@@ -382,7 +387,7 @@ namespace DPApp {
                 std::cout << "Loading BIM mesh folder: " << bim_folder << std::endl;
                 std::cout << "Loading PointCloud file: " << pointcloud_file << std::endl;
 
-                /// 1. Load mesh data
+                /// 1. 메시 데이터 로딩
                 std::vector<chunkbim::MeshChunk> bimData;
                 if (!loadGltf(bim_folder, bimData)) {
                     std::cerr << "loadGltf failed for: " << bim_folder << std::endl;
@@ -399,9 +404,9 @@ namespace DPApp {
                     element.calculateBounds();
                 }
 
-                /// 2. Load point cloud data, then rebase to the BIM's centroid and narrow to
-                /// float for the Master's bulk resident copy (the real memory-saving point --
-                /// this array can be hundreds of millions of points for a large site).
+                /// 2. 포인트클라우드 데이터를 로딩한 뒤, BIM 중심점 기준으로 재배치(rebase)하고
+                /// Master의 대량 상주 사본을 위해 float로 축소한다 (실제로 메모리를 절약하는
+                /// 핵심 부분 -- 대형 현장에서는 이 배열이 수억 개의 점이 될 수 있다).
                 std::vector<pctree::XYZPoint> pcAbsolute;
                 if (!loadLasFile(pointcloud_file, pcAbsolute)) {
                     return chunks;
@@ -421,7 +426,7 @@ namespace DPApp {
 
                 size_t numChunks = bimData.size();
 
-                /// Pre-create chunks (bounds already calculated above)
+                /// 청크를 미리 생성 (bounds는 위에서 이미 계산됨)
                 for (size_t i = 0; i < numChunks; ++i) {
                     chunks.emplace_back(std::make_shared<BimPcChunk>());
                     auto& bimpc_chunk = chunks.back();
@@ -432,12 +437,12 @@ namespace DPApp {
                     bimpc_chunk->offsetZ = rebaseOffset[2];
                 }
 
-                /// Assign each point to the BIM chunk whose bounding box contains it. `pc` is
-                /// shifted (float, absolute - rebaseOffset); widen+unshift just for the bbox
-                /// comparison (chunk.bim is always absolute), but store the original shifted
-                /// float value -- BimPcChunk::points stays float+shifted, matching `pc`'s own
-                /// representation exactly (no conversion needed).
-                /// If a point falls outside all boxes, assign it to the nearest chunk center.
+                /// 각 점을 자신을 포함하는 바운딩 박스를 가진 BIM 청크에 배정한다. `pc`는
+                /// 이동된(shifted) 상태(float, 절대좌표 - rebaseOffset)이므로, bbox 비교를
+                /// 위해서만 승격+offset 복원을 하고(chunk.bim은 항상 절대좌표), 원래의
+                /// 이동된 float 값 자체를 저장한다 -- BimPcChunk::points는 `pc`와 동일한
+                /// float+이동 표현을 그대로 유지하므로 변환이 필요 없다.
+                /// 어떤 박스에도 속하지 않는 점은 가장 가까운 청크 중심에 배정한다.
                 const double margin = 1.0;
                 for (const auto& pt : pc) {
                     double px = static_cast<double>(pt[0]) + rebaseOffset[0];
@@ -483,19 +488,19 @@ namespace DPApp {
             return chunks;
         }
 
-        /// Build one IcpChunk per BIM element (Revit Element ID -- each GLTF node/mesh loaded
-        /// by loadGltf() is one structural component of the plant/structure), so fine alignment
-        /// can be distributed to Slaves one element at a time instead of running as a single
-        /// Master-side pass over the whole point cloud.
+        /// BIM 부재(Revit Element ID -- loadGltf()가 로딩하는 GLTF 노드/메시 하나하나가
+        /// 플랜트/구조물의 구조적 구성요소 하나에 대응)마다 IcpChunk를 하나씩 만들어,
+        /// Master가 전체 포인트클라우드를 한 번에 처리하는 대신 fine alignment를 부재
+        /// 단위로 Slave들에 분산시킬 수 있게 한다.
         ///
-        /// For each element: clip the (already coarse-aligned) point cloud to that element's
-        /// bounding box (expanded by config.maxCorrespondenceDistance as margin), and generate
-        /// pseudo target points from just that element's mesh. Elements with too few nearby
-        /// points (< config.minCorrespondences) or a degenerate mesh are skipped -- there is
-        /// nothing meaningful to align there. A point can end up in more than one element's
-        /// chunk when their (margin-expanded) boxes overlap; unlike BimPc's distance-calc
-        /// chunking (where every point must land in exactly one chunk), that's fine here --
-        /// a boundary point is a legitimate correspondence candidate for either neighbor.
+        /// 각 부재에 대해: (이미 coarse 정합된) 포인트클라우드를 그 부재의 바운딩 박스
+        /// (여유값으로 config.maxCorrespondenceDistance만큼 확장)로 잘라내고, 그 부재의
+        /// 메시만으로 가상 target 점을 생성한다. 주변 점이 너무 적거나(config.minCorrespondences
+        /// 미만) 메시가 퇴화된 부재는 건너뛴다 -- 정합할 의미 있는 대상이 없기 때문이다.
+        /// (여유값으로 확장된) 박스들이 겹치면 한 점이 여러 부재의 청크에 동시에 들어갈
+        /// 수 있다; 모든 점이 정확히 하나의 청크에만 속해야 하는 BimPc 거리계산 청킹과
+        /// 달리, 여기서는 문제가 되지 않는다 -- 경계에 있는 점은 이웃한 부재 어느 쪽에도
+        /// 유효한 대응점 후보가 될 수 있기 때문이다.
         std::vector<std::shared_ptr<icp::IcpChunk>> loadIcpElementChunks(
             const std::vector<chunkbim::MeshChunk>& elements,
             const std::vector<std::array<float, 3>>& coarseAlignedPoints,
@@ -513,17 +518,17 @@ namespace DPApp {
                     return chunks;
                 }
 
-                /// Compute (and cache) each element's bounding box up front.
+                /// 각 부재의 바운딩 박스를 미리 계산(및 캐시)해 둔다.
                 std::vector<chunkbim::MeshChunk> boundedElements = elements;
                 for (auto& element : boundedElements) {
                     element.calculateBounds();
                 }
 
-                /// Clip points into every element's (margin-expanded) box. coarseAlignedPoints
-                /// is shifted (float, absolute - offset); elements are absolute (unshifted), so
-                /// widen+unshift each point just for the bbox comparison, but store the
-                /// original shifted float value -- IcpChunk::sourcePoints stays float+shifted,
-                /// matching this bulk array's own representation exactly (no conversion needed).
+                /// 점들을 각 부재의 (여유값으로 확장된) 박스에 잘라 넣는다. coarseAlignedPoints는
+                /// 이동된(shifted) 상태(float, 절대좌표 - offset)이고 elements는 절대좌표
+                /// (이동 없음)이므로, bbox 비교를 위해서만 승격+offset 복원을 하고, 원래의
+                /// 이동된 float 값 자체를 저장한다 -- IcpChunk::sourcePoints는 이 대량 배열과
+                /// 동일한 float+이동 표현을 그대로 유지하므로 변환이 필요 없다.
                 const double margin = (std::max)(config.maxCorrespondenceDistance, 0.1);
                 std::vector<std::vector<std::array<float, 3>>> elementPoints(numElements);
 
@@ -550,8 +555,8 @@ namespace DPApp {
                         continue;
                     }
 
-                    /// Generated in the same shifted frame as elementPoints[i] (offset passed
-                    /// through), so it can be narrowed to float and stored directly below.
+                    /// elementPoints[i]와 동일한 이동된 좌표계로 생성된다(offset을 그대로
+                    /// 전달했으므로), 따라서 아래에서 바로 float로 축소해 저장할 수 있다.
                     std::vector<std::array<double, 3>> pseudoPoints;
                     std::vector<size_t> faceIdx;
                     std::vector<std::array<double, 3>> facePts;
@@ -600,7 +605,7 @@ namespace DPApp {
 }
 
 /// =========================================
-/// Constructor / Destructor
+/// 생성자 / 소멸자
 /// =========================================
 
 MasterApplication::MasterApplication()
@@ -612,7 +617,7 @@ MasterApplication::~MasterApplication() {
 }
 
 /// =========================================
-/// Initialization
+/// 초기화
 /// =========================================
 
 bool MasterApplication::initialize(int argc, char* argv[]) {
@@ -637,7 +642,7 @@ bool MasterApplication::initialize(int argc, char* argv[]) {
 
     setupRestApiRoutes();
 
-    /// Load agents configuration
+    /// Agent 설정 로딩
     loadAgentsFromConfig("master_config.json");
 
     return true;
@@ -681,7 +686,7 @@ bool MasterApplication::initializeTaskManager(TaskType task_type) {
 }
 
 /// =========================================
-/// Lifecycle Management
+/// 생명주기 관리
 /// =========================================
 
 bool MasterApplication::start() {
@@ -782,7 +787,7 @@ void MasterApplication::runInteractive() {
 }
 
 /// =========================================
-/// BIM-PointCloud Processing
+/// BIM-포인트클라우드 처리
 /// =========================================
 
 void MasterApplication::runBimPcProcess(const std::string& mesh_folder, const std::string& pointcloud_file) {
@@ -936,7 +941,7 @@ bool MasterApplication::loadAndProcessPointCloud(const std::string& filename, co
 }
 
 /// =========================================
-/// Network Message Handlers
+/// 네트워크 메시지 핸들러
 /// =========================================
 
 void MasterApplication::handleMessage(const NetworkMessage& message, const std::string& client_id) {
@@ -995,7 +1000,7 @@ void MasterApplication::handleTaskResult(const NetworkMessage& message, const st
 
         // result_type: 0 = ProcessingResult, 1 = BimPcResult, 2 = TestResult
         if (result_type == 2) {
-            // Test result processing
+            // 테스트 결과 처리
             TestResult result = TestResult::deserialize(result_data);
             handleTestResult(result);
 
@@ -1017,7 +1022,7 @@ void MasterApplication::handleTaskResult(const NetworkMessage& message, const st
                 << ", time: " << result.processing_time_ms << "ms)";
         }
         else if (result_type == 1) {
-            // BimPc result processing
+            // BimPc 결과 처리
             BimPcResult result = NetworkUtils::deserializeBimPcResult(result_data);
             if (task_manager_) {
                 if (result.success) {
@@ -1035,10 +1040,10 @@ void MasterApplication::handleTaskResult(const NetworkMessage& message, const st
                 << " from " << client_id;
         }
         else if (result_type == 3) {
-            // ICP result processing (task_id (4 bytes) + serialized icp::IcpResult),
-            // sent by SlaveApplication::sendIcpResult(). [Fix] This used to fall through
-            // to the "General result processing" branch below and be mis-deserialized as
-            // a plain ProcessingResult instead of being routed to handleIcpResult().
+            // ICP 결과 처리 (task_id(4바이트) + 직렬화된 icp::IcpResult),
+            // SlaveApplication::sendIcpResult()가 전송함. [수정 이력] 예전에는 이 분기가
+            // 없어서 아래쪽의 "일반 결과 처리" 분기로 흘러들어가, handleIcpResult()로
+            // 라우팅되지 못하고 평범한 ProcessingResult로 잘못 역직렬화되고 있었다.
             if (result_data.size() < sizeof(uint32_t)) {
                 ELOG << "Invalid ICP result message from " << client_id;
                 return;
@@ -1049,10 +1054,10 @@ void MasterApplication::handleTaskResult(const NetworkMessage& message, const st
                 result_data.begin() + sizeof(uint32_t), result_data.end());
             icp::IcpResult icp_result = icp::deserializeIcpResult(icp_result_data);
 
-            /// [Fix] handleIcpResult() only updates the IcpJob's own bookkeeping
-            /// (chunkResults/completedChunks/icp_task_to_job_). Without also telling
-            /// task_manager_ the task finished, the slave stays marked "busy" forever from
-            /// TaskManager's point of view, breaking load-balanced dispatch for later tasks.
+            /// [수정 이력] handleIcpResult()는 IcpJob 자체의 장부(chunkResults/completedChunks/
+            /// icp_task_to_job_)만 갱신한다. task_manager_에게도 태스크가 끝났다고 알려주지
+            /// 않으면, TaskManager 입장에서는 그 Slave가 영원히 "사용 중(busy)"으로 남아있게
+            /// 되어 이후 태스크들의 부하분산 분배가 망가진다.
             if (task_manager_) {
                 if (icp_result.success) {
                     ProcessingResult simple_result;
@@ -1068,7 +1073,7 @@ void MasterApplication::handleTaskResult(const NetworkMessage& message, const st
             handleIcpResult(icp_result, icp_task_id);
         }
         else {
-            // General result processing
+            // 일반 결과 처리
             ProcessingResult result = NetworkUtils::deserializeResult(result_data);
             if (task_manager_) {
                 if (result.success) {
@@ -1086,16 +1091,16 @@ void MasterApplication::handleTaskResult(const NetworkMessage& message, const st
 }
 
 /// =========================================
-/// Test Result Handling
+/// 테스트 결과 처리
 /// =========================================
 
 void MasterApplication::handleTestResult(const TestResult& result) {
     std::lock_guard<std::mutex> lock(test_mutex_);
 
-    // Store result
+    // 결과 저장
     test_results_.push_back(result);
 
-    // Find and verify chunk
+    // 청크를 찾아서 검증
     for (auto& chunk : test_chunks_) {
         if (chunk.chunk_id == result.chunk_id) {
             TestResult mutable_result = result;
@@ -1123,7 +1128,7 @@ void MasterApplication::handleTaskFailed(const TaskInfo& task, const std::string
 }
 
 /// =========================================
-/// Task Creation
+/// 태스크 생성
 /// =========================================
 
 void MasterApplication::createTasksFromChunks(const std::vector<std::shared_ptr<PointCloudChunk>>& chunks) {
@@ -1147,7 +1152,7 @@ void MasterApplication::createTasksFromChunks(const std::vector<std::shared_ptr<
 }
 
 /// =========================================
-/// Background Loops
+/// 백그라운드 루프
 /// =========================================
 
 void MasterApplication::taskAssignmentLoop() {
@@ -1177,7 +1182,7 @@ void MasterApplication::sendAssignedTasks() {
         auto task_data = NetworkUtils::serializeTask(task);
         std::vector<uint8_t> chunk_data;
 
-        // Check if test Task type
+        // 테스트 태스크 타입인지 확인
         bool is_test_task = (task_info.task_type == TaskType::TEST_ECHO ||
             task_info.task_type == TaskType::TEST_COMPUTE ||
             task_info.task_type == TaskType::TEST_DELAY ||
@@ -1190,7 +1195,7 @@ void MasterApplication::sendAssignedTasks() {
             task_info.icp_chunk_data != nullptr);
 
         if (is_test_task) {
-            // Test chunk data serialization
+            // 테스트 청크 데이터 직렬화
             std::lock_guard<std::mutex> lock(test_mutex_);
             for (const auto& test_chunk : test_chunks_) {
                 if (test_chunk.chunk_id == task_info.chunk_id) {
@@ -1279,7 +1284,7 @@ void MasterApplication::timeoutLoop() {
 }
 
 /// =========================================
-/// Main Entry Point
+/// 메인 진입점
 /// =========================================
 
 static BOOL WINAPI ConsoleHandler(DWORD signal) {
@@ -1296,17 +1301,17 @@ static BOOL WINAPI ConsoleHandler(DWORD signal) {
 
 int main(int argc, char* argv[]) {
 
-    /// [ToDo] Delete the follwing lines for clean-up
-    /// Aftet completing compile test, comment out the follwing lines
+    /// [ToDo] 정리를 위해 아래 줄들을 삭제할 것
+    /// 컴파일 테스트 완료 후 아래 줄들은 주석 처리할 것
 #ifdef _DEBUG
-    /// Phase 1 test
+    /// Phase 1 테스트
     //testIcpTypesCompile();
 
-    /// Phase 2 test
+    /// Phase 2 테스트
     //testIcpCoreCompile();
-    //return 0;  // Run test only and exit
+    //return 0;  // 테스트만 실행하고 종료
 
-    /// Phase 3 test
+    /// Phase 3 테스트
     //testIcpSerializationCompile();
     //return 0;
 

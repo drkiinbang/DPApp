@@ -1,6 +1,6 @@
 #pragma once
 
-// Prevent Windows min/max macros from interfering with std::min/max
+// Windows의 min/max 매크로가 std::min/max와 충돌하지 않도록 방지
 #ifdef _WIN32
 #define NOMINMAX
 #endif
@@ -53,7 +53,7 @@ namespace DPApp {
     // =====================================================
 
     /**
-     * @brief Point cloud loading utilities
+     * @brief 포인트클라우드 로딩 유틸리티
      */
     namespace PointCloudLoader {
         std::vector<std::shared_ptr<PointCloudChunk>> loadPointCloudFileInChunks(
@@ -68,8 +68,8 @@ namespace DPApp {
     }
 
     /**
-     * @brief Task Processor class for individual workers (Slave nodes)
-     * Fixed 2 task types: CONVERT_PTS and BIM_DISTANCE_CALCULATION
+     * @brief 개별 워커(Slave 노드)를 위한 태스크 처리기 클래스
+     * 2가지 태스크 타입 고정: CONVERT_PTS와 BIM_DISTANCE_CALCULATION
      */
     class TaskProcessor {
     public:
@@ -81,33 +81,33 @@ namespace DPApp {
             std::cout << "TaskProcessor destroyed" << std::endl;
         }
 
-        // Task processing - handles both supported task types internally
+        // 태스크 처리 - 지원하는 두 태스크 타입을 내부에서 모두 처리
         ProcessingResult processTask(const ProcessingTask& task, const PointCloudChunk& chunk);
 
-        /// BimPcChunk processing
+        /// BimPcChunk 처리
         BimPcResult processTask(const ProcessingTask& task, const BimPcChunk& chunk);
 
-        // Supported task type queries
+        // 지원하는 태스크 타입 조회
         std::vector<TaskType> getSupportedTaskTypes() const;
         bool supportsTaskType(const TaskType task_type) const;
 
-        // Statistics
+        // 통계
         uint32_t getProcessedTaskCount() const { return stats_.getProcessedCount(); }
         uint32_t getFailedTaskCount() const { return stats_.getFailedCount(); }
         double getAverageProcessingTime() const { return stats_.getAverageProcessingTime(); }
 
     private:
-        ProcessingStats stats_;  /// replace atomic variables for safety
+        ProcessingStats stats_;  /// 안전을 위해 atomic 변수 대신 사용
     };
 
     /**
-     * @brief Simple point cloud processing functions
+     * @brief 단순 포인트클라우드 처리 함수들
      */
     namespace PointCloudProcessors {
-        /// Convert pts format
+        /// pts 포맷 변환
         ProcessingResult convertPts(const ProcessingTask& task, const PointCloudChunk& chunk);
 
-        /// Simple distance calculation (simplified BIM functionality)
+        /// 단순 거리 계산 (BIM 기능을 단순화한 버전)
         ProcessingResult calculateDistance(const ProcessingTask& task, const PointCloudChunk& chunk);
     }
 
@@ -116,10 +116,10 @@ namespace DPApp {
     }
 
     ///
-    /// Implementation Section
+    /// 구현부
     ///
 
-    // Point cloud loading utilities implementation
+    // 포인트클라우드 로딩 유틸리티 구현
     namespace PointCloudLoader {
 
         std::vector<std::shared_ptr<PointCloudChunk>> loadPointCloudFileInChunks(
@@ -130,7 +130,7 @@ namespace DPApp {
             try {
                 std::cout << "Loading point cloud file: " << file_path << std::endl;
 
-                /// Check file extension
+                /// 파일 확장자 확인
                 std::string extension = std::filesystem::path(file_path).extension().string();
                 std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
 
@@ -178,7 +178,7 @@ namespace DPApp {
                 while (std::getline(file, line)) {
                     line_count++;
 
-                    // Skip empty line or comment line
+                    // 빈 줄이나 주석 줄은 건너뜀
                     if (line.empty() || line[0] == '#') continue;
 
                     std::istringstream iss(line);
@@ -194,12 +194,12 @@ namespace DPApp {
                         points_in_current_chunk++;
                         total_points_processed++;
 
-                        // Check chunk size limit
+                        // 청크 크기 제한 확인
                         if (points_in_current_chunk >= max_points_per_chunk) {
-                            // Complete chunk
+                            // 청크 완료
                             chunks.push_back(current_chunk);
 
-                            // Start new chunk
+                            // 새 청크 시작
                             chunk_counter++;
                             current_chunk = std::make_shared<PointCloudChunk>();
                             current_chunk->chunk_id = chunk_counter;
@@ -208,13 +208,13 @@ namespace DPApp {
                         }
                     }
 
-                    // Progress (every 100k lines)
+                    // 진행 상황 (10만 줄마다)
                     if (line_count % 100000 == 0) {
                         std::cout << "Processing line: " << line_count << std::endl;
                     }
                 }
 
-                // Last chunk
+                // 마지막 청크
                 if (points_in_current_chunk > 0) {
                     chunks.push_back(current_chunk);
                 }
@@ -268,7 +268,7 @@ namespace DPApp {
                     chunks.push_back(current_chunk);
                     chunk_counter++;
 
-                    // Progress reporting (every chunk)
+                    // 진행 상황 보고 (청크마다)
                     if (chunk_counter % 10 == 0) {
                         std::cout << "Loaded chunks: " << chunk_counter
                             << ", points: " << total_points_loaded << std::endl;
@@ -311,7 +311,7 @@ namespace DPApp {
                     pc.emplace_back(p.x, p.y, p.z);
                     chunk_counter++;
 
-                    // Progress reporting (every chunk)
+                    // 진행 상황 보고 (청크마다)
                     if (chunk_counter % gap == 0) {
                         std::cout << chunk_counter << " of " << total_num_points << " are loaded.,\n";
                     }
@@ -340,7 +340,7 @@ namespace DPApp {
         result.chunk_id = task.chunk_id;
 
         try {
-            /// Direct switch on task type - no dynamic registration needed
+            /// 태스크 타입에 대해 직접 분기 - 동적 등록이 필요 없음
             switch (task.task_type) {
             case TaskType::CONVERT_PTS:
                 result = PointCloudProcessors::convertPts(task, chunk);
@@ -364,7 +364,7 @@ namespace DPApp {
             return result;
         }
 
-        /// Update processing time statistics
+        /// 처리 시간 통계 갱신
         auto end_time = std::chrono::steady_clock::now();
         double processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(
             end_time - start_time).count() / 1000.0;
@@ -373,14 +373,14 @@ namespace DPApp {
             stats_.recordSuccess(processing_time);
         }
         else {
-            /// Handles logical failure cases that were not processed 
-            /// by either the catch blocks or default case above
-            /// In theory, a guard may be required to prevent duplicated recordFailure() calls.
-            /// However, under the current control flow, any path that already called recordFailure() returns early.
-            /// Threrefore, reaching this block implies no prior failure
-            /// has been recorded, and it is safe to handle it here
+            /// 위의 catch 블록이나 default 분기에서 처리되지 않은 논리적 실패
+            /// 케이스를 처리한다. 이론적으로는 recordFailure()가 중복 호출되지
+            /// 않도록 가드가 필요할 수도 있지만, 현재 제어 흐름 상 이미
+            /// recordFailure()를 호출한 모든 경로는 여기 도달하기 전에 조기
+            /// 반환한다. 따라서 이 블록에 도달했다는 것은 아직 실패가 기록되지
+            /// 않았다는 뜻이므로 여기서 처리해도 안전하다
             if (result.error_message.empty()) {
-                /// An empty error message indicates a failure theat was not caught above
+                /// 오류 메시지가 비어 있다는 것은 위에서 잡히지 않은 실패를 의미함
                 stats_.recordFailure();
             }
         }
@@ -413,9 +413,9 @@ namespace DPApp {
             result.error_message = "Processing error: " + std::string(e.what());
             stats_.recordFailure();
             return result;
-            /// Considering the current control flow, returning here is safe
-            /// because recordFailure() has already been called
-            /// preventing duplicated failure recording downstream.
+            /// 현재 제어 흐름을 고려하면 여기서 반환하는 것은 안전하다 --
+            /// recordFailure()가 이미 호출되었으므로 이후 단계에서 실패가
+            /// 중복 기록되는 것을 막아준다.
         }
 
         auto end_time = std::chrono::steady_clock::now();
@@ -426,7 +426,7 @@ namespace DPApp {
             stats_.recordSuccess(processing_time);
         }
         else {
-            /// Fore failure cases which were not caught in if statement or catch
+            /// 위 if문이나 catch에서 잡히지 않은 실패 케이스 처리
             if (result.error_message.empty()) {
                 stats_.recordFailure();
             }
@@ -455,7 +455,7 @@ namespace DPApp {
             return utf8str;
         }
     }
-    /// PointCloudProcessors Implementation
+    /// PointCloudProcessors 구현
     namespace PointCloudProcessors {
 
         ProcessingResult convertPts(const ProcessingTask& task, const PointCloudChunk& chunk) {
@@ -468,10 +468,10 @@ namespace DPApp {
                 std::cout << "Converting PTS chunk " << chunk.chunk_id
                     << " with " << chunk.points.size() << " points" << std::endl;
 
-                // Simple PTS conversion - just copy points with potential format adjustments
+                // 단순 PTS 변환 - 필요시 포맷 조정만 하고 점들을 그대로 복사
                 result.processed_points = chunk.points;
 
-                // Example: Apply coordinate offset if specified in parameters
+                // 예시: 매개변수에 좌표 offset이 지정되어 있으면 적용
                 if (!task.parameters.empty() && task.parameters.size() >= sizeof(double) * 3) {
                     double offset_x, offset_y, offset_z;
                     std::memcpy(&offset_x, task.parameters.data(), sizeof(double));
@@ -508,10 +508,10 @@ namespace DPApp {
                 std::cout << "Calculating distances for chunk " << chunk.chunk_id
                     << " with " << chunk.points.size() << " points" << std::endl;
 
-                // Simple distance calculation - calculate distance from origin for each point
+                // 단순 거리 계산 - 각 점의 원점으로부터의 거리를 계산
                 result.processed_points = chunk.points;
 
-                // Calculate distance from origin and store in intensity field
+                // 원점으로부터의 거리를 계산해 intensity 필드에 저장
                 for (auto& point : result.processed_points) {
                     float distance = static_cast<float>(std::sqrt(point[0] * point[0] + point[1] * point[1] + point[2] * point[2]));
                 }
@@ -565,7 +565,7 @@ namespace DPApp {
             bimData.clear();
             bimData.reserve(numEntries);
 
-            // Iterate through GLTF files in the directory
+            // 디렉터리 내 GLTF 파일들을 순회
             int idx = 1000; // bim_id의 초기값 - 파일명에 Revit Element ID가 없는 경우 사용됨
             for (const auto& entry : std::filesystem::directory_iterator(input_path))
             {
@@ -590,11 +590,11 @@ namespace DPApp {
                 const std::string utf8FileName = util::wstring_to_utf8(data_file);
                 std::string gltf_file_name = utf8FileName;
 
-                // create new gltf_file object
+                // 새 gltf_file 객체 생성
                 GltfMesh gltf_file;
                 bimData.push_back(BimMeshInfo());
                 BimMeshInfo& singleFile = bimData.back();
-                // read gltf file and get BimInfo object1
+                // gltf 파일을 읽어 BimInfo 객체를 얻음
                 if (!gltf_file.read(gltf_file_name, singleFile, is_offset_applied, offset)) {
                     bimData.pop_back();
                     continue;
@@ -688,7 +688,7 @@ namespace DPApp {
                 // .nodes2 파일에 bim_info 저장
                 bim_info.save(bim_id, node_name, is_offset_applied, offset, filestream);
 
-                // Progress 출력
+                // 진행 상황 출력
                 processed_gltf_files++;
                 int progress = (int)((float)processed_gltf_files / total_gltf_files * 100);
                 if (processed_gltf_files % 100 == 0 || progress == 100)
@@ -731,7 +731,7 @@ namespace DPApp {
                 return false;
             }
 
-            /// Check the output folder path
+            /// 출력 폴더 경로 확인
             std::error_code ec;
             std::string* err = nullptr;
             std::filesystem::path output_path(output_file_path);
@@ -753,7 +753,7 @@ namespace DPApp {
                 return false;
             }
 
-            /// Write offset
+            /// offset 쓰기
             if (is_offset_applied)
                 result_point_cloud_file.write(reinterpret_cast<const char*>(offset), sizeof(float) * 3);
             else {
@@ -769,7 +769,7 @@ namespace DPApp {
 
             std::string line_contents;
 
-            /// Read first line
+            /// 첫 줄 읽기
             if (!std::getline(pts_file, line_contents)) {
                 std::cerr << "Failed to read the first line from the PTS file." << std::endl;
                 pts_file.close();
@@ -777,17 +777,17 @@ namespace DPApp {
                 return false;
             }
 
-            /// Check if first line is point count or data
+            /// 첫 줄이 점 개수인지 데이터인지 확인
             std::vector<std::string> token = split(line_contents, "\t, ");
             unsigned long long total_num_points = 0;
 
             if (token.size() == 1) {
-                /// First line is point count
+                /// 첫 줄이 점 개수인 경우
                 total_num_points = std::stoull(token[0]);
                 std::cout << "Total number of points recored in the first line in the file: " << total_num_points << "\n";
             }
             else if (token.size() >= 3) {
-                /// First line is data - process it
+                /// 첫 줄이 데이터인 경우 - 그대로 처리
                 for (int i = 0; i < 3; i++) {
                     double value = std::stod(token[i]);
                     buffer[i] = static_cast<float>(value);
@@ -795,7 +795,7 @@ namespace DPApp {
                 idx = 1;
             }
 
-            /// Process remaining lines
+            /// 나머지 줄들 처리
             while (std::getline(pts_file, line_contents))
             {
                 std::vector<std::string> result = split(line_contents, "\t, ");
@@ -803,17 +803,17 @@ namespace DPApp {
                     continue;
                 }
 
-                /// Just store raw values
+                /// 원본 값을 그대로 저장
                 for (unsigned int i = 0; i < 3; i++) {
                     double value = std::stod(result[i]);
                     buffer[idx * 3 + i] = static_cast<float>(value);
                 }
 
-                /// Increase the index of loaded points
+                /// 로딩된 점의 인덱스 증가
                 idx++;
 
                 if (idx == CHUNK_POINTS) {
-                    /// Apply offset in batch
+                    /// 배치 단위로 offset 적용
                     if (is_offset_applied) {
                         for (size_t i = 0; i < idx; ++i) {
                             for (size_t j = 0; j < 3; ++j) {
@@ -822,7 +822,7 @@ namespace DPApp {
                         }
                     }
 
-                    /// Update bounding box in batch
+                    /// 배치 단위로 바운딩 박스 갱신
                     cnvrt::POINT_DOUBLE point_d;
                     for (size_t i = 0; i < idx; ++i) {
                         point_d.x = buffer[i * 3 + 0];
@@ -844,10 +844,10 @@ namespace DPApp {
                 }
             }
 
-            /// Process remaining data
+            /// 나머지 데이터 처리
             if (idx > 0)
             {
-                /// Apply offset in batch
+                /// 배치 단위로 offset 적용
                 if (is_offset_applied) {
                     for (size_t i = 0; i < idx; ++i) {
                         for (size_t j = 0; j < 3; ++j) {
@@ -856,7 +856,7 @@ namespace DPApp {
                     }
                 }
 
-                /// Update bounding box in batch
+                /// 배치 단위로 바운딩 박스 갱신
                 cnvrt::POINT_DOUBLE point_d;
                 for (size_t i = 0; i < idx; ++i) {
                     point_d.x = buffer[i * 3 + 0];
@@ -897,7 +897,7 @@ namespace DPApp {
                 return false;
             }
 
-            /// Check the output folder path
+            /// 출력 폴더 경로 확인
             std::error_code ec;
             std::string* err = nullptr;
             std::filesystem::path output_path(output_file_path);
@@ -922,7 +922,7 @@ namespace DPApp {
                 return false;
             }
 
-            /// Write offset
+            /// offset 쓰기
             if (is_offset_applied)
                 result_point_cloud_file.write(reinterpret_cast<const char*>(offset), sizeof(float) * 3);
             else {
@@ -953,7 +953,7 @@ namespace DPApp {
                         buffer[idx * 3 + 1] = static_cast<float>(p.y) - offset[1];
                         buffer[idx * 3 + 2] = static_cast<float>(p.z) - offset[2];
 
-                        /// Update bounding box in batch
+                        /// 배치 단위로 바운딩 박스 갱신
                         point_d.x = buffer[idx * 3 + 0];
                         point_d.y = buffer[idx * 3 + 1];
                         point_d.z = buffer[idx * 3 + 2];
@@ -969,7 +969,7 @@ namespace DPApp {
                         buffer[idx * 3 + 1] = static_cast<float>(p.y);
                         buffer[idx * 3 + 2] = static_cast<float>(p.z);
 
-                        /// Update bounding box in batch
+                        /// 배치 단위로 바운딩 박스 갱신
                         point_d.x = buffer[idx * 3 + 0];
                         point_d.y = buffer[idx * 3 + 1];
                         point_d.z = buffer[idx * 3 + 2];
@@ -1006,7 +1006,7 @@ namespace DPApp {
     }
 
     namespace mesh {
-        /// Extract node name from a full path
+        /// 전체 경로로부터 노드 이름을 추출
         void extractNodeInfo(const std::filesystem::path& file_path,
             std::string& nodeName,
             int& bimId,
@@ -1084,7 +1084,7 @@ namespace DPApp {
             }
         }
 
-        /// Geometry and boundingbox
+        /// 지오메트리와 바운딩박스
         struct GeometryInfo {
             MBR bbox;
             size_t buffer_size;
@@ -1103,7 +1103,7 @@ namespace DPApp {
                 bool is_offset_applied = false;
                 float offset[3] = { 0.f, 0.f, 0.f };
 
-                /// compute bbox using a function in bim_info
+                /// bim_info의 함수를 이용해 bbox 계산
                 geo_info.bbox = bim_info.get_mbr(is_offset_applied, offset);
                 auto local_bbox_min = geo_info.bbox.get_min();
                 auto local_bbox_max = geo_info.bbox.get_max();
@@ -1174,7 +1174,7 @@ namespace DPApp {
                 float offset[3] = { 0.f, 0.f, 0.f };
 
                 GltfMesh gltf_file;
-                /// read gltf
+                /// gltf 읽기
                 if (!gltf_file.read(utf8FileName, currentGltf, is_offset_applied, offset)) {
                     std::cerr << "Failed to read GLTF file: " << utf8FileName << std::endl;
                     continue;
@@ -1182,7 +1182,7 @@ namespace DPApp {
 
                 extractNodeInfo(utf8FileName, currentGltf.node_name, currentGltf.bim_id, fallback_idx);
 
-                /// Bounding-box
+                /// 바운딩 박스
                 for (auto& min : currentGltf.bbox_min)
                     min = (std::numeric_limits<float>::max)();
                 for (auto& max : currentGltf.bbox_max)
@@ -1626,7 +1626,7 @@ namespace DPApp {
         }
 
         /*
-        /// Load a las file
+        /// las 파일 로딩
         bool loadLasFile(const std::string& file_path, std::shared_ptr<tree::KDTree3D>& tree)
         {
             try {
@@ -1649,7 +1649,7 @@ namespace DPApp {
                     points.emplace_back(p.x, p.y, p.z);
                 }
 
-                /// Build KD-tree
+                /// KD-tree 구축
                 std::shared_ptr<tree::PointCloud3DAdaptor> adaptor;
 
                 if (!buildKdtree3D(points, adaptor, tree, 20)) {
@@ -1691,7 +1691,7 @@ namespace DPApp {
     }/// namespace mesh
 
     namespace mesh2 {
-        /// Vertex3D: 3D vertex data
+        /// Vertex3D: 3차원 정점 데이터
         class Vertex3D
         {
         public:
@@ -1845,16 +1845,16 @@ namespace DPApp {
             std::vector<int> faceId;
         };
 
-        ///  MeshData: structure for mesh data
+        ///  MeshData: 메시 데이터를 위한 구조체
         template<class T> struct MeshData
         {
         public:
             typedef T CoordValueType;
 
-            /// Must return the number of data points
+            /// 데이터 점의 개수를 반환해야 함
             inline std::size_t kdtree_get_point_count() const { return vertices.size(); }
 
-            /// Returns the distance between the vector "p1[0:size-1]" and the data point with index "idx_p2" stored in the class:
+            /// 벡터 "p1[0:size-1]"과 클래스에 저장된 인덱스 "idx_p2"의 데이터 점 사이의 거리를 반환:
             inline T kdtree_distance(const T* p1, const size_t idx_p2, size_t size) const
             {
                 T s = 0;
@@ -1866,15 +1866,15 @@ namespace DPApp {
                 return s;
             }
 
-            /// Returns the dim'th component of the idx'th point in the class:
+            /// 클래스 내 idx번째 점의 dim번째 성분을 반환:
             inline T kdtree_get_pt(const size_t idx, int dim) const
             {
                 return vertices[idx][dim];
             }
 
-            /// Optional bounding-box computation: return false to default to a standard bbox computation loop.
-            /// Return true if the BBOX was already computed by the class and returned in "bb" so it can be avoided to redo it again.
-            /// Look at bb.size() to find out the expected dimensionality (e.g. 2 or 3 for point clouds)
+            /// 선택적 바운딩 박스 계산: false를 반환하면 표준 bbox 계산 루프를 기본으로 사용한다.
+            /// 클래스가 이미 BBOX를 계산해서 "bb"에 담아 반환했다면 true를 반환해 재계산을 피할 수 있다.
+            /// bb.size()를 보면 기대되는 차원 수를 알 수 있다 (포인트클라우드의 경우 보통 2 또는 3)
             template <class BBOX> bool kdtree_get_bbox(BBOX& /*bb*/) const
             {
                 return false;
@@ -1886,16 +1886,16 @@ namespace DPApp {
             std::vector<Vertex3D> fNormals;
         };
 
-        /// Mesh data type
+        /// 메시 데이터 타입
         using MeshDataType = MeshData<double>;
 
-        /// KD Tree type to use for the mesh node data
+        /// 메시 노드 데이터에 사용할 KD-Tree 타입
         using KDTree = nanoflann::KDTreeSingleIndexAdaptor<nanoflann::L2_Simple_Adaptor<MeshDataType::CoordValueType, MeshDataType>, MeshDataType, 3>;
 
-        /// data dimension
+        /// 데이터 차원
         const std::size_t dimension = 3;
 
-        /// Pseudo point type
+        /// 가상점(pseudo point) 타입
         enum class PSEUDOTYPE { NONE = 0, CENTROID = 1, MIDPOINT = 2 };
 
         class SSMFlann
@@ -1904,14 +1904,14 @@ namespace DPApp {
             SSMFlann(const double maxLength = 0.0, const PSEUDOTYPE pType = PSEUDOTYPE::MIDPOINT);
 
             /**setNumberOfPoints
-            *@brief resize vertex data vector
-            *@param size : vertex data size (number of vertices)
+            *@brief 정점 데이터 벡터 크기 조정
+            *@param size : 정점 데이터 크기 (정점 개수)
             */
             void setNumberOfPoints(const unsigned int size);
 
             /**setVertex
-            *@brief add a vertex without checking duplicated points
-            *@param index : vertex index
+            *@brief 중복 점 검사 없이 정점 추가
+            *@param index : 정점 인덱스
             *@param x
             *@param y
             *@param z
@@ -1920,65 +1920,65 @@ namespace DPApp {
             bool setVertex(const unsigned int index, const double x, const double y, const double z);
 
             /**setNumberOfFaces
-            *@brief resize face data vector
-            *@param size : number of faces
+            *@brief face 데이터 벡터 크기 조정
+            *@param size : face 개수
             */
             void setNumberOfFaces(const unsigned int size);
 
             /**setPseudoType
-            *@brief set the type of generating pseudo points
-            *@param pType: type
+            *@brief 가상점 생성 방식 설정
+            *@param pType: 타입
             */
             void setPseudoType(const PSEUDOTYPE pType);
 
             /**setFace
-            *@brief add a face
-            *@param faceIndex : face index
-            *@param vtxIndex : indices of vertices consisting a face
-            *@param fnx : face normal vector x coordinate
-            *@param fny : face normal vector y coordinate
-            *@param fnz : face normal vector z coordinate
+            *@brief face 추가
+            *@param faceIndex : face 인덱스
+            *@param vtxIndex : face를 구성하는 정점들의 인덱스
+            *@param fnx : face normal 벡터의 x 좌표
+            *@param fny : face normal 벡터의 y 좌표
+            *@param fnz : face normal 벡터의 z 좌표
             *@return bool
             */
             bool setFace(const unsigned int faceIndex, const std::vector<unsigned int>& vtxIndex);
 
             /**setFaceNormal
-            *@brief add a face normal vector
-            *@param faceIndex : face index
-            *@param fnx : face normal vector x coordinate
-            *@param fny : face normal vector y coordinate
-            *@param fnz : face normal vector z coordinate
+            *@brief face normal 벡터 추가
+            *@param faceIndex : face 인덱스
+            *@param fnx : face normal 벡터의 x 좌표
+            *@param fny : face normal 벡터의 y 좌표
+            *@param fnz : face normal 벡터의 z 좌표
             *@return bool
             */
             bool setFaceNormal(const unsigned int faceIndex, const double fnx, const double fny, const double fnz);
 
             /**getFaceNormal
-            *@brief get a face normal vector
-            *@param faceIndex : face index
+            *@brief face normal 벡터 조회
+            *@param faceIndex : face 인덱스
             *@return Vertex3D
             */
             Vertex3D getFaceNormal(const unsigned int faceIndex) const;
 
             /**clearVertexData
-            *@brief clear vertex data
+            *@brief 정점 데이터 초기화
             */
             void clearVertexData();
 
             /**buildTree
             *@brief buildTree
-            *@param maxLeaf max number of leaves of kdtree
+            *@param maxLeaf kdtree의 최대 leaf 개수
             */
             void buildTree(const unsigned int maxLeaf = 20);
 
             /**buildTree
-            *@brief import index info from a file
-            *@param maxLeaf max number of leaves of kdtree
+            *@brief 파일로부터 인덱스 정보를 불러옴
+            *@param maxLeaf kdtree의 최대 leaf 개수
             *@return bool
             */
             bool buildTree(const std::string& idxFilePath, const unsigned int maxLeaf = 20);
 
             /**search
-            *@brief search closest vertices
+            *@brief 가장 가까운 정점들 탐색
             */
             bool search(const double x0, const double y0, const double z0,
                 std::vector<double>& distances,
@@ -1987,15 +1987,15 @@ namespace DPApp {
                 const double distThreshold = 0.0) const;
 
             /**raytrace
-            *@brief find the closest point along the given ray
-            *@param sx: x coordinate of a start point of a ray
-            *@param sy: y coordinate of a start point of a ray
-            *@param sz: z coordinate of a start point of a ray
-            *@param ex: x coordinate of a end point of a ray
-            *@param ey: y coordinate of a end point of a ray
-            *@param ez: z coordinate of a end point of a ray
-            *@param radius: search radius
-            *@param foundPts: point indices and distances, result values
+            *@brief 주어진 광선(ray)을 따라 가장 가까운 점을 찾음
+            *@param sx: 광선 시작점의 x 좌표
+            *@param sy: 광선 시작점의 y 좌표
+            *@param sz: 광선 시작점의 z 좌표
+            *@param ex: 광선 끝점의 x 좌표
+            *@param ey: 광선 끝점의 y 좌표
+            *@param ez: 광선 끝점의 z 좌표
+            *@param radius: 탐색 반경
+            *@param foundPts: 점 인덱스와 거리, 결과값
             *@return bool
             */
             bool raytrace(const double sx, const double sy, const double sz,
@@ -2004,7 +2004,7 @@ namespace DPApp {
                 std::vector<std::pair<size_t, double>>& foundPts);
 
             /**getVertex
-            *@param vtxIndex : vertex index
+            *@param vtxIndex : 정점 인덱스
             */
             Vertex3D getVertex(const std::size_t vtxIndex) const;
 
@@ -2029,74 +2029,74 @@ namespace DPApp {
             void setDistThreshold(const double newDistTh) { this->maxDist = newDistTh; }
 
             /**exportIndex
-            *@param idxFilePath : index file path
+            *@param idxFilePath : 인덱스 파일 경로
             *@return bool
             */
             bool exportIndex(const std::string& idxFilePath);
 
         private:
             /**defineFace
-            *@brief define face with vertex indices
-            *@param faceIndex face index
-            *@param vertexIndices vertex indices in a face
+            *@brief 정점 인덱스들로 face를 정의
+            *@param faceIndex face 인덱스
+            *@param vertexIndices face를 구성하는 정점 인덱스들
             *@return bool
             */
             bool defineFace(const unsigned int faceIndex, const std::vector<unsigned int>& vertexIndices);
 
             /**computeCentroid
-            *@param vertices : vertices consisting a face
-            *@return Vertex3D : centroid 3D coordinates
+            *@param vertices : face를 구성하는 정점들
+            *@return Vertex3D : 중심점(centroid)의 3차원 좌표
             */
             Vertex3D computeCentroid(const std::vector<Vertex3D>& vertices);
 
             /**checkDist2Center
-            *@param vertices : vertices consisting a face
-            *@param centroid : centroid of a polygon
-            *@return bool : [false] there is a too long side (>maxSide) in the vertices defining a face
+            *@param vertices : face를 구성하는 정점들
+            *@param centroid : 다각형의 중심점
+            *@return bool : [false] face를 정의하는 정점들 중 너무 긴 변(>maxSide)이 있음
             */
             bool checkDist2Center(const std::vector<Vertex3D>& vertices, const Vertex3D& centroid);
 
             /**defineSubTriangles
-            *@brief define sub-polygons (triangles)
-            *@param vertices : vertices consisting a face
-            *@param centroid : centroid of a polygon
+            *@brief 하위 다각형(삼각형) 정의
+            *@param vertices : face를 구성하는 정점들
+            *@param centroid : 다각형의 중심점
             */
             std::vector< std::vector<Vertex3D>> defineSubTriangles(const std::vector<Vertex3D>& vertices, const Vertex3D& centroid);
 
-            /**insertPseudoPoint: generate pseudo points in a face with centroid points
-            *@param vertexIndices : vertex indices consisting a face
-            *@param faceIndex : face index
+            /**insertPseudoPoint: 중심점을 이용해 face 내부에 가상점 생성
+            *@param vertexIndices : face를 구성하는 정점 인덱스들
+            *@param faceIndex : face 인덱스
             */
             void insertPseudoPoint(const std::vector<unsigned int>& vertexIndices, const unsigned int faceIndex);
 
-            /**insertPseudoPointMid: generate pseudo points in a face with centroid points
-            *@param vertexIndices : vertex indices consisting a face
-            *@param faceIndex : face index
+            /**insertPseudoPointMid: 중심점을 이용해 face 내부에 가상점 생성
+            *@param vertexIndices : face를 구성하는 정점 인덱스들
+            *@param faceIndex : face 인덱스
             */
             void insertPseudoPointMid(const std::vector<unsigned int>& vertexIndices, const unsigned int faceIndex);
 
-            /**addMidPts: add mid points to a given line
-            *@param p0 : the start point of a line
-            *@param p1 : the end point of a line
-            *@param maxLength : maximum length threshold
-            *@param pseudoPts : bucket for storing pseudo point (midPts)
-            *@return bool: if true, the line is large, else, short
+            /**addMidPts: 주어진 선분에 중간점 추가
+            *@param p0 : 선분의 시작점
+            *@param p1 : 선분의 끝점
+            *@param maxLength : 최대 길이 임계값
+            *@param pseudoPts : 가상점(midPts)을 담을 버킷
+            *@return bool: true면 선분이 김, false면 짧음
             */
             bool addMidPts(const Vertex3D& p0, const Vertex3D& p1, const double maxLength, std::vector<Vertex3D>& pseudoPts);
 
-            /**divideTriangle: divide a triangle into three sub-triangles
-            *@param triVtx : three vertices
-            *@param maxLength : maximum length threshold
-            *@param pseudoPts : bucket for storing pseudo point (midPts)
-            *@param centroid : center of a triangle
-            *@return bool: if true, triangle is large, else, small
+            /**divideTriangle: 삼각형을 세 개의 하위 삼각형으로 분할
+            *@param triVtx : 세 정점
+            *@param maxLength : 최대 길이 임계값
+            *@param pseudoPts : 가상점(midPts)을 담을 버킷
+            *@param centroid : 삼각형의 중심
+            *@return bool: true면 삼각형이 큼, false면 작음
             */
             bool divideTriangle(const std::vector<Vertex3D>& triVtx, const double maxLength, std::vector<Vertex3D>& pseudoPts, Vertex3D& centroid);
 
-            /**divideFace: divide a face (polygon)
-            *@param faceVtx : face vertices
-            *@param maxLength : maximum length threshold
-            *@param pseudoPts : bucket for storing pseudo point (midPts)
+            /**divideFace: face(다각형) 분할
+            *@param faceVtx : face 정점들
+            *@param maxLength : 최대 길이 임계값
+            *@param pseudoPts : 가상점(midPts)을 담을 버킷
             */
             void divideFace(const std::vector<Vertex3D>& faceVtx, const double maxLength, std::vector<Vertex3D>& pseudoPts);
 
@@ -2143,8 +2143,8 @@ namespace DPApp {
         }
 
         /**setPseudoType
-        *@brief set the type of generating pseudo points
-        *@param pType: type
+        *@brief 가상점 생성 방식 설정
+        *@param pType: 타입
         */
         void SSMFlann::setPseudoType(const PSEUDOTYPE pType)
         {
@@ -2229,7 +2229,7 @@ namespace DPApp {
                     meshData.vertices[index].addFaceId(faceIndex);
                 }
 
-                /// divide a face into sub-triangles
+                /// face를 하위 삼각형들로 분할
                 switch (this->pseudoType)
                 {
                 case PSEUDOTYPE::CENTROID:
@@ -2255,12 +2255,12 @@ namespace DPApp {
         void SSMFlann::buildTree(const unsigned int maxLeaf)
         {
             try {
-                /// Add additional pseudo points
+                /// 추가 가상점들을 더함
                 size_t totalSize = meshData.vertices.size() + pseudoPts.size();
                 meshData.vertices.reserve(totalSize);
                 meshData.vertices.insert(meshData.vertices.end(), pseudoPts.begin(), pseudoPts.end());
 
-                /// Larger maxLeaf result in fast search, but takes long time for tree construction
+                /// maxLeaf가 클수록 탐색은 빨라지지만 트리 구축에 시간이 오래 걸림
                 size_t dimension = 3;
                 tree.reset(new KDTree(dimension, meshData, nanoflann::KDTreeSingleIndexAdaptorParams(maxLeaf)));
                 tree->buildIndex();
@@ -2273,10 +2273,10 @@ namespace DPApp {
         bool SSMFlann::buildTree(const std::string& idxFilePath, const unsigned int maxLeaf)
         {
             try {
-                /// Add additional pseudo points
+                /// 추가 가상점들을 더함
                 meshData.vertices.insert(meshData.vertices.end(), pseudoPts.begin(), pseudoPts.end());
 
-                /// Larger maxLeaf result in fast search, but takes long time for tree construction
+                /// maxLeaf가 클수록 탐색은 빨라지지만 트리 구축에 시간이 오래 걸림
                 size_t dimension = 3;
                 tree.reset(new KDTree(dimension, meshData, nanoflann::KDTreeSingleIndexAdaptorParams(maxLeaf)));
 
@@ -2322,15 +2322,15 @@ namespace DPApp {
         }
 
         /**raytrace
-        *@brief find the closest point along the given ray
-        *@param sx: x coordinate of a start point of a ray
-        *@param sy: y coordinate of a start point of a ray
-        *@param sz: z coordinate of a start point of a ray
-        *@param ex: x coordinate of a end point of a ray
-        *@param ey: y coordinate of a end point of a ray
-        *@param ez: z coordinate of a end point of a ray
-        *@param radius: search radius
-        *@param foundPts: point indices and distances, result values
+        *@brief 주어진 광선(ray)을 따라 가장 가까운 점을 찾음
+        *@param sx: 광선 시작점의 x 좌표
+        *@param sy: 광선 시작점의 y 좌표
+        *@param sz: 광선 시작점의 z 좌표
+        *@param ex: 광선 끝점의 x 좌표
+        *@param ey: 광선 끝점의 y 좌표
+        *@param ez: 광선 끝점의 z 좌표
+        *@param radius: 탐색 반경
+        *@param foundPts: 점 인덱스와 거리, 결과값
         *@return bool
         */
         bool SSMFlann::raytrace(const double sx, const double sy, const double sz,
@@ -2359,7 +2359,7 @@ namespace DPApp {
 
                 MeshDataType::CoordValueType searchPt[] = { sx + nx * fwdDist, sy + ny * fwdDist, sz + nz * fwdDist };
                 nanoflann::SearchParams params;
-                /// Search nearest point in radius
+                /// 반경 내에서 가장 가까운 점 탐색
                 const size_t nMatches = tree->radiusSearch(&searchPt[0], radius, foundPts, params);
                 if (nMatches > 0)
                     return true;
@@ -2375,8 +2375,8 @@ namespace DPApp {
         }
 
         /**computeCentroid
-        *@param vertices : vertices consisting a face
-        *@return Vertex3D : centroid 3D coordinates
+        *@param vertices : face를 구성하는 정점들
+        *@return Vertex3D : 중심점(centroid)의 3차원 좌표
         */
         Vertex3D SSMFlann::computeCentroid(const std::vector<Vertex3D>& vertices)
         {
@@ -2394,9 +2394,9 @@ namespace DPApp {
         }
 
         /**checkDist2Center
-        *@param vertices : vertices consisting a face
-        *@param centroid : centroid of a polygon
-        *@return bool : [false] there is a too long side (>maxSide) in the vertices defining a face
+        *@param vertices : face를 구성하는 정점들
+        *@param centroid : 다각형의 중심점
+        *@return bool : [false] face를 정의하는 정점들 중 너무 긴 변(>maxSide)이 있음
         */
         bool SSMFlann::checkDist2Center(const std::vector<Vertex3D>& vertices, const Vertex3D& centroid)
         {
@@ -2414,9 +2414,9 @@ namespace DPApp {
         }
 
         /**defineSubTriangles
-        *@brief define sub-polygons (triangles)
-        *@param vertices : vertices consisting a face
-        *@param centroid : centroid of a polygon
+        *@brief 하위 다각형(삼각형) 정의
+        *@param vertices : face를 구성하는 정점들
+        *@param centroid : 다각형의 중심점
         */
         std::vector< std::vector<Vertex3D>> SSMFlann::defineSubTriangles(const std::vector<Vertex3D>& vertices, const Vertex3D& centroid)
         {
@@ -2436,16 +2436,16 @@ namespace DPApp {
             return triangles;
         }
 
-        /**insertPseudoPoint: generate pseudo points in a face with centroid points
-        *@param vertexIndices : vertex indices consisting a face
-        *@param faceIndex : face index
+        /**insertPseudoPoint: 중심점을 이용해 face 내부에 가상점 생성
+        *@param vertexIndices : face를 구성하는 정점 인덱스들
+        *@param faceIndex : face 인덱스
         */
         void SSMFlann::insertPseudoPoint(const std::vector<unsigned int>& vertexIndices, const unsigned int faceIndex)
         {
             if (this->maxDist < std::numeric_limits<double>::epsilon())
                 return;
 
-            /// Collect vertices using indices
+            /// 인덱스들로 정점 수집
             std::vector<std::vector<Vertex3D>> verticesGroup(1);
             verticesGroup[0].reserve(vertexIndices.size());
             for (auto idx : vertexIndices)
@@ -2453,29 +2453,29 @@ namespace DPApp {
 
             std::vector<std::vector<Vertex3D>> newCollectedVertices;
 
-            /// Check size of a face and put centroid points if need
+            /// face 크기를 확인하고 필요하면 중심점을 삽입
             do
             {
-                /// New polygons defined by centroid points
+                /// 중심점으로 새로 정의되는 다각형들
                 newCollectedVertices.clear();
 
                 for (auto vertices : verticesGroup)
                 {
-                    /// compute a centroid
+                    /// 중심점 계산
                     Vertex3D centroid = computeCentroid(vertices);
 
-                    /// check if there is a long side
+                    /// 너무 긴 변이 있는지 확인
                     if (checkDist2Center(vertices, centroid))
                         continue;
 
-                    /// Assign face index and save the centroid (pseudoPts)
+                    /// face 인덱스를 부여하고 중심점(pseudoPts)을 저장
                     centroid.addFaceId(faceIndex);
                     pseudoPts.push_back(centroid);
 
-                    /// Define new sub-triangles
+                    /// 새로운 하위 삼각형 정의
                     std::vector<std::vector<Vertex3D>> triangles = defineSubTriangles(vertices, centroid);
 
-                    /// Collect newly defined triangle
+                    /// 새로 정의된 삼각형 수집
                     newCollectedVertices.insert(newCollectedVertices.end(), triangles.begin(), triangles.end());
                 }
 
@@ -2487,22 +2487,22 @@ namespace DPApp {
             } while (1);
         }
 
-        /**insertPseudoPointMid: generate pseudo points
-        *@param vertexIndices : vertex indices consisting a face
-        *@param faceIndex : face index
+        /**insertPseudoPointMid: 가상점 생성
+        *@param vertexIndices : face를 구성하는 정점 인덱스들
+        *@param faceIndex : face 인덱스
         */
         void SSMFlann::insertPseudoPointMid(const std::vector<unsigned int>& vertexIndices, const unsigned int faceIndex)
         {
             if (this->maxDist < std::numeric_limits<double>::epsilon())
                 return;
 
-            /// Collect vertices for a face
+            /// face를 위한 정점 수집
             std::vector<Vertex3D> faceVtx;
             faceVtx.reserve(vertexIndices.size());
             for (auto idx : vertexIndices)
                 faceVtx.push_back(meshData.vertices[idx]);
 
-            /// Generate pseudo points by dividing a face into sub-triangles
+            /// face를 하위 삼각형들로 나누어 가상점 생성
             std::vector<Vertex3D> midPts;
             midPts.reserve(vertexIndices.size() * 10);
             divideFace(faceVtx, this->maxDist, midPts);
@@ -2512,19 +2512,19 @@ namespace DPApp {
             pseudoPts.insert(pseudoPts.end(), midPts.begin(), midPts.end());
         }
 
-        /**addMidPts: add mid points to a given line
-        *@param p0 : the start point of a line
-        *@param p1 : the end point of a line
-        *@param maxLength : maximum length threshold
-        *@param pseudoPts : bucket for storing pseudo point (midPts)
+        /**addMidPts: 주어진 선분에 중간점 추가
+        *@param p0 : 선분의 시작점
+        *@param p1 : 선분의 끝점
+        *@param maxLength : 최대 길이 임계값
+        *@param pseudoPts : 가상점(midPts)을 담을 버킷
         *@param faceId: face Id
-        *@return bool: if true, the line is large, else, short
+        *@return bool: true면 선분이 김, false면 짧음
         */
         bool SSMFlann::addMidPts(const Vertex3D& p0, const Vertex3D& p1, const double maxLength, std::vector<Vertex3D>& pseudoPts)
         {
             std::vector<Vertex3D> addedPts;
 
-            /// check distances
+            /// 거리 확인
             Vertex3D v = p1 - p0;
             auto distSq = v.x() * v.x() + v.y() * v.y() + v.z() * v.z();
             auto maxLengthSq = maxLength * maxLength;
@@ -2552,16 +2552,16 @@ namespace DPApp {
                 return false;
         }
 
-        /**divideTriangle: divide a triangle into three sub-triangles
-        *@param triVtx : three vertices
-        *@param maxLength : maximum length threshold
-        *@param pseudoPts : bucket for storing pseudo point (midPts)
-        *@param centroid : center of a triangle
-        *@return bool: if true, triangle is large, else, small
+        /**divideTriangle: 삼각형을 세 개의 하위 삼각형으로 분할
+        *@param triVtx : 세 정점
+        *@param maxLength : 최대 길이 임계값
+        *@param pseudoPts : 가상점(midPts)을 담을 버킷
+        *@param centroid : 삼각형의 중심
+        *@return bool: true면 삼각형이 큼, false면 작음
         */
         bool SSMFlann::divideTriangle(const std::vector<Vertex3D>& triVtx, const double maxLength, std::vector<Vertex3D>& pseudoPts, Vertex3D& centroid)
         {
-            /// compute a centroid
+            /// 중심점 계산
             centroid = Vertex3D((triVtx[0].x() + triVtx[1].x() + triVtx[2].x()) / 3.,
                 (triVtx[0].y() + triVtx[1].y() + triVtx[2].y()) / 3.,
                 (triVtx[0].z() + triVtx[1].z() + triVtx[2].z()) / 3.);
@@ -2569,7 +2569,7 @@ namespace DPApp {
             std::vector<Vertex3D> midPts;
             bool longSide = true;
 
-            /// Mid-points
+            /// 중간점
             if (!addMidPts(triVtx[0], centroid, maxLength, midPts))
                 longSide = false;
             if (!addMidPts(triVtx[1], centroid, maxLength, midPts))
@@ -2583,26 +2583,26 @@ namespace DPApp {
             return longSide;
         }
 
-        /**divideFace: divide a face (polygon)
-        *@param faceVtx : face vertices
-        *@param maxLength : maximum length threshold
-        *@param pseudoPts : bucket for storing pseudo point (midPts)
+        /**divideFace: face(다각형) 분할
+        *@param faceVtx : face 정점들
+        *@param maxLength : 최대 길이 임계값
+        *@param pseudoPts : 가상점(midPts)을 담을 버킷
         */
         void SSMFlann::divideFace(const std::vector<Vertex3D>& faceVtx, const double maxLength, std::vector<Vertex3D>& pseudoPts)
         {
             if (faceVtx.size() < 3)
                 return;
 
-            Vertex3D centroid; /// Centroid
+            Vertex3D centroid; /// 중심점
 
-            /// Divide sides
+            /// 변(side) 분할
             for (unsigned int i = 0; i < faceVtx.size(); ++i)
             {
                 unsigned int j;
                 if (i == faceVtx.size() - 1) j = 0;
                 else j = i + 1;
 
-                /// Add pseudo points to the inside
+                /// 내부에 가상점 추가
                 addMidPts(faceVtx[i], faceVtx[j], maxLength, pseudoPts);
 
                 centroid += faceVtx[i];
@@ -2630,15 +2630,15 @@ namespace DPApp {
             if (!bigSize)
                 return;
 
-            /// First sub-triangles from a face
+            /// face로부터의 첫 하위 삼각형들
             std::vector<std::vector<Vertex3D>> subTri(faceVtx.size());
 
             for (unsigned int i = 0; i < faceVtx.size(); ++i)
             {
-                /// Add pseudo points to the inside
+                /// 내부에 가상점 추가
                 addMidPts(centroid, faceVtx[i], maxLength, pseudoPts);
 
-                /// Add pseudo point to the sides
+                /// 변에 가상점 추가
                 Vertex3D side;
                 unsigned int j;
                 if (i == faceVtx.size() - 1) j = 0;
@@ -2652,7 +2652,7 @@ namespace DPApp {
                 subTri[i] = tri;
             }
 
-            /// Check sub-triangles
+            /// 하위 삼각형 확인
             unsigned int count = 0;
             do
             {
@@ -2756,7 +2756,7 @@ namespace DPApp {
                 float offset[3] = { 0.f, 0.f, 0.f };
 
                 GltfMesh gltf_file;
-                /// read gltf
+                /// gltf 읽기
                 if (!gltf_file.read(utf8FileName, currentGltf, is_offset_applied, offset)) {
                     std::cerr << "Failed to read GLTF file: " << utf8FileName << std::endl;
                     continue;
@@ -2764,7 +2764,7 @@ namespace DPApp {
 
                 mesh::extractNodeInfo(utf8FileName, currentGltf.node_name, currentGltf.bim_id, fallback_idx);
 
-                /// Bounding-box
+                /// 바운딩 박스
                 for (auto& min : currentGltf.bbox_min)
                     min = (std::numeric_limits<float>::max)();
                 for (auto& max : currentGltf.bbox_max)
@@ -2786,26 +2786,26 @@ namespace DPApp {
         }
     }
 
-    /// BIM–PointCloud processing functions
+    /// BIM–포인트클라우드 처리 함수들
     namespace BimPcProcessors {
 
         ///
-        /// @brief BIM–PointCloud processing function (Dummy)
-        /// TODO: Actual processing logic will be implemented later
+        /// @brief BIM–포인트클라우드 처리 함수
         ///
-        /// @param task Task information to process
-        /// @param chunk BimPcChunk data (PointCloud + Mesh)
-        /// @return BimPcResult Processing result
+        /// @param task 처리할 태스크 정보
+        /// @param chunk BimPcChunk 데이터 (포인트클라우드 + 메시)
+        /// @return BimPcResult 처리 결과
         ///
-        /// Distance threshold (meters) used to classify a point as "within tolerance" of the
-        /// BIM mesh surface. Chosen as a typical construction QC tolerance. Not currently
-        /// exposed via ProcessingTask::parameters -- if per-task configurability is needed,
-        /// thread it through the same way IcpConfig is threaded through icp::IcpChunk.
+        /// 점이 BIM 메시 표면에 "공차 이내(within tolerance)"로 분류되는 기준이 되는
+        /// 거리 임계값(미터). 일반적인 시공 품질검사(QC) 공차값으로 선택되었다.
+        /// 현재는 ProcessingTask::parameters를 통해 노출되지 않는다 -- 태스크별로
+        /// 설정 가능하게 만들 필요가 있다면, icp::IcpChunk에 IcpConfig가 전달되는
+        /// 방식과 동일하게 구현하면 된다.
         constexpr double kBimPcWithinThresholdMeters = 0.05;
 
-        /// Grid spacing (meters) used to sample the mesh surface into pseudo points for
-        /// nearest-neighbor search. Matches the default used by ICP registration
-        /// (see IcpConfig::pseudoPointGridSize in include/IcpTypes.h).
+        /// 최근접 이웃 탐색을 위해 메시 표면을 가상점으로 샘플링할 때 사용하는
+        /// 격자 간격(미터). ICP 정합에서 사용하는 기본값과 일치한다
+        /// (include/IcpTypes.h의 IcpConfig::pseudoPointGridSize 참고).
         constexpr double kBimPcPseudoPointGridSize = 0.1;
 
         BimPcResult processBimPc(const ProcessingTask& task, const BimPcChunk& chunk) {
@@ -2825,10 +2825,10 @@ namespace DPApp {
                 result.total_points_processed = static_cast<uint32_t>(chunk.points.size());
                 result.total_faces_processed = static_cast<uint32_t>(chunk.bim.faces.size());
 
-                /// chunk.points is stored float, shifted by (offsetX, offsetY, offsetZ) -- widen
-                /// to double and add the offset back exactly once, here, so the rest of this
-                /// function compares against chunk.bim (always absolute, double) exactly as
-                /// before this offset-rebase optimization existed.
+                /// chunk.points는 (offsetX, offsetY, offsetZ)만큼 이동된 float로 저장되어
+                /// 있다 -- 여기서 딱 한 번 double로 승격시키고 offset을 다시 더해서, 이
+                /// 함수의 나머지 부분이 이 offset-재배치 최적화가 도입되기 전과 완전히
+                /// 동일하게 chunk.bim(항상 절대좌표, double)과 비교하도록 한다.
                 std::vector<std::array<double, 3>> pointsAbsolute;
                 pointsAbsolute.reserve(chunk.points.size());
                 for (const auto& p : chunk.points) {
@@ -2849,8 +2849,8 @@ namespace DPApp {
                     std::cout << "No points or faces to process; returning empty result." << std::endl;
                 }
                 else {
-                    /// 1. Sample the mesh surface into pseudo points (same grid-sampling
-                    /// approach used by ICP registration; see PseudoPointGenerator.hpp).
+                    /// 1. 메시 표면을 가상점으로 샘플링 (ICP 정합에서 사용하는 것과 동일한
+                    /// 격자 샘플링 방식; PseudoPointGenerator.hpp 참고).
                     std::vector<std::array<double, 3>> pseudoPoints;
                     std::vector<size_t> faceIdx;
                     std::vector<std::array<double, 3>> facePts;
@@ -2863,19 +2863,19 @@ namespace DPApp {
                             "No pseudo points could be generated from the mesh (degenerate faces?)");
                     }
 
-                    /// 2. Build a KD-Tree over the pseudo points for fast nearest-neighbor search.
+                    /// 2. 빠른 최근접 이웃 탐색을 위해 가상점들 위에 KD-Tree를 구축.
                     icp::PointCloudAdaptor adaptor(pseudoPoints);
                     icp::KdTree3D tree(3, adaptor, nanoflann::KDTreeSingleIndexAdaptorParams(50));
                     tree.buildIndex();
 
-                    /// 3. For every input point, use the KD-Tree over pseudo points to narrow
-                    /// down a handful of candidate faces (the ones nearby pseudo points came
-                    /// from), then compute the *exact* point-to-triangle distance to each
-                    /// candidate and keep the minimum. This reports true point-to-surface
-                    /// distance rather than distance to the nearest sampled pseudo point --
-                    /// using only the nearest pseudo point would bias distances by up to
-                    /// roughly the grid spacing (kBimPcPseudoPointGridSize), which matters
-                    /// right at the QC threshold below.
+                    /// 3. 입력된 각 점에 대해, 가상점 위의 KD-Tree를 이용해 후보 face
+                    /// 몇 개(그 근처 가상점들이 유래한 face들)로 범위를 좁힌 뒤, 각 후보에
+                    /// 대해 *정확한* point-to-triangle 거리를 계산하고 그 중 최솟값을
+                    /// 취한다. 이렇게 하면 (샘플링된 가상점 중 가장 가까운 것까지의 거리가
+                    /// 아니라) 실제 표면까지의 참(true) 거리를 보고하게 된다 -- 가장 가까운
+                    /// 가상점만 사용하면 격자 간격(kBimPcPseudoPointGridSize) 정도만큼
+                    /// 거리에 편차가 생길 수 있는데, 이는 바로 아래의 QC 임계값 판정에서
+                    /// 중요하게 작용한다.
                     constexpr size_t kCandidateNeighbors = 8;
                     const size_t numCandidates = (std::min)(kCandidateNeighbors, pseudoPoints.size());
 
@@ -2905,7 +2905,7 @@ namespace DPApp {
 
                         for (size_t k = 0; k < numCandidates; ++k) {
                             size_t face = faceIdx[candidateIdx[k]];
-                            if (face == lastFace) continue; /// candidates are often on the same face; skip repeats
+                            if (face == lastFace) continue; /// 후보들이 같은 face에 속하는 경우가 많으므로 중복은 건너뜀
                             lastFace = face;
 
                             const auto& f = chunk.bim.faces[face];

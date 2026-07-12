@@ -28,6 +28,8 @@ bool loadLasFile(const std::string& file_path, std::vector<chunkpc::PointCloudCh
         size_t total_points_loaded = 0;
         uint32_t chunk_counter = 0;
 
+        // 파일 전체를 한 번에 메모리로 읽지 않고, max_points_per_chunk 단위(범위)로
+        // 스트리밍하며 순차적으로 청크를 만든다 (대용량 LAS 파일 처리 시 메모리 절약)
         for (size_t start = 0; start < total_num_points; start += max_points_per_chunk) {
             std::size_t end = (std::min)(start + max_points_per_chunk, total_num_points);
             if (!lasReader.loadPointRange(start, end)) {
@@ -48,7 +50,7 @@ bool loadLasFile(const std::string& file_path, std::vector<chunkpc::PointCloudCh
             total_points_loaded += current_chunk.points.size();
             chunk_counter++;
 
-            // Progress reporting (every chunk)
+            // 진행 상황 출력 (10개 청크마다)
             if (chunk_counter % 10 == 0) {
                 std::cout << "Loaded chunks: " << chunk_counter
                     << ", points: " << total_points_loaded << std::endl;

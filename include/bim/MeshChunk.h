@@ -8,6 +8,9 @@
 #include <cstdint>   // for uint64_t, uint32_t
 
 
+/// BIM 부재(요소) 단위로 네트워크 청크에 담아 전송하기 위한 메시 자료구조.
+/// pctree::XYZPoint(float 기반)로 정점을 표현하며, Face(include/bim/face.h)보다
+/// 가벼운 "전송 전용" 표현이다.
 namespace chunkbim {
     struct FaceVtx {
         pctree::XYZPoint normal;
@@ -31,7 +34,7 @@ namespace chunkbim {
         std::string name;
         int id;
 
-        /// Bounding box
+        /// 바운딩 박스
         double min_x, min_y, min_z;
         double max_x, max_y, max_z;
 
@@ -42,7 +45,7 @@ namespace chunkbim {
                 return;
             }
 
-            /// Initialize with first vertex of first face
+            /// 첫 번째 face의 첫 번째 정점으로 초기화
             min_x = max_x = faces[0].vertices[0][0];
             min_y = max_y = faces[0].vertices[0][1];
             min_z = max_z = faces[0].vertices[0][2];
@@ -61,6 +64,8 @@ namespace chunkbim {
     };
 }
 
+/// 포인트클라우드(LAS 등) 청크를 위한 자료구조. 위 chunkbim(BIM 메시)과는 별개로,
+/// 포인트클라우드 데이터를 담아 전송하는 용도다.
 namespace chunkpc {
     struct PointCloudHeader {
         std::string filename;
@@ -77,13 +82,13 @@ namespace chunkpc {
         uint32_t chunk_id;
         PointCloudHeader header;
 
-        /// Bounding box
+        /// 바운딩 박스
         double min_x, min_y, min_z;
         double max_x, max_y, max_z;
 
         PointCloudChunk() : chunk_id(0), min_x(0), min_y(0), min_z(0), max_x(0), max_y(0), max_z(0) {}
 
-        /// Compute bounding box
+        /// 바운딩 박스 계산
         void calculateBounds() {
             if (points.empty()) {
                 min_x = min_y = min_z = 0;
@@ -106,7 +111,7 @@ namespace chunkpc {
             }
         }
 
-        /// Get chunk size in byte
+        /// 청크 크기(바이트)를 반환
         size_t getSize() const {
             return sizeof(PointCloudChunk) + points.size() * sizeof(pctree::XYZPoint);
         }

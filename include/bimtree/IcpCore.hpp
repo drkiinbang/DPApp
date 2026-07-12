@@ -1,18 +1,18 @@
 #pragma once
 
 /// ============================================================================
-/// IcpCore.hpp - ICP Core Algorithm Implementation
+/// IcpCore.hpp - ICP 핵심 알고리즘 구현
 /// ============================================================================
-/// 
-/// This header provides the core ICP algorithm components:
-/// - Correspondence finding using KD-Tree (nanoflann)
-/// - Outlier rejection (MAD-based)
-/// - Rigid transformation estimation using SVD (Eigen)
-/// - RMSE calculation
-/// - Point cloud transformation and downsampling
-/// - Main ICP iteration loop
-/// 
-/// Location: F:\repository\DPApp\include\bimtree\IcpCore.hpp
+///
+/// 이 헤더는 ICP 알고리즘의 핵심 구성요소들을 제공한다:
+/// - KD-Tree(nanoflann)를 이용한 대응점(correspondence) 탐색
+/// - 이상치(outlier) 제거 (MAD 기반)
+/// - SVD(Eigen)를 이용한 강체 변환(rigid transformation) 추정
+/// - RMSE 계산
+/// - 포인트클라우드 변환 및 다운샘플링
+/// - ICP 메인 반복 루프
+///
+/// 위치: D:\repository\DPApp_II\include\bimtree\IcpCore.hpp
 /// ============================================================================
 
 #include "../IcpTypes.h"
@@ -43,10 +43,10 @@ const unsigned int uknw = 6;
 namespace icp {
 
     //=========================================================================
-    // Point Cloud Adapter for nanoflann KD-Tree
+    // nanoflann KD-Tree용 포인트클라우드 어댑터
     //=========================================================================
 
-    /// Adapter class for using std::vector<std::array<double,3>> with nanoflann
+    /// std::vector<std::array<double,3>>를 nanoflann과 함께 사용하기 위한 어댑터 클래스
     struct PointCloudAdaptor {
         const std::vector<std::array<double, 3>>& points;
 
@@ -54,12 +54,12 @@ namespace icp {
             : points(pts) {
         }
 
-        /// Number of points
+        /// 점 개수
         inline size_t kdtree_get_point_count() const {
             return points.size();
         }
 
-        /// Squared distance between point p1 and point at index idx_p2
+        /// 점 p1과 인덱스 idx_p2의 점 사이의 거리 제곱
         inline double kdtree_distance(const double* p1, const size_t idx_p2, size_t /*size*/) const {
             const double d0 = p1[0] - points[idx_p2][0];
             const double d1 = p1[1] - points[idx_p2][1];
@@ -67,37 +67,40 @@ namespace icp {
             return d0 * d0 + d1 * d1 + d2 * d2;
         }
 
-        /// Get dim-th component of point at index idx
+        /// 인덱스 idx인 점의 dim번째 성분값 반환
         inline double kdtree_get_pt(const size_t idx, int dim) const {
             return points[idx][dim];
         }
 
-        /// Optional bounding box computation (return false to use default)
+        /// 선택적 바운딩 박스 계산 (false를 반환하면 nanoflann 기본 계산 방식을 사용)
         template <class BBOX>
         bool kdtree_get_bbox(BBOX& /*bb*/) const {
             return false;
         }
     };
 
-    /// KD-Tree type definition using nanoflann
+    /// nanoflann을 이용한 KD-Tree 타입 정의
     using KdTree3D = nanoflann::KDTreeSingleIndexAdaptor<
         nanoflann::L2_Simple_Adaptor<double, PointCloudAdaptor>,
         PointCloudAdaptor,
-        3,      // dimensions
-        size_t  // index type
+        3,      // 차원 수
+        size_t  // 인덱스 타입
     >;
 
     //=========================================================================
-    // Correspondence Structure
+    // 대응점(Correspondence) 구조체
     //=========================================================================
 
-    /// Correspondence pair (source index, target index, squared distance)
+    /// 대응점 쌍 (source 인덱스, target 인덱스, 거리 제곱)
     struct Correspondence {
         size_t sourceIdx;
         size_t targetIdx;
         double squaredDistance;
     };
 
+    /// Point-to-Plane용 대응점 구조체. target 인덱스 대신, 이미 face 위에 투영된
+    /// 점(facePt)을 직접 들고 있다 -- target 점 자체가 아니라 그 점이 속한 face
+    /// 평면 위로 투영된 좌표가 필요하기 때문이다.
     struct CorrespondenceFace {
         size_t sourceIdx;
         std::array<double, 3> facePt;
@@ -105,14 +108,14 @@ namespace icp {
     };
 
     //=========================================================================
-    // Correspondence Finding
+    // 대응점 탐색
     //=========================================================================
 
-    /// Find nearest neighbor correspondences using KD-Tree
-    /// @param sourcePoints Source point cloud (to be transformed)
-    /// @param targetTree KD-Tree built from target points
-    /// @param maxDistanceSquared Maximum squared distance for valid correspondence
-    /// @param correspondences Output vector of correspondences
+    /// KD-Tree를 이용해 최근접 이웃 대응점을 탐색한다 (Point-to-Point 방식)
+    /// @param sourcePoints source 포인트클라우드 (변환 대상)
+    /// @param targetTree target 점들로 만든 KD-Tree
+    /// @param maxDistanceSquared 유효한 대응점으로 인정할 최대 거리의 제곱
+    /// @param correspondences 결과로 채워질 대응점 벡터
     inline void findCorrespondences(
         const std::vector<std::array<double, 3>>& sourcePoints,
         const KdTree3D& targetTree,
@@ -126,14 +129,14 @@ namespace icp {
             size_t resultIndex = 0;
             double resultDistSq = 0.0;
 
-            /// Find single nearest neighbor
+            /// 최근접 이웃 1개만 탐색
             nanoflann::KNNResultSet<double> resultSet(1);
             resultSet.init(&resultIndex, &resultDistSq);
 
             targetTree.findNeighbors(resultSet, sourcePoints[i].data(),
                 nanoflann::SearchParams());
 
-            /// Check distance threshold
+            /// 거리 임계값 확인
             if (resultDistSq <= maxDistanceSquared) {
                 Correspondence corr;
                 corr.sourceIdx = i;
@@ -144,6 +147,11 @@ namespace icp {
         }
     }
 
+    /// 점 P에서 평면(기준점 Q, 법선 N)까지의 부호 있는 거리와, 그 평면 위로의
+    /// 투영점을 계산한다. N이 단위 벡터가 아니어도 되도록 정규화를 포함한다
+    /// (호출 빈도가 높은 findCorrespondencesWithNormals의 다른 오버로드에서는
+    /// 단위 벡터를 미리 보장해 sqrt를 생략한 더 빠른 버전을 쓴다 -- 아래
+    /// pointTriangleDistanceAndProjectionUnitN 참고).
     inline bool pointPlaneDistanceAndProjection(
         const std::array<double, 3>& P,
         const std::array<double, 3>& Q,
@@ -171,6 +179,10 @@ namespace icp {
         return true;
     }
 
+    /// normal(법선) 정보를 활용하는 Point-to-Plane 대응점 탐색. face별 대표점 1개
+    /// (facePt)와 그 face의 normal만으로 점-평면 거리를 계산하는, 저비용 버전이다
+    /// (face 전체 삼각형 대신 대표점 하나만 있으면 되는 이유는
+    /// doc/DPApp_ICP_Technical_Documentation.docx §5.1 참고).
     inline void findCorrespondencesWithNormals(
         const std::vector<std::array<double, 3>>& sourcePoints,
         const KdTree3D& targetTree,
@@ -184,7 +196,8 @@ namespace icp {
         correspondences.clear();
         correspondences.reserve(sourcePoints.size());
 
-        /// Build point-wise arrays from face indices
+        /// face 인덱스로부터 점 단위 배열을 구성 (target KD-Tree의 각 target 점이
+        /// 어느 face에 속하는지를 미리 풀어서(펼쳐서) 저장해 둔다)
         std::vector<std::array<double, 3>> targetNormals(faceIdx.size());
         std::vector<std::array<double, 3>> facePts(faceIdx.size());
         for (size_t i = 0; i < faceIdx.size(); ++i) {
@@ -210,10 +223,10 @@ namespace icp {
             double distance;
             std::array<double, 3> proj;
 
-            /// Point-to-Plane distance and projection
+            /// Point-to-Plane 거리 및 투영점 계산
             if (!pointPlaneDistanceAndProjection(
-                sourcePoints[i],           // P: source point
-                facePts[resultIndex],      // Q: point on face
+                sourcePoints[i],           // P: source 점
+                facePts[resultIndex],      // Q: face 위의 점
                 targetNormals[resultIndex], // N: face normal
                 distance,
                 proj))
@@ -240,20 +253,22 @@ namespace icp {
         }
     }
 
-    /// Fastest version: Unit normal vector provided (|N| = 1)
+    /// 가장 빠른 버전: 단위 법선 벡터(|N| = 1)가 이미 보장된 경우에 사용.
+    /// 삼각형(v0, v1, v2) 위로 점 P를 투영하고, 그 투영점이 실제로 삼각형 내부에
+    /// 있는지(barycentric 좌표 기준)까지 함께 확인한다.
     inline bool pointTriangleDistanceAndProjectionUnitN(
         const std::array<double, 3>& P,
         const std::array<double, 3>& v0,
         const std::array<double, 3>& v1,
         const std::array<double, 3>& v2,
-        const std::array<double, 3>& N,  /// Must be unit vector
+        const std::array<double, 3>& N,  /// 반드시 단위 벡터여야 함
         double& distance,
         std::array<double, 3>& proj)
     {
         constexpr double EPSILON_SQ = 1e-12;
         constexpr double EDGE_TOLERANCE = 1e-6;
 
-        /// Triangle edges
+        /// 삼각형의 두 변(edge) 벡터
         const double e0x = v1[0] - v0[0];
         const double e0y = v1[1] - v0[1];
         const double e0z = v1[2] - v0[2];
@@ -262,7 +277,7 @@ namespace icp {
         const double e1y = v2[1] - v0[1];
         const double e1z = v2[2] - v0[2];
 
-        /// Dot products for barycentric
+        /// barycentric 좌표 계산을 위한 내적들
         const double dot00 = e0x * e0x + e0y * e0y + e0z * e0z;
         const double dot01 = e0x * e1x + e0y * e1y + e0z * e1z;
         const double dot11 = e1x * e1x + e1y * e1y + e1z * e1z;
@@ -279,7 +294,7 @@ namespace icp {
         const double dot02 = e0x * pvx + e0y * pvy + e0z * pvz;
         const double dot12 = e1x * pvx + e1y * pvy + e1z * pvz;
 
-        /// Barycentric (early rejection)
+        /// barycentric u, v 계산 (조기 반려(early rejection)로 불필요한 연산을 줄임)
         const double invDenom = 1.0 / denom;
         const double u = (dot11 * dot02 - dot01 * dot12) * invDenom;
         if (u < -EDGE_TOLERANCE || u > 1.0 + EDGE_TOLERANCE)
@@ -289,10 +304,10 @@ namespace icp {
         if (v < -EDGE_TOLERANCE || (u + v) > 1.0 + EDGE_TOLERANCE)
             return false;
 
-        /// Distance = (P-v0)·N (no sqrt needed for unit normal)
+        /// 거리 = (P-v0)·N (단위 법선이므로 sqrt 불필요)
         distance = pvx * N[0] + pvy * N[1] + pvz * N[2];
 
-        /// Projection: P - N * distance
+        /// 투영점: P - N * distance
         proj[0] = P[0] - N[0] * distance;
         proj[1] = P[1] - N[1] * distance;
         proj[2] = P[2] - N[2] * distance;
@@ -300,6 +315,9 @@ namespace icp {
         return true;
     }
 
+    /// 위 findCorrespondencesWithNormals의 변형: face 대표점 1개 대신, face를
+    /// 이루는 삼각형 3개 정점(allFaceVtx)을 모두 받아 실제 삼각형 내부 투영
+    /// 여부까지 검사하는 더 정밀한(대신 더 비싼) 버전.
     inline void findCorrespondencesWithNormals(
         const std::vector<std::array<double, 3>>& sourcePoints,
         const KdTree3D& targetTree,
@@ -313,7 +331,7 @@ namespace icp {
         correspondences.clear();
         correspondences.reserve(sourcePoints.size());
 
-        /// Build point-wise arrays from face indices
+        /// face 인덱스로부터 점 단위 배열을 구성
         std::vector<std::array<double, 3>> targetNormals(faceIdx.size());
         std::vector<std::array<std::array<double, 3>, 3>> faceVtx(faceIdx.size());
         for (size_t i = 0; i < faceIdx.size(); ++i) {
@@ -335,10 +353,10 @@ namespace icp {
             double distance;
             std::array<double, 3> proj;
 
-            /// Point-to-Plane distance and projection
+            /// Point-to-Plane 거리 및 투영점 계산
             if (!pointTriangleDistanceAndProjectionUnitN(
-                sourcePoints[i],           /// P: source point
-                faceVtx[resultIndex][0],   /// V0 
+                sourcePoints[i],           /// P: source 점
+                faceVtx[resultIndex][0],   /// V0
                 faceVtx[resultIndex][1],   /// V1
                 faceVtx[resultIndex][2],   /// V2
                 targetNormals[resultIndex],/// N: face normal
@@ -355,31 +373,31 @@ namespace icp {
     }
 
     //=========================================================================
-    // Outlier Rejection
+    // 이상치(Outlier) 제거
     //=========================================================================
 
-    /// Reject outliers using Median Absolute Deviation (MAD)
-    /// @param correspondences Correspondences to filter (modified in-place)
-    /// @param threshold Multiplier for MAD (typically 2.0 - 3.0)
+    /// MAD(Median Absolute Deviation, 중위절대편차)를 이용해 이상치를 제거한다
+    /// @param correspondences 필터링할 대응점 목록 (제자리에서 수정됨)
+    /// @param threshold MAD에 곱할 배수 (보통 2.0 ~ 3.0)
     inline void rejectOutliersMAD(
         std::vector<Correspondence>& correspondences,
         double threshold)
     {
         if (correspondences.size() < 10) return;
 
-        /// Extract distances
+        /// 거리값 추출
         std::vector<double> distances;
         distances.reserve(correspondences.size());
         for (const auto& c : correspondences) {
             distances.push_back(std::sqrt(c.squaredDistance));
         }
 
-        /// Compute median
+        /// 중앙값(median) 계산
         std::vector<double> sortedDist = distances;
         std::sort(sortedDist.begin(), sortedDist.end());
         const double median = sortedDist[sortedDist.size() / 2];
 
-        /// Compute MAD (Median Absolute Deviation)
+        /// MAD(중위절대편차) 계산
         std::vector<double> absDevs;
         absDevs.reserve(distances.size());
         for (double d : distances) {
@@ -388,11 +406,11 @@ namespace icp {
         std::sort(absDevs.begin(), absDevs.end());
         const double mad = absDevs[absDevs.size() / 2];
 
-        /// MAD to standard deviation approximation
+        /// MAD를 표준편차로 근사 변환하는 스케일 계수
         const double madScale = 1.4826;
         const double sigma = mad * madScale;
 
-        /// Reject outliers beyond threshold * sigma from median
+        /// 중앙값으로부터 threshold * sigma를 넘는 대응점은 이상치로 제거
         const double maxDist = median + threshold * sigma;
         const double maxDistSq = maxDist * maxDist;
 
@@ -404,9 +422,9 @@ namespace icp {
             correspondences.end());
     }
 
-    /// Reject outliers using percentile threshold
-    /// @param correspondences Correspondences to filter
-    /// @param percentile Keep only correspondences below this percentile (0-100)
+    /// 백분위수(percentile) 기준으로 이상치를 제거한다
+    /// @param correspondences 필터링할 대응점 목록
+    /// @param percentile 이 백분위수 이하의 대응점만 유지 (0-100)
     inline void rejectOutliersPercentile(
         std::vector<Correspondence>& correspondences,
         double percentile)
@@ -433,15 +451,15 @@ namespace icp {
     }
 
     //=========================================================================
-    // Transformation Estimation using SVD
+    // SVD를 이용한 변환 추정
     //=========================================================================
 
-    /// Estimate rigid transformation (rotation + translation) using SVD
-    /// Finds T such that target ≈ R * source + t
-    /// @param sourcePoints Source point cloud
-    /// @param targetPoints Target point cloud
-    /// @param correspondences Point correspondences
-    /// @return 4x4 transformation matrix
+    /// SVD를 이용해 강체 변환(회전 + 이동)을 추정한다 (Point-to-Point, Kabsch/Umeyama 방식)
+    /// target ≈ R * source + t 를 만족하는 T를 찾는다
+    /// @param sourcePoints source 포인트클라우드
+    /// @param targetPoints target 포인트클라우드
+    /// @param correspondences 점 대응 관계
+    /// @return 4x4 변환 행렬
     inline Transform4x4 estimateRigidTransformSVD(
         const std::vector<std::array<double, 3>>& sourcePoints,
         const std::vector<std::array<double, 3>>& targetPoints,
@@ -453,7 +471,7 @@ namespace icp {
 
         const size_t n = correspondences.size();
 
-        /// Compute centroids
+        /// 중심점(centroid) 계산
         Eigen::Vector3d srcCentroid = Eigen::Vector3d::Zero();
         Eigen::Vector3d tgtCentroid = Eigen::Vector3d::Zero();
 
@@ -466,7 +484,7 @@ namespace icp {
         srcCentroid /= static_cast<double>(n);
         tgtCentroid /= static_cast<double>(n);
 
-        /// Compute cross-covariance matrix H
+        /// 교차공분산 행렬(cross-covariance matrix) H 계산
         Eigen::Matrix3d H = Eigen::Matrix3d::Zero();
 
         for (const auto& c : correspondences) {
@@ -486,24 +504,26 @@ namespace icp {
             H += srcCentered * tgtCentered.transpose();
         }
 
-        /// SVD decomposition: H = U * S * V^T
+        /// SVD 분해: H = U * S * V^T
         Eigen::JacobiSVD<Eigen::Matrix3d, Eigen::ComputeFullU | Eigen::ComputeFullV> svd(H);
         Eigen::Matrix3d U = svd.matrixU();
         Eigen::Matrix3d V = svd.matrixV();
 
-        /// Rotation: R = V * U^T
+        /// 회전: R = V * U^T
         Eigen::Matrix3d R = V * U.transpose();
 
-        /// Ensure proper rotation (det(R) = 1, not -1 for reflection)
+        /// 올바른 회전(det(R) = 1)인지 확인 -- 반사(reflection, det = -1)가 나오면
+        /// V의 마지막 열의 부호를 뒤집어 보정한다 (Kabsch 알고리즘의 표준적인
+        /// reflection 방지 처리)
         if (R.determinant() < 0) {
             V.col(2) *= -1;
             R = V * U.transpose();
         }
 
-        /// Translation: t = tgtCentroid - R * srcCentroid
+        /// 이동: t = tgtCentroid - R * srcCentroid
         Eigen::Vector3d t = tgtCentroid - R * srcCentroid;
 
-        /// Build 4x4 transformation matrix
+        /// 4x4 변환 행렬 구성
         double rotMat[9];
         for (int i = 0; i < 3; ++i) {
             for (int j = 0; j < 3; ++j) {
@@ -515,12 +535,12 @@ namespace icp {
     }
 
     //=========================================================================
-    // RMSE Calculation
+    // RMSE 계산
     //=========================================================================
 
-    /// Compute Root Mean Square Error from correspondences
-    /// @param correspondences Correspondences with squared distances
-    /// @return RMSE value
+    /// 대응점들로부터 평균제곱근오차(RMSE)를 계산
+    /// @param correspondences 거리 제곱값을 담고 있는 대응점 목록
+    /// @return RMSE 값
     inline double computeRMSE(const std::vector<Correspondence>& correspondences)
     {
         if (correspondences.empty()) {
@@ -534,12 +554,12 @@ namespace icp {
         return std::sqrt(sum / correspondences.size());
     }
 
-    /// Compute RMSE with transformation applied
-    /// @param sourcePoints Source points (original, not transformed)
-    /// @param targetPoints Target points
-    /// @param correspondences Point correspondences
-    /// @param transform Transformation to apply to source
-    /// @return RMSE value after transformation
+    /// 변환을 적용한 뒤의 RMSE를 계산
+    /// @param sourcePoints source 점들 (원본, 아직 변환 전)
+    /// @param targetPoints target 점들
+    /// @param correspondences 점 대응 관계
+    /// @param transform source에 적용할 변환
+    /// @return 변환 적용 후의 RMSE 값
     inline double computeRMSE(
         const std::vector<std::array<double, 3>>& sourcePoints,
         const std::vector<std::array<double, 3>>& targetPoints,
@@ -556,11 +576,11 @@ namespace icp {
             const auto& sp = sourcePoints[c.sourceIdx];
             const auto& tp = targetPoints[c.targetIdx];
 
-            /// Transform source point
+            /// source 점 변환
             double tx, ty, tz;
             transform.transformPoint(sp[0], sp[1], sp[2], tx, ty, tz);
 
-            /// Compute squared distance
+            /// 거리 제곱 계산
             const double dx = tx - tp[0];
             const double dy = ty - tp[1];
             const double dz = tz - tp[2];
@@ -571,10 +591,10 @@ namespace icp {
     }
 
     //=========================================================================
-    // Point Cloud Transformation
+    // 포인트클라우드 변환
     //=========================================================================
 
-    /// Apply transformation to point cloud in-place
+    /// 포인트클라우드에 변환을 제자리(in-place)로 적용
     inline void transformPointCloud(
         std::vector<std::array<double, 3>>& points,
         const Transform4x4& transform)
@@ -584,7 +604,7 @@ namespace icp {
         }
     }
 
-    /// Apply transformation to point cloud (copy version)
+    /// 포인트클라우드에 변환을 적용 (복사본 반환 버전)
     inline std::vector<std::array<double, 3>> transformPointCloudCopy(
         const std::vector<std::array<double, 3>>& points,
         const Transform4x4& transform)
@@ -600,10 +620,11 @@ namespace icp {
         return result;
     }
 
-    /// Apply transformation to a float-stored point cloud (copy version). Each point is
-    /// widened to double for the transform math (precision), then narrowed back to float for
-    /// storage -- used for the Master's bulk (offset-rebased) point cloud arrays, which stay
-    /// float in memory even though the transform itself is always double.
+    /// float로 저장된 포인트클라우드에 변환을 적용 (복사본 반환 버전). 각 점은
+    /// 변환 연산의 정밀도를 위해 double로 승격시킨 뒤 계산하고, 저장을 위해 다시
+    /// float로 축소한다 -- Master가 들고 있는 대량의 (offset-재배치된) 포인트클라우드
+    /// 배열에 사용되며, 이 배열은 항상 float로 유지되지만 변환 자체는 항상
+    /// double로 계산한다.
     inline std::vector<std::array<float, 3>> transformPointCloudCopy(
         const std::vector<std::array<float, 3>>& points,
         const Transform4x4& transform)
@@ -622,10 +643,10 @@ namespace icp {
     }
 
     //=========================================================================
-    // Downsampling
+    // 다운샘플링
     //=========================================================================
 
-    /// Downsample point cloud by uniform selection (every N-th point)
+    /// 균등 선택(매 N번째 점) 방식으로 포인트클라우드를 다운샘플링
     inline bool downsampleUniform(
         const std::vector<std::array<double, 3>>& points,
         const std::vector<size_t>& faceIdx,
@@ -648,7 +669,7 @@ namespace icp {
         return true;
     }
 
-    /// Downsample point cloud by uniform selection (every N-th point)
+    /// 균등 선택(매 N번째 점) 방식으로 포인트클라우드를 다운샘플링
     inline std::vector<std::array<double, 3>> downsampleUniform(
         const std::vector<std::array<double, 3>>& points,
         int ratio)
@@ -667,9 +688,9 @@ namespace icp {
         return downPts;
     }
 
-    /// Downsample a float-stored point cloud by uniform selection (every N-th point). Plain
-    /// element copy, no precision-sensitive math -- used for the Master's bulk (offset-rebased)
-    /// point cloud arrays.
+    /// float로 저장된 포인트클라우드를 균등 선택(매 N번째 점) 방식으로
+    /// 다운샘플링. 단순 원소 복사이며 정밀도에 민감한 연산은 없다 -- Master가
+    /// 들고 있는 대량의 (offset-재배치된) 포인트클라우드 배열에 사용된다.
     inline std::vector<std::array<float, 3>> downsampleUniform(
         const std::vector<std::array<float, 3>>& points,
         int ratio)
@@ -688,9 +709,9 @@ namespace icp {
         return downPts;
     }
 
-    /// Widen a float point array to double (e.g. when handing a downsampled subset off to
-    /// IcpChunk, which stores double for use by the (unmodified) ICP correspondence/transform
-    /// estimation code below).
+    /// float 점 배열을 double로 승격시킨다 (예: 다운샘플링된 일부를 IcpChunk에
+    /// 넘길 때 -- IcpChunk는 아래의 (수정되지 않은) ICP 대응점탐색/변환추정
+    /// 코드가 사용할 수 있도록 double로 저장한다).
     inline std::vector<std::array<double, 3>> widenToDouble(
         const std::vector<std::array<float, 3>>& points)
     {
@@ -702,8 +723,8 @@ namespace icp {
         return result;
     }
 
-    /// Narrow a double point array to float (e.g. right after loading/offset-rebasing the full
-    /// LAS point cloud, before it settles into the Master's bulk float storage).
+    /// double 점 배열을 float로 축소한다 (예: 전체 LAS 포인트클라우드를
+    /// 로딩/offset-재배치한 직후, Master의 대량 float 저장소에 자리잡기 전에 사용).
     inline std::vector<std::array<float, 3>> narrowToFloat(
         const std::vector<std::array<double, 3>>& points)
     {
@@ -715,17 +736,17 @@ namespace icp {
         return result;
     }
 
-    /// Downsample point cloud using voxel grid
-    /// @param points Input point cloud
-    /// @param voxelSize Size of each voxel
-    /// @return Downsampled point cloud (voxel centroids)
+    /// 복셀 격자(voxel grid) 방식으로 포인트클라우드를 다운샘플링
+    /// @param points 입력 포인트클라우드
+    /// @param voxelSize 복셀 하나의 크기
+    /// @return 다운샘플링된 포인트클라우드 (각 복셀의 중심점(centroid))
     inline std::vector<std::array<double, 3>> downsampleVoxelGrid(
         const std::vector<std::array<double, 3>>& points,
         double voxelSize)
     {
         if (points.empty() || voxelSize <= 0.0) return points;
 
-        /// Find bounding box
+        /// 바운딩 박스 계산
         double minX = points[0][0], maxX = points[0][0];
         double minY = points[0][1], maxY = points[0][1];
         double minZ = points[0][2], maxZ = points[0][2];
@@ -736,12 +757,12 @@ namespace icp {
             if (p[2] < minZ) minZ = p[2]; if (p[2] > maxZ) maxZ = p[2];
         }
 
-        /// Voxel grid dimensions
+        /// 복셀 격자의 차원(개수)
         const int nx = static_cast<int>((maxX - minX) / voxelSize) + 1;
         const int ny = static_cast<int>((maxY - minY) / voxelSize) + 1;
 
-        /// Use map for sparse voxel storage
-        /// Key: voxel index, Value: (sum of points, count)
+        /// 희소(sparse) 복셀 저장을 위해 map 사용
+        /// 키: 복셀 인덱스, 값: (점 좌표 합, 개수)
         std::unordered_map<size_t, std::pair<std::array<double, 3>, size_t>> voxelMap;
 
         for (const auto& p : points) {
@@ -760,7 +781,7 @@ namespace icp {
             voxel.second++;
         }
 
-        /// Extract centroids
+        /// 각 복셀의 중심점(centroid) 추출
         std::vector<std::array<double, 3>> result;
         result.reserve(voxelMap.size());
 
@@ -778,10 +799,10 @@ namespace icp {
     }
 
     //=========================================================================
-    // Outlier Rejection for CorrespondenceFace
+    // CorrespondenceFace를 위한 이상치 제거
     //=========================================================================
 
-    /// Reject outliers using MAD for CorrespondenceFace (Point-to-Plane)
+    /// CorrespondenceFace(Point-to-Plane)에 대해 MAD 기반 이상치 제거
     inline void rejectOutliersMAD(
         std::vector<CorrespondenceFace>& correspondences,
         double threshold)
@@ -820,10 +841,10 @@ namespace icp {
     }
 
     //=========================================================================
-    // RMSE Calculation for CorrespondenceFace
+    // CorrespondenceFace의 RMSE 계산
     //=========================================================================
 
-    /// Compute RMSE from CorrespondenceFace (Point-to-Plane distance)
+    /// CorrespondenceFace(Point-to-Plane 거리)로부터 RMSE 계산
     inline double computeRMSE(const std::vector<CorrespondenceFace>& correspondences)
     {
         if (correspondences.empty()) {
@@ -838,10 +859,15 @@ namespace icp {
     }
 
     //=========================================================================
-    // Point-to-Plane Transformation Estimation
+    // Point-to-Plane 변환 추정
     //=========================================================================
 
-    /// Estimate rigid transformation using Point-to-Plane linearized method
+    /// Point-to-Plane 선형화 기법으로 강체 변환을 추정한다.
+    /// 소각 근사(small angle approximation)를 이용해 회전을 (rx, ry, rz)
+    /// 세 각도로 선형화하고, 6개 미지수(tx,ty,tz,rx,ry,rz)에 대한 선형 최소제곱
+    /// 문제 Ax=b를 SVD로 풀어 한 번에 계산한다 (반복적으로 각도를 갱신하는
+    /// 비선형 최적화가 아니라, ICP 반복 루프 자체가 이 선형화 오차를 상쇄한다 --
+    /// 자세한 수식 유도는 기술문서 §5.1 참고).
     inline Transform4x4 estimateRigidTransformPointToPlane(
         const std::vector<std::array<double, 3>>& sourcePoints,
         const std::vector<CorrespondenceFace>& correspondences,
@@ -862,6 +888,7 @@ namespace icp {
             const auto& s = sourcePoints[corr.sourceIdx];
             const auto& p = corr.facePt;
 
+            /// source 점 s와 투영점 p 사이의 방향을 그 대응점의 근사 normal로 사용
             double dx = s[0] - p[0];
             double dy = s[1] - p[1];
             double dz = s[2] - p[2];
@@ -879,6 +906,7 @@ namespace icp {
 
             double sx = s[0], sy = s[1], sz = s[2];
 
+            /// A 행렬의 각 행: [nx, ny, nz, sy*nz-sz*ny, sz*nx-sx*nz, sx*ny-sy*nx]
             A(i, 0) = nx;
             A(i, 1) = ny;
             A(i, 2) = nz;
@@ -886,16 +914,18 @@ namespace icp {
             A(i, 4) = sz * nx - sx * nz;
             A(i, 5) = sx * ny - sy * nx;
 
+            /// b 벡터: 부호 있는 point-to-plane 거리
             b(i) = nx * (p[0] - sx) + ny * (p[1] - sy) + nz * (p[2] - sz);
         }
 
-        /// Solve using SVD least squares (BDCSVD for newer Eigen)
+        /// SVD 최소제곱으로 풀이 (최신 Eigen에서는 BDCSVD 권장)
         Eigen::BDCSVD<Eigen::MatrixXd, Eigen::ComputeThinU | Eigen::ComputeThinV> svd(A);
         Eigen::VectorXd x = svd.solve(b);
 
         double tx = x(0), ty = x(1), tz = x(2);
         double rx = x(3), ry = x(4), rz = x(5);
 
+        /// 선형화로 얻은 소각(rx,ry,rz)으로부터 실제 회전 행렬(R) 구성 (ZYX 오일러 순서)
         double cx = std::cos(rx), sx_r = std::sin(rx);
         double cy = std::cos(ry), sy = std::sin(ry);
         double cz = std::cos(rz), sz = std::sin(rz);
@@ -921,6 +951,13 @@ namespace icp {
         return Transform4x4::fromRotationTranslation(rotMat, tx, ty, tz);
     }
 
+    /// [미완성/미사용] 아래 calDiscrepancy부터 runLSM까지는 SSMMatrixd 기반의
+    /// 비선형 최소제곱(NLLS) 방식으로 Point-to-Plane 변환을 추정하려던 실험적
+    /// 구현이다. 현재 runIcp()는 이 대신 위쪽의 estimateRigidTransformPointToPlane
+    /// (Eigen SVD 선형화 버전)을 사용하며, 이 구간은 코드베이스 어디에서도 호출되지
+    /// 않는다("[ToDo] under construction" 원문 주석 그대로 유지). 삭제하지 않고
+    /// 남겨둔 이유는 알 수 없으므로, 수정 시 이 구간이 실제로 쓰이고 있는지 반드시
+    /// grep으로 재확인할 것.
     inline void calDiscrepancy(const std::array<double, 3>& src, const std::array<double, 3>& tar, const std::array<double, uknw>& params, math::Matrixd& ai, math::Matrixd& yi)
     {
         math::Matrixd GA(3, 1), GB(3, 1);
@@ -951,7 +988,7 @@ namespace icp {
         T(1, 0) = params[1];
         T(2, 0) = params[2];
 
-        //dTx, dTy, dTz, dO, dP, dK, and dS
+        //dTx, dTy, dTz, dO, dP, dK, dS에 대한 편미분 계수 행렬 구성
         ai(0, 0) = 1;
         ai(0, 1) = 0;
         ai(0, 2) = 0;
@@ -976,9 +1013,9 @@ namespace icp {
         yi = GB - RGA - T;
     }
 
-    /// [ToDo] under construction
-    /// add const double benchSd
-    /// add std::array<double, 3> xyzSd
+    /// [ToDo] 미완성
+    /// const double benchSd 추가 필요
+    /// std::array<double, 3> xyzSd 추가 필요
     struct RETVAL_NLLS {
         std::array<double, uknw> params;
         math::Matrixd Correlation;
@@ -1087,7 +1124,7 @@ namespace icp {
     }
 
     /// [ToDo]
-    /// CorrespondenceFace, need it, all of them???
+    /// CorrespondenceFace가 필요한가, 전부 다 필요한가???
     inline Transform4x4 runLSM(
         const std::vector<std::array<double, 3>>& sourcePoints,
         const std::vector<CorrespondenceFace>& correspondences,
@@ -1186,13 +1223,13 @@ namespace icp {
     }
 
     //=========================================================================
-    // ICP Main Algorithm
+    // ICP 메인 알고리즘
     //=========================================================================
 
-    /// Run ICP algorithm (Point-to-Plane or Point-to-Point)
-    /// @param chunk ICP chunk containing source/target points and config
-    /// @param cancelRequested Atomic flag for cancellation check
-    /// @return ICP result with transformation and statistics
+    /// ICP 알고리즘을 실행한다 (Point-to-Plane 또는 Point-to-Point)
+    /// @param chunk source/target 점들과 설정값을 담은 ICP 청크
+    /// @param cancelRequested 취소 확인용 atomic 플래그
+    /// @return 변환 행렬과 통계치를 담은 ICP 결과
     inline IcpResult runIcp(const IcpChunk& chunk, std::atomic<bool>& cancelRequested)
     {
         IcpResult result;
@@ -1202,7 +1239,7 @@ namespace icp {
 
         auto startTime = std::chrono::high_resolution_clock::now();
 
-        /// Validate input
+        /// 입력 유효성 검사
         if (chunk.sourcePoints.empty()) {
             result.success = false;
             result.errorMessage = "Source points are empty";
@@ -1214,11 +1251,12 @@ namespace icp {
             return result;
         }
 
-        /// chunk's point arrays are stored float, shifted by (offsetX, offsetY, offsetZ) --
-        /// widen to double and add the offset back exactly once, here, before any actual
-        /// computation. Everything below this point operates on these local double vectors
-        /// exactly as it did before this offset-rebase optimization existed. faceNormals are
-        /// direction vectors and are widened but never shifted.
+        /// 청크의 점 배열은 (offsetX, offsetY, offsetZ)만큼 이동된 float로 저장되어
+        /// 있다 -- 실제 연산을 시작하기 전에, 여기서 딱 한 번 double로 승격시키고
+        /// offset을 다시 더한다. 이 지점 아래의 모든 코드는 이 float+offset
+        /// 최적화가 도입되기 이전과 완전히 동일하게, 이 로컬 double 벡터들을
+        /// 대상으로 동작한다. faceNormals는 방향 벡터이므로 승격만 하고 offset은
+        /// 더하지 않는다.
         const auto unshiftWiden = [&](const std::vector<std::array<float, 3>>& src) {
             std::vector<std::array<double, 3>> out;
             out.reserve(src.size());
@@ -1237,22 +1275,22 @@ namespace icp {
 
         const auto& config = chunk.config;
 
-        /// Check if Point-to-Plane mode is available
+        /// Point-to-Plane 모드를 쓸 수 있는지 확인 (face 정보가 모두 있어야 함)
         const bool usePointToPlane = !chunk.faceIndices.empty() &&
             !chunk.faceNormals.empty() &&
             !chunk.facePts.empty();
 
-        /// Build KD-Tree for target points
+        /// target 점들로 KD-Tree 구성
         PointCloudAdaptor targetAdaptor(targetPointsD);
         KdTree3D targetTree(3, targetAdaptor,
             nanoflann::KDTreeSingleIndexAdaptorParams(50));
         targetTree.buildIndex();
 
-        /// Initialize transformation
+        /// 변환 초기화
         Transform4x4 currentTransform = chunk.initialTransform;
         Transform4x4 accumulatedLocalTransform = Transform4x4::identity();
 
-        /// Copy source points for transformation
+        /// 변환을 적용할 source 점들의 복사본
         std::vector<std::array<double, 3>> transformedSource = sourcePointsD;
         transformPointCloud(transformedSource, currentTransform);
 
@@ -1266,14 +1304,14 @@ namespace icp {
         if (usePointToPlane) {
             std::vector<CorrespondenceFace> correspondences;
 
-            /// Initial RMSE
+            /// 초기 RMSE 계산
             findCorrespondencesWithNormals(
                 transformedSource, targetTree, chunk.faceIndices,
                 faceNormalsD, facePtsD,
                 maxDistSq, config.normalAngleThreshold, correspondences);
             result.initialRMSE = computeRMSE(correspondences);
 
-            /// ICP iterations
+            /// ICP 반복
             for (int iter = 0; iter < config.maxIterations; ++iter) {
                 if (cancelRequested.load()) {
                     result.success = false;
@@ -1281,7 +1319,7 @@ namespace icp {
                     return result;
                 }
 
-                /// 1. Find correspondences
+                /// 1. 대응점 탐색
                 findCorrespondencesWithNormals(
                     transformedSource, targetTree, chunk.faceIndices,
                     faceNormalsD, facePtsD,
@@ -1295,7 +1333,7 @@ namespace icp {
                     return result;
                 }
 
-                /// 2. Reject outliers
+                /// 2. 이상치 제거
                 rejectOutliersMAD(correspondences, config.outlierRejectionThreshold);
 
                 if (static_cast<int>(correspondences.size()) < config.minCorrespondences) {
@@ -1305,12 +1343,12 @@ namespace icp {
                     return result;
                 }
 
-                /// 3. Estimate transformation (Point-to-Plane)
+                /// 3. 변환 추정 (Point-to-Plane)
                 Transform4x4 deltaT = estimateRigidTransformPointToPlane(
                     transformedSource, correspondences,
                     chunk.faceIndices, faceNormalsD);
 #ifdef _DEBUG
-                /// [ToDo]: config
+                /// [ToDo]: config로 옮길 것
                 std::array<double, uknw> params0 = { 0., 0., 0., 0., 0., 0. };
                 double sdThr = 0.000001;
                 unsigned int maxIter = 50;
@@ -1322,31 +1360,31 @@ namespace icp {
 
 #ifdef _DEBUG
                 {
-                    /// Extract translation
+                    /// 이동 성분 추출
                     double tx = deltaT.m[12];
                     double ty = deltaT.m[13];
                     double tz = deltaT.m[14];
 
-                    /// Extract rotation angles from rotation matrix (Euler angles)
-                    /// R = Rz * Ry * Rx (ZYX convention)
+                    /// 회전 행렬로부터 오일러 각도 추출
+                    /// R = Rz * Ry * Rx (ZYX 관례)
                     double r00 = deltaT.m[0], r01 = deltaT.m[4], r02 = deltaT.m[8];
                     double r10 = deltaT.m[1], r11 = deltaT.m[5], r12 = deltaT.m[9];
                     double r20 = deltaT.m[2], r21 = deltaT.m[6], r22 = deltaT.m[10];
 
-                    double pitch = std::asin(-r20);  /// ry (Y rotation)
+                    double pitch = std::asin(-r20);  /// ry (Y축 회전)
                     double yaw, roll;
 
                     if (std::abs(r20) < 0.99999) {
-                        yaw = std::atan2(r10, r00);   /// rz (Z rotation)
-                        roll = std::atan2(r21, r22);  /// rx (X rotation)
+                        yaw = std::atan2(r10, r00);   /// rz (Z축 회전)
+                        roll = std::atan2(r21, r22);  /// rx (X축 회전)
                     }
                     else {
-                        /// Gimbal lock
+                        /// 짐벌락(gimbal lock) 상황
                         yaw = std::atan2(-r01, r11);
                         roll = 0.0;
                     }
 
-                    /// Convert to degrees
+                    /// 도(degree) 단위로 변환
                     const double rad2deg = 180.0 / 3.14159265;
                     roll *= rad2deg;
                     pitch *= rad2deg;
@@ -1356,18 +1394,18 @@ namespace icp {
                 }
 #endif
 
-                /// 4. Apply transformation
+                /// 4. 변환 적용
                 transformPointCloud(transformedSource, deltaT);
                 accumulatedLocalTransform = deltaT * accumulatedLocalTransform;
 
-                /// 5. Compute RMSE
+                /// 5. RMSE 계산
                 findCorrespondencesWithNormals(
                     transformedSource, targetTree, chunk.faceIndices,
                     faceNormalsD, facePtsD,
                     maxDistSq, config.normalAngleThreshold, correspondences);
                 double currentRMSE = computeRMSE(correspondences);
 
-                /// 6. Check convergence
+                /// 6. 수렴 확인
                 double transformChange = currentTransform.distanceTo(deltaT * currentTransform);
                 currentTransform = deltaT * currentTransform;
 
@@ -1386,16 +1424,16 @@ namespace icp {
             }
         }
         /// =====================================================
-        /// Fallback: Point-to-Point ICP
+        /// 대체(Fallback) 방식: Point-to-Point ICP
         /// =====================================================
         else {
             std::vector<Correspondence> correspondences;
 
-            /// Initial RMSE
+            /// 초기 RMSE 계산
             findCorrespondences(transformedSource, targetTree, maxDistSq, correspondences);
             result.initialRMSE = computeRMSE(correspondences);
 
-            /// ICP iterations
+            /// ICP 반복
             for (int iter = 0; iter < config.maxIterations; ++iter) {
                 if (cancelRequested.load()) {
                     result.success = false;
@@ -1403,7 +1441,7 @@ namespace icp {
                     return result;
                 }
 
-                /// 1. Find correspondences
+                /// 1. 대응점 탐색
                 findCorrespondences(transformedSource, targetTree, maxDistSq, correspondences);
 
                 if (static_cast<int>(correspondences.size()) < config.minCorrespondences) {
@@ -1414,7 +1452,7 @@ namespace icp {
                     return result;
                 }
 
-                /// 2. Reject outliers
+                /// 2. 이상치 제거
                 rejectOutliersMAD(correspondences, config.outlierRejectionThreshold);
 
                 if (static_cast<int>(correspondences.size()) < config.minCorrespondences) {
@@ -1424,19 +1462,19 @@ namespace icp {
                     return result;
                 }
 
-                /// 3. Estimate transformation (Point-to-Point)
+                /// 3. 변환 추정 (Point-to-Point)
                 Transform4x4 deltaT = estimateRigidTransformSVD(
                     transformedSource, targetPointsD, correspondences);
 
-                /// 4. Apply transformation
+                /// 4. 변환 적용
                 transformPointCloud(transformedSource, deltaT);
                 accumulatedLocalTransform = deltaT * accumulatedLocalTransform;
 
-                /// 5. Compute RMSE
+                /// 5. RMSE 계산
                 findCorrespondences(transformedSource, targetTree, maxDistSq, correspondences);
                 double currentRMSE = computeRMSE(correspondences);
 
-                /// 6. Check convergence
+                /// 6. 수렴 확인
                 double transformChange = currentTransform.distanceTo(deltaT * currentTransform);
                 currentTransform = deltaT * currentTransform;
 
@@ -1454,7 +1492,7 @@ namespace icp {
             }
         }
 
-        /// Store final transformation
+        /// 최종 변환 결과 저장
         result.transform = currentTransform;
         result.localTransform = accumulatedLocalTransform;
         result.success = true;
@@ -1467,19 +1505,23 @@ namespace icp {
     }
 
     //=========================================================================
-    // Result Aggregation
+    // 결과 통합(Aggregation)
     //=========================================================================
 
-    /// Aggregate multiple ICP results using weighted average (inverse RMSE)
-    /// @param results Vector of ICP results from different chunks
-    /// @return Aggregated transformation matrix
+    /// 여러 청크의 ICP 결과를 가중 평균(RMSE의 역수를 가중치로 사용)으로 통합한다.
+    /// 주의: 이 함수는 "RMSE 역수 가중치" 방식이며, 실제 부재별 분산 미세정합
+    /// 결과를 통합하는 MasterApplication_ICP.cpp의 aggregateWeightedTransforms는
+    /// 이와 달리 "source 점 개수" 가중치를 사용하는 별도의 구현이다 -- 서로
+    /// 혼동하지 말 것 (자세한 통합 방식 비교는 doc/handover/08_부재별_정합_통합_방법론.md 참고).
+    /// @param results 여러 청크에서 얻은 ICP 결과 벡터
+    /// @return 통합된 변환 행렬
     inline Transform4x4 aggregateResultsWeighted(const std::vector<IcpResult>& results)
     {
         if (results.empty()) {
             return Transform4x4::identity();
         }
 
-        /// Filter successful results
+        /// 성공한 결과만 필터링
         std::vector<const IcpResult*> validResults;
         for (const auto& r : results) {
             if (r.success && r.finalRMSE > 0.0) {
@@ -1495,7 +1537,7 @@ namespace icp {
             return validResults[0]->transform;
         }
 
-        /// Compute weights (inverse RMSE)
+        /// 가중치 계산 (RMSE의 역수)
         std::vector<double> weights;
         double totalWeight = 0.0;
         for (const auto* r : validResults) {
@@ -1504,7 +1546,7 @@ namespace icp {
             totalWeight += w;
         }
 
-        /// Weighted average of transformation matrices
+        /// 변환 행렬들의 가중 평균
         Transform4x4 result;
         std::memset(result.m, 0, sizeof(result.m));
 
@@ -1515,7 +1557,9 @@ namespace icp {
             }
         }
 
-        /// Re-orthogonalize rotation matrix using SVD
+        /// 회전 성분을 SVD로 재직교화(re-orthogonalize) -- 행렬 원소별 가중 평균을
+        /// 그대로 쓰면 회전 행렬의 직교성(orthogonality)이 깨지므로, 가장 가까운
+        /// 회전 행렬로 재투영해 준다 (Orthogonal Procrustes 방식과 동일한 원리)
         Eigen::Matrix3d R;
         R << result.m[0], result.m[4], result.m[8],
             result.m[1], result.m[5], result.m[9],
@@ -1534,9 +1578,9 @@ namespace icp {
         return result;
     }
 
-    /// Select best result based on lowest RMSE
-    /// @param results Vector of ICP results
-    /// @return Pointer to best result, or nullptr if no valid results
+    /// 가장 낮은 RMSE를 기준으로 최선의 결과를 선택
+    /// @param results ICP 결과 벡터
+    /// @return 최선의 결과에 대한 포인터, 유효한 결과가 없으면 nullptr
     inline const IcpResult* selectBestResult(const std::vector<IcpResult>& results)
     {
         const IcpResult* best = nullptr;

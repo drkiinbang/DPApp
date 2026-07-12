@@ -1,13 +1,13 @@
 #pragma once
 
 /// ============================================================================
-/// IcpTypes.h - ICP (Iterative Closest Point) Registration Types
+/// IcpTypes.h - ICP(Iterative Closest Point, 반복 최근접점) 정합 관련 타입 정의
 /// ============================================================================
-/// 
-/// This header defines data structures for distributed ICP alignment
-/// between point clouds (LAS) and meshes (GLTF).
-/// 
-/// Location: F:\repository\DPApp\include\IcpTypes.h
+///
+/// 이 헤더는 포인트클라우드(LAS)와 메시(GLTF) 간의 분산 ICP 정합에 사용되는
+/// 데이터 구조체들을 정의한다.
+///
+/// 위치: D:\repository\DPApp_II\include\IcpTypes.h
 /// ============================================================================
 
 #include <array>
@@ -22,11 +22,11 @@
 namespace icp {
 
     //=========================================================================
-    // Transform4x4 - 4x4 Transformation Matrix (Column-Major)
+    // Transform4x4 - 4x4 변환 행렬 (Column-Major, 열 우선)
     //=========================================================================
 
-    /// 4x4 transformation matrix for rigid body transformations
-    /// Layout (column-major, OpenGL style):
+    /// 강체 변환(rigid body transformation)을 표현하는 4x4 변환 행렬.
+    /// 메모리 배치(column-major, OpenGL 방식):
     /// | m[0]  m[4]  m[8]   m[12] |   | R00 R01 R02 Tx |
     /// | m[1]  m[5]  m[9]   m[13] | = | R10 R11 R12 Ty |
     /// | m[2]  m[6]  m[10]  m[14] |   | R20 R21 R22 Tz |
@@ -34,7 +34,7 @@ namespace icp {
     struct Transform4x4 {
         double m[16];
 
-        /// Create identity matrix
+        /// 단위 행렬(identity matrix) 생성
         static Transform4x4 identity() {
             Transform4x4 result;
             std::memset(result.m, 0, sizeof(result.m));
@@ -42,7 +42,7 @@ namespace icp {
             return result;
         }
 
-        /// Create translation matrix
+        /// 이동(translation) 전용 행렬 생성
         static Transform4x4 translation(double tx, double ty, double tz) {
             Transform4x4 result = identity();
             result.m[12] = tx;
@@ -51,28 +51,28 @@ namespace icp {
             return result;
         }
 
-        /// Create from rotation matrix (3x3, row-major) and translation vector
+        /// 3x3 회전 행렬(row-major)과 이동 벡터로부터 4x4 변환 행렬 생성
         static Transform4x4 fromRotationTranslation(const double R[9], double tx, double ty, double tz) {
             Transform4x4 result;
             std::memset(result.m, 0, sizeof(result.m));
 
-            /// Rotation (row-major R to column-major m)
+            /// 회전 성분 (row-major R을 column-major m으로 옮겨 담음)
             result.m[0] = R[0];  result.m[4] = R[1];  result.m[8] = R[2];
             result.m[1] = R[3];  result.m[5] = R[4];  result.m[9] = R[5];
             result.m[2] = R[6];  result.m[6] = R[7];  result.m[10] = R[8];
 
-            /// Translation
+            /// 이동 성분
             result.m[12] = tx;
             result.m[13] = ty;
             result.m[14] = tz;
 
-            /// Homogeneous coordinate
+            /// 동차좌표(homogeneous coordinate) 성분
             result.m[15] = 1.0;
 
             return result;
         }
 
-        /// Matrix multiplication: this * other
+        /// 행렬 곱셈: this * other
         Transform4x4 operator*(const Transform4x4& other) const {
             Transform4x4 result;
             std::memset(result.m, 0, sizeof(result.m));
@@ -87,56 +87,59 @@ namespace icp {
             return result;
         }
 
-        /// Transform a 3D point: result = R * p + t
+        /// 3차원 점 변환: result = R * p + t
         void transformPoint(double x, double y, double z, double& ox, double& oy, double& oz) const {
             ox = m[0] * x + m[4] * y + m[8] * z + m[12];
             oy = m[1] * x + m[5] * y + m[9] * z + m[13];
             oz = m[2] * x + m[6] * y + m[10] * z + m[14];
         }
 
-        /// Transform a 3D point (in-place version)
+        /// 3차원 점 변환 (제자리(in-place) 버전)
         void transformPointInPlace(double& x, double& y, double& z) const {
             double ox, oy, oz;
             transformPoint(x, y, z, ox, oy, oz);
             x = ox; y = oy; z = oz;
         }
 
-        /// Get rotation matrix (3x3, row-major)
+        /// 회전 행렬(3x3, row-major) 추출
         void getRotation(double R[9]) const {
             R[0] = m[0];  R[1] = m[4];  R[2] = m[8];
             R[3] = m[1];  R[4] = m[5];  R[5] = m[9];
             R[6] = m[2];  R[7] = m[6];  R[8] = m[10];
         }
 
-        /// Get translation vector
+        /// 이동 벡터 추출
         void getTranslation(double& tx, double& ty, double& tz) const {
             tx = m[12];
             ty = m[13];
             tz = m[14];
         }
 
-        /// Compute inverse (assuming rigid transformation: R^T, -R^T * t)
+        /// 역변환 계산 (강체 변환이라는 가정 하에: R^T, -R^T * t 방식으로 계산.
+        /// 일반적인 행렬 역행렬 계산(가우스 소거 등)보다 훨씬 빠르며, 회전 행렬이
+        /// 직교(orthogonal)하다는 성질을 이용한다 -- 스케일/전단이 섞인 일반 4x4
+        /// 행렬에는 사용할 수 없다.)
         Transform4x4 inverse() const {
             Transform4x4 result;
 
-            /// Transpose rotation part
+            /// 회전 성분 전치(transpose) -- 직교 행렬의 역행렬은 전치와 같다
             result.m[0] = m[0];   result.m[4] = m[1];   result.m[8] = m[2];
             result.m[1] = m[4];   result.m[5] = m[5];   result.m[9] = m[6];
             result.m[2] = m[8];   result.m[6] = m[9];   result.m[10] = m[10];
 
-            /// Translation: -R^T * t
+            /// 이동 성분: -R^T * t
             result.m[12] = -(result.m[0] * m[12] + result.m[4] * m[13] + result.m[8] * m[14]);
             result.m[13] = -(result.m[1] * m[12] + result.m[5] * m[13] + result.m[9] * m[14]);
             result.m[14] = -(result.m[2] * m[12] + result.m[6] * m[13] + result.m[10] * m[14]);
 
-            /// Homogeneous part
+            /// 동차좌표 성분
             result.m[3] = result.m[7] = result.m[11] = 0.0;
             result.m[15] = 1.0;
 
             return result;
         }
 
-        /// Calculate Frobenius norm of difference (for convergence check)
+        /// 두 변환 행렬 차이의 Frobenius norm 계산 (수렴 여부 판정에 사용)
         double distanceTo(const Transform4x4& other) const {
             double sum = 0.0;
             for (int i = 0; i < 16; ++i) {
@@ -147,15 +150,16 @@ namespace icp {
         }
     };
 
-    /// Given a rigid transform valid for absolute-frame points (R*p_abs + t ~= q_abs), derive
-    /// the equivalent transform for points already shifted by a rebase offset
-    /// (p_shifted = p_abs - offset), such that applying it directly to p_shifted yields a
-    /// result in the same shifted frame (q_shifted = q_abs - offset):
+    /// 절대좌표계 점에 대해 유효한 강체 변환(R*p_abs + t ~= q_abs)이 주어졌을 때,
+    /// 재배치(rebase) offset만큼 이미 이동되어 있는 점(p_shifted = p_abs - offset)에
+    /// 그대로 적용해도 같은 이동된 좌표계에서의 결과(q_shifted = q_abs - offset)를
+    /// 얻을 수 있는 등가 변환을 유도한다:
     ///   t_shifted = t_absolute - (I - R) * offset = t_absolute - offset + R * offset
-    /// Rotation is unchanged by a common translation offset. Used only to apply an
-    /// already-computed (absolute-frame) ICP transform directly to the Master's bulk,
-    /// offset-rebased float point array without widening the whole array to double first --
-    /// the ICP computation itself always operates on absolute-frame (unshifted) chunk data.
+    /// 회전(R)은 공통 이동 offset에 영향받지 않으므로 그대로 유지된다. 이 함수는
+    /// 이미 계산이 끝난(절대좌표 기준) ICP 변환을, Master가 들고 있는 대용량의
+    /// offset-재배치된 float 포인트 배열 전체에 double로 승격시키지 않고 바로
+    /// 적용하기 위해서만 사용한다 -- ICP 연산 자체는 항상 절대좌표(이동되지 않은)
+    /// 청크 데이터를 대상으로 동작한다.
     inline Transform4x4 toShiftedFrame(const Transform4x4& absoluteTransform,
         double offsetX, double offsetY, double offsetZ) {
         Transform4x4 result = absoluteTransform;
@@ -171,42 +175,42 @@ namespace icp {
     }
 
     //=========================================================================
-    // IcpConfig - ICP Algorithm Configuration
+    // IcpConfig - ICP 알고리즘 설정값
     //=========================================================================
 
-    /// Configuration parameters for ICP algorithm
+    /// ICP 알고리즘의 동작을 조절하는 설정 매개변수 모음
     struct IcpConfig {
-        /// Maximum number of iterations
+        /// 최대 반복 횟수
         int maxIterations = 50;
 
-        /// Convergence threshold (transformation change)
+        /// 수렴 판정 임계값 (변환 행렬 변화량 기준)
         double convergenceThreshold = 1e-6;
 
-        /// Maximum distance for correspondence matching (meters)
+        /// 대응점(correspondence)으로 인정할 최대 거리 (미터)
         double maxCorrespondenceDistance = 1.0;
 
-        /// Outlier rejection threshold (multiplier of MAD)
+        /// 이상치(outlier) 제거 임계값 (MAD의 배수)
         double outlierRejectionThreshold = 2.5;
 
-        /// Downsample ratio for coarse alignment (1 = no downsampling)
+        /// coarse(전역) 정합용 다운샘플링 비율 (1 = 다운샘플링 없음)
         int downsampleRatio = 10;
 
-        /// Use normal-based filtering for correspondences
+        /// 대응점 탐색 시 normal(법선) 기반 필터링 사용 여부
         bool useNormalFiltering = true;
 
-        /// Normal angle threshold (degrees) for filtering
+        /// 필터링에 사용할 normal 각도 임계값 (도 단위)
         double normalAngleThreshold = 45.0;
 
-        /// Minimum number of correspondences required
+        /// 정합에 필요한 최소 대응점 개수
         int minCorrespondences = 100;
 
-        /// Grid size for mesh pseudo-point generation (meters)
+        /// 메시 가상점(pseudo-point) 생성 시 사용할 격자 간격 (미터)
         double pseudoPointGridSize = 0.1;
 
-        /// Enable verbose logging
+        /// 상세 로그 출력 여부
         bool verbose = false;
 
-        /// Validate configuration
+        /// 설정값 유효성 검사
         bool isValid() const {
             return maxIterations > 0 &&
                 convergenceThreshold > 0.0 &&
@@ -220,56 +224,57 @@ namespace icp {
     };
 
     //=========================================================================
-    // IcpChunk - Data chunk for distributed ICP processing
+    // IcpChunk - 분산 ICP 처리를 위한 데이터 청크
     //=========================================================================
 
-    /// Chunk data sent to Slave for local ICP processing. Point arrays are stored as `float`,
-    /// shifted by (offsetX, offsetY, offsetZ) relative to absolute coordinates -- this keeps
-    /// wire/storage size small while preserving sub-mm precision (see icp::computeBimRebaseOffset
-    /// in PseudoPointGenerator.hpp for how the offset is chosen). Consumers (runIcp) widen back
-    /// to double and add the offset back exactly once, at the top of the function, before doing
-    /// any actual math.
+    /// Slave에서의 로컬 ICP 처리를 위해 전송되는 청크 데이터. 점 배열은 절대좌표
+    /// 대비 (offsetX, offsetY, offsetZ)만큼 이동된 `float`로 저장한다 -- 이렇게
+    /// 하면 밀리미터 이하의 정밀도를 유지하면서도 전송/저장 크기를 절반으로
+    /// 줄일 수 있다 (offset을 어떻게 결정하는지는 PseudoPointGenerator.hpp의
+    /// icp::computeBimRebaseOffset() 참고). 이 청크를 실제로 사용하는 쪽(runIcp)은
+    /// 함수 맨 앞에서 딱 한 번만 double로 승격시키고 offset을 다시 더한 뒤에
+    /// 실제 연산을 시작한다.
     struct IcpChunk {
-        /// Unique chunk identifier
+        /// 청크 고유 식별자
         uint32_t chunk_id = 0;
 
-        /// Source points (from point cloud) - [x, y, z], shifted, float
+        /// source 점들(포인트클라우드 유래) - [x, y, z], 이동됨(shifted), float
         std::vector<std::array<float, 3>> sourcePoints;
 
-        /// Target points (pseudo-points from mesh) - [x, y, z], shifted, float
+        /// target 점들(메시 유래 가상점) - [x, y, z], 이동됨(shifted), float
         std::vector<std::array<float, 3>> targetPoints;
 
-        /// Index indicating which face each point belongs to
+        /// 각 점이 속한 face를 가리키는 인덱스
         std::vector<size_t> faceIndices;
 
-        /// Face normal vectors - [nx, ny, nz]. Direction vectors, never shifted by offset.
+        /// face normal 벡터 - [nx, ny, nz]. 방향 벡터이므로 offset 이동의 대상이 아니다.
         std::vector<std::array<float, 3>> faceNormals;
 
-        /// Face representative points (one vertex per face) - [x, y, z], shifted, float
+        /// face별 대표점 (face 하나당 정점 1개) - [x, y, z], 이동됨(shifted), float
         std::vector<std::array<float, 3>> facePts;
 
-        /// Initial transformation (from coarse alignment)
+        /// 초기 변환 (coarse 정합 결과로부터 전달됨)
         Transform4x4 initialTransform;
 
-        /// ICP configuration for this chunk
+        /// 이 청크에 적용할 ICP 설정값
         IcpConfig config;
 
-        /// Rebase offset applied to sourcePoints/targetPoints/facePts (double, exact) -- add
-        /// this back after widening to double to recover absolute coordinates.
+        /// sourcePoints/targetPoints/facePts에 적용된 재배치(rebase) offset (double, 정확한 값)
+        /// -- double로 승격시킨 뒤 이 값을 다시 더하면 절대좌표로 복원된다.
         double offsetX = 0.0, offsetY = 0.0, offsetZ = 0.0;
 
-        /// Bounding box of source points
+        /// source 점들의 바운딩 박스
         double source_min_x = 0.0, source_min_y = 0.0, source_min_z = 0.0;
         double source_max_x = 0.0, source_max_y = 0.0, source_max_z = 0.0;
 
-        /// Bounding box of target points
+        /// target 점들의 바운딩 박스
         double target_min_x = 0.0, target_min_y = 0.0, target_min_z = 0.0;
         double target_max_x = 0.0, target_max_y = 0.0, target_max_z = 0.0;
 
-        /// Default constructor
+        /// 기본 생성자
         IcpChunk() : initialTransform(Transform4x4::identity()) {}
 
-        /// Calculate source bounding box from points
+        /// source 점들로부터 바운딩 박스 계산
         void calculateSourceBounds() {
             if (sourcePoints.empty()) return;
 
@@ -287,7 +292,7 @@ namespace icp {
             }
         }
 
-        /// Calculate target bounding box from points
+        /// target 점들로부터 바운딩 박스 계산
         void calculateTargetBounds() {
             if (targetPoints.empty()) return;
 
@@ -305,7 +310,7 @@ namespace icp {
             }
         }
 
-        /// Get approximate memory size in bytes
+        /// 대략적인 메모리 크기(바이트) 계산
         size_t getApproximateSize() const {
             return sizeof(IcpChunk) +
                 sourcePoints.size() * sizeof(std::array<float, 3>) +
@@ -314,7 +319,7 @@ namespace icp {
                 faceNormals.size() * sizeof(std::array<float, 3>);
         }
 
-        /// Check if chunk has valid data for processing
+        /// 처리 가능한 유효 데이터를 갖고 있는지 확인
         bool isValid() const {
             return !sourcePoints.empty() &&
                 !targetPoints.empty() &&
@@ -323,88 +328,88 @@ namespace icp {
     };
 
     //=========================================================================
-    // IcpResult - Result of ICP processing
+    // IcpResult - ICP 처리 결과
     //=========================================================================
 
-    /// Result from ICP processing on a single chunk
+    /// 청크 하나에 대한 ICP 처리 결과
     struct IcpResult {
-        /// Chunk identifier (matches IcpChunk::chunk_id)
+        /// 청크 식별자 (IcpChunk::chunk_id와 대응)
         uint32_t chunk_id = 0;
 
-        /// Final transformation matrix (combined: initial * local refinement)
+        /// 최종 변환 행렬 (initial * 로컬 미세조정을 합성한 값)
         Transform4x4 transform;
 
-        /// Local refinement transformation only (without initial)
+        /// 로컬 미세조정 변환만 (initial 성분 제외)
         Transform4x4 localTransform;
 
-        /// Final Root Mean Square Error
+        /// 최종 평균제곱근오차(RMSE)
         double finalRMSE = 0.0;
 
-        /// Initial RMSE (before ICP iterations)
+        /// 초기 RMSE (ICP 반복 시작 전)
         double initialRMSE = 0.0;
 
-        /// Number of iterations actually performed
+        /// 실제로 수행된 반복 횟수
         int actualIterations = 0;
 
-        /// Number of valid correspondences in final iteration
+        /// 마지막 반복에서의 유효 대응점 개수
         int correspondenceCount = 0;
 
-        /// Number of source points processed
+        /// 처리된 source 점 개수
         int sourcePointCount = 0;
 
-        /// Number of target points used
+        /// 사용된 target 점 개수
         int targetPointCount = 0;
 
-        /// Whether ICP converged within threshold
+        /// ICP가 임계값 이내로 수렴했는지 여부
         bool converged = false;
 
-        /// Whether processing was successful
+        /// 처리가 성공했는지 여부
         bool success = false;
 
-        /// Error message (if failed)
+        /// 오류 메시지 (실패 시)
         std::string errorMessage;
 
-        /// Processing time in milliseconds
+        /// 처리 소요 시간 (밀리초)
         double processingTimeMs = 0.0;
 
-        /// Default constructor
+        /// 기본 생성자
         IcpResult() : transform(Transform4x4::identity()),
             localTransform(Transform4x4::identity()) {
         }
 
-        /// Get RMSE improvement ratio (0.0 ~ 1.0)
+        /// RMSE 개선 비율 계산 (0.0 ~ 1.0)
         double getImprovementRatio() const {
             if (initialRMSE <= 0.0) return 0.0;
             return (initialRMSE - finalRMSE) / initialRMSE;
         }
 
-        /// Check if result is good quality
+        /// 결과 품질이 양호한지 확인
         bool isGood(double maxRMSE = 0.1) const {
             return success && converged && finalRMSE < maxRMSE;
         }
     };
 
     //=========================================================================
-    // IcpJobStatus - Status of entire ICP job
+    // IcpJobStatus - 전체 ICP 작업(job)의 상태
     //=========================================================================
 
-    /// Status enumeration for ICP job lifecycle
+    /// ICP 작업 생명주기를 나타내는 상태 열거형
     enum class IcpJobStatus {
-        PENDING,            ///< Job created, waiting to start
-        LOADING_DATA,       ///< Loading LAS and GLTF data
-        GENERATING_PSEUDO,  ///< Generating pseudo-points from mesh
-        COARSE_ALIGNMENT,   ///< Running coarse alignment on master
-        DISTRIBUTING,       ///< Distributing chunks to slaves
-        FINE_ALIGNMENT,     ///< Running fine alignment on slaves
-        AGGREGATING,        ///< Aggregating results from slaves
-        APPLYING_TRANSFORM, ///< Applying final transformation
-        SAVING_RESULT,      ///< Saving aligned point cloud
-        COMPLETED,          ///< Job completed successfully
-        FAILED,             ///< Job failed with error
-        CANCELLED           ///< Job was cancelled by user
+        PENDING,            ///< 작업이 생성되어 시작을 대기 중
+        LOADING_DATA,       ///< LAS와 GLTF 데이터를 로딩 중
+        GENERATING_PSEUDO,  ///< 메시로부터 가상점(pseudo-point) 생성 중
+        COARSE_ALIGNMENT,   ///< Master에서 coarse(전역) 정합 실행 중
+        DISTRIBUTING,       ///< Slave들에게 청크를 분배하는 중
+        FINE_ALIGNMENT,     ///< Slave들에서 fine(정밀) 정합 실행 중
+        AGGREGATING,        ///< Slave들의 결과를 통합하는 중
+        APPLYING_TRANSFORM, ///< 최종 변환을 적용하는 중
+        SAVING_RESULT,      ///< 정합된 포인트클라우드를 저장하는 중
+        COMPLETED,          ///< 작업이 성공적으로 완료됨
+        FAILED,             ///< 작업이 오류로 실패함
+        CANCELLED           ///< 사용자에 의해 작업이 취소됨
     };
 
-    /// Convert IcpJobStatus to string
+    /// IcpJobStatus를 문자열로 변환
     inline const char* statusToString(IcpJobStatus status) {
         switch (status) {
         case IcpJobStatus::PENDING:            return "PENDING";
@@ -424,15 +429,16 @@ namespace icp {
     }
 
     //=========================================================================
-    // IcpElementAlignment - Per-BIM-element (부재) alignment result
+    // IcpElementAlignment - BIM 부재(element) 단위 정합 결과
     //=========================================================================
 
-    /// One BIM element's individually-estimated alignment, kept alongside the combined
-    /// job-wide result so callers can inspect/save per-element quality (e.g. one element's
-    /// fine alignment converging poorly doesn't have to be guessed at from the combined RMSE
-    /// alone). `transform` here is the chunk's *local* refinement only (IcpResult::transform,
-    /// composed with the job's coarse transform the same way aggregateWeightedTransforms
-    /// combines all chunks) -- see CHANGELOG/doc for the combination math.
+    /// BIM 부재 하나에 대해 개별적으로 추정된 정합 결과. 작업 전체의 통합 결과와
+    /// 함께 보관되어, 호출자가 부재별 품질을 따로 확인할 수 있게 한다(예: 특정
+    /// 부재의 fine 정합이 잘 안 됐을 때, 통합 RMSE 하나만 보고 추측할 필요 없이
+    /// 바로 원인 부재를 짚어낼 수 있다). 여기서의 `transform`은 그 청크의 *로컬*
+    /// 미세조정 결과만을 담고 있으며(IcpResult::transform), aggregateWeightedTransforms가
+    /// 모든 청크를 통합하는 것과 동일한 방식으로 작업의 coarse 변환과 합성된
+    /// 값이다 -- 통합 수식의 상세한 유도는 CHANGELOG/doc 문서 참고.
     struct IcpElementAlignment {
         uint32_t chunk_id = 0;
         std::string elementName;
@@ -449,88 +455,88 @@ namespace icp {
     };
 
     //=========================================================================
-    // IcpJob - Master-side job management structure
+    // IcpJob - Master 측 작업(job) 관리 구조체
     //=========================================================================
 
-    /// Complete ICP job information (managed by Master)
+    /// ICP 작업의 전체 정보 (Master가 관리)
     struct IcpJob {
-        /// Unique job identifier
+        /// 작업 고유 식별자
         std::string jobId;
 
-        /// Input file paths
+        /// 입력 파일 경로
         std::string lasFilePath;
         std::string bimFolderPath;
 
-        /// LAS offset (user-supplied manual pre-shift, applied after loading)
+        /// LAS offset (사용자가 직접 지정하는 수동 사전 이동값, 로딩 직후 적용됨)
         double offsetX = 0.0;
         double offsetY = 0.0;
         double offsetZ = 0.0;
 
-        /// Rebase offset (computed automatically from the BIM centroid, distinct from the
-        /// manual offsetX/Y/Z above). Point-cloud coordinates are stored/transmitted shifted
-        /// by this amount (as float) to preserve sub-mm precision near the origin; the final
-        /// transform is corrected back to the original frame exactly once, when the job
-        /// completes (see aggregateWeightedTransforms usage in processIcpJob).
+        /// 재배치(rebase) offset (BIM 중심점으로부터 자동으로 계산됨, 위의 수동
+        /// offsetX/Y/Z와는 별개). 포인트클라우드 좌표는 원점 부근에서의 밀리미터
+        /// 이하 정밀도를 지키기 위해 이 값만큼 이동시킨(float) 상태로 저장/전송
+        /// 되며, 최종 변환은 작업이 완료될 때 딱 한 번 원래 좌표계로 보정된다
+        /// (processIcpJob에서의 aggregateWeightedTransforms 사용 부분 참고).
         double rebaseOffsetX = 0.0;
         double rebaseOffsetY = 0.0;
         double rebaseOffsetZ = 0.0;
 
-        /// Output file path for aligned point cloud
+        /// 정합된 포인트클라우드를 저장할 출력 파일 경로
         std::string outputPath;
 
-        /// Job configuration
+        /// 작업 설정값
         IcpConfig config;
 
-        /// Current status
+        /// 현재 상태
         IcpJobStatus status = IcpJobStatus::PENDING;
 
-        /// Error message (if status == FAILED)
+        /// 오류 메시지 (status == FAILED일 때)
         std::string errorMessage;
 
-        /// Coarse alignment result (Phase 1)
+        /// coarse 정합 결과 (1단계)
         Transform4x4 coarseTransform;
         double coarseRMSE = 0.0;
         bool coarseConverged = false;
 
-        /// Chunk results (Phase 2)
+        /// 청크별 결과 (2단계)
         std::vector<IcpResult> chunkResults;
         int totalChunks = 0;
         int completedChunks = 0;
         int failedChunks = 0;
 
-        /// Final aggregated result (Phase 3)
+        /// 최종 통합 결과 (3단계)
         Transform4x4 finalTransform;
         double finalRMSE = 0.0;
 
-        /// Per-BIM-element (부재) alignment results, one per successfully-processed chunk
-        /// (empty when fine alignment ran as a single Master-only pass instead of per-element
-        /// chunks). Saved to disk alongside the combined result -- see
-        /// alignmentOutputPath/saveAlignmentResults() in MasterApplication_ICP.cpp.
+        /// BIM 부재(부재)별 정합 결과, 성공적으로 처리된 청크마다 하나씩 (fine
+        /// 정합이 부재별 청크가 아니라 Master 단일 패스로 실행된 경우에는 비어
+        /// 있음). 통합 결과와 함께 디스크에 저장된다 -- MasterApplication_ICP.cpp의
+        /// alignmentOutputPath/saveAlignmentResults() 참고.
         std::vector<IcpElementAlignment> elementResults;
 
-        /// Path to the saved per-element + combined alignment JSON file (set once written)
+        /// 저장된 부재별+통합 정합 결과 JSON 파일의 경로 (파일이 실제로 쓰여진 뒤 설정됨)
         std::string alignmentOutputPath;
 
-        /// Statistics
+        /// 통계
         size_t totalPointCount = 0;
         size_t totalMeshTriangles = 0;
         size_t totalPseudoPoints = 0;
 
-        /// Timing information (milliseconds since epoch)
+        /// 시간 정보 (epoch 이후 경과 밀리초)
         double startTimeMs = 0.0;
         double endTimeMs = 0.0;
         double coarseAlignmentTimeMs = 0.0;
         double fineAlignmentTimeMs = 0.0;
 
-        /// Cancellation flag (atomic for thread safety)
+        /// 취소 요청 플래그 (스레드 안전을 위해 atomic 사용)
         std::atomic<bool> cancelRequested{ false };
 
-        /// Default constructor
+        /// 기본 생성자
         IcpJob() : coarseTransform(Transform4x4::identity()),
             finalTransform(Transform4x4::identity()) {
         }
 
-        /// Copy constructor (handle atomic)
+        /// 복사 생성자 (atomic 멤버를 직접 다뤄야 하므로 컴파일러가 자동 생성하지 못함)
         IcpJob(const IcpJob& other)
             : jobId(other.jobId)
             , lasFilePath(other.lasFilePath)
@@ -567,7 +573,7 @@ namespace icp {
         {
         }
 
-        /// Get progress percentage (0-100)
+        /// 진행률 계산 (0~100)
         double getProgress() const {
             switch (status) {
             case IcpJobStatus::PENDING:           return 0.0;
@@ -578,7 +584,7 @@ namespace icp {
             case IcpJobStatus::FINE_ALIGNMENT: {
                 if (totalChunks == 0) return 25.0;
                 double chunkProgress = static_cast<double>(completedChunks) / totalChunks;
-                return 25.0 + chunkProgress * 60.0; // 25% ~ 85%
+                return 25.0 + chunkProgress * 60.0; // 25% ~ 85% 구간을 청크 진행률에 비례 배분
             }
             case IcpJobStatus::AGGREGATING:        return 90.0;
             case IcpJobStatus::APPLYING_TRANSFORM: return 95.0;
@@ -590,7 +596,7 @@ namespace icp {
             }
         }
 
-        /// Get elapsed time in seconds (uses current time if job is still running)
+        /// 경과 시간(초) 계산 (작업이 아직 진행 중이면 현재 시각 기준으로 계산)
         double getElapsedTimeSec() const {
             if (startTimeMs <= 0.0) return 0.0;
             double end = (endTimeMs > 0.0) ? endTimeMs
@@ -600,61 +606,61 @@ namespace icp {
             return (end - startTimeMs) / 1000.0;
         }
 
-        /// Check if job is finished (success, failed, or cancelled)
+        /// 작업이 종료 상태(성공/실패/취소)인지 확인
         bool isFinished() const {
             return status == IcpJobStatus::COMPLETED ||
                 status == IcpJobStatus::FAILED ||
                 status == IcpJobStatus::CANCELLED;
         }
 
-        /// Check if job is currently running
+        /// 작업이 현재 진행 중인지 확인
         bool isRunning() const {
             return !isFinished() && status != IcpJobStatus::PENDING;
         }
     };
 
     //=========================================================================
-    // IcpStatistics - Aggregated statistics for reporting
+    // IcpStatistics - 보고용으로 집계한 통계 정보
     //=========================================================================
 
-    /// Statistics for ICP job results
+    /// ICP 작업 결과에 대한 통계치
     struct IcpStatistics {
-        /// Point cloud statistics
+        /// 포인트클라우드 통계
         size_t totalSourcePoints = 0;
         size_t processedSourcePoints = 0;
 
-        /// Mesh statistics
+        /// 메시 통계
         size_t totalMeshTriangles = 0;
         size_t totalPseudoPoints = 0;
 
-        /// Alignment statistics
+        /// 정합 통계
         double initialRMSE = 0.0;
         double coarseRMSE = 0.0;
         double finalRMSE = 0.0;
-        double rmseImprovement = 0.0; ///< percentage
+        double rmseImprovement = 0.0; ///< 백분율(%)
 
-        /// Iteration statistics
+        /// 반복 횟수 통계
         int coarseIterations = 0;
         int totalFineIterations = 0;
         double averageFineIterations = 0.0;
 
-        /// Correspondence statistics
+        /// 대응점 통계
         int totalCorrespondences = 0;
         double averageCorrespondenceDistance = 0.0;
 
-        /// Chunk statistics
+        /// 청크 통계
         int totalChunks = 0;
         int successfulChunks = 0;
         int failedChunks = 0;
         int convergedChunks = 0;
 
-        /// Timing (seconds)
+        /// 처리 시간 (초)
         double totalProcessingTimeSec = 0.0;
         double coarseAlignmentTimeSec = 0.0;
         double fineAlignmentTimeSec = 0.0;
         double dataLoadingTimeSec = 0.0;
 
-        /// Calculate statistics from IcpJob
+        /// IcpJob으로부터 통계치 계산
         static IcpStatistics fromJob(const IcpJob& job) {
             IcpStatistics stats;
 

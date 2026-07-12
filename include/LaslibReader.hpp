@@ -17,7 +17,7 @@
 #include <sstream>
 #include <cmath>
 
-// LAStools headers
+// LAStools 헤더
 #include "lasreader.hpp"
 #include "laswriter.hpp"
 #include "lasdefinitions.hpp"
@@ -49,7 +49,7 @@ namespace las {
         double gps_time{};
         std::array<std::uint16_t, 3> rgb{};
 
-        // Utility methods
+        // 유틸리티 메서드
         [[nodiscard]] bool hasRGB() const noexcept {
             return rgb[0] != 0 || rgb[1] != 0 || rgb[2] != 0;
         }
@@ -71,7 +71,7 @@ namespace las {
             return std::sqrt(dx * dx + dy * dy + dz * dz);
         }
 
-        // Comparison operators for sorting/searching
+        // 정렬/탐색을 위한 비교 연산자
         bool operator==(const PointData& other) const noexcept {
             return x == other.x && y == other.y && z == other.z;
         }
@@ -119,7 +119,7 @@ namespace las {
         std::array<std::uint32_t, 5> points_by_return{};
     };
 
-    // Custom exception for LAS operations
+    // LAS 작업을 위한 사용자 정의 예외
     class LASException : public std::runtime_error {
     public:
         explicit LASException(const std::string& message)
@@ -136,7 +136,7 @@ namespace las {
         static constexpr std::size_t PROGRESS_INTERVAL = 50000;
         static constexpr int MAX_CLASSIFICATION = 256;
 
-        // Static classification names using function to avoid initialization order issues
+        // 초기화 순서 문제를 피하기 위해 함수를 통해 분류명 정적 테이블을 제공
         [[nodiscard]] static const std::unordered_map<int, std::string_view>& getClassificationNames() noexcept {
             static const std::unordered_map<int, std::string_view> classification_names = {
                 {0, "Created, never classified"},
@@ -239,7 +239,7 @@ namespace las {
             }
         }
 
-        // Helper function to replace std::exchange
+        // std::exchange를 대체하는 헬퍼 함수
         template<typename T, typename U>
         T exchange(T& obj, U&& new_value) noexcept {
             T old_value = std::move(obj);
@@ -259,7 +259,7 @@ namespace las {
             std::size_t estimated_filtered) const {
             const std::size_t max_memory_mb = getAvailableMemoryMB();
             const std::size_t point_size = sizeof(PointData);
-            const std::size_t max_points = (max_memory_mb * 1024 * 1024) / point_size / 2; /// 50%
+            const std::size_t max_points = (max_memory_mb * 1024 * 1024) / point_size / 2; /// 가용 메모리의 50%까지만 사용
 
             return (std::min)({
                 estimated_filtered,
@@ -275,7 +275,7 @@ namespace las {
             close();
         }
 
-        // Non-copyable but movable
+        // 복사 불가, 이동은 가능
         LASToolsReader(const LASToolsReader&) = delete;
         LASToolsReader& operator=(const LASToolsReader&) = delete;
 
@@ -466,7 +466,7 @@ namespace las {
             return true;
         }
 
-        /// Load points with filter using template and SFINAE
+        /// 템플릿과 SFINAE를 이용해 필터를 적용하며 점을 로딩
         template<typename Filter, typename = std::enable_if_t<
             std::is_invocable_r_v<bool, Filter, const PointData&>>>
             [[nodiscard]] bool loadFilteredPoints(Filter&& filter) {
@@ -514,7 +514,7 @@ namespace las {
 
             std::cout << "\n========== Exporting to CSV... ==========\n";
 
-            // Write header
+            // 헤더 쓰기
             switch (format) {
             case ExportFormat::XYZ:
                 file << "X,Y,Z\n";
@@ -531,7 +531,7 @@ namespace las {
                 break;
             }
 
-            // Write data with batch processing for better performance
+            // 성능 향상을 위해 배치 단위로 데이터 쓰기
             constexpr std::size_t BATCH_SIZE = 10000;
             std::ostringstream batch_buffer;
 
@@ -611,7 +611,7 @@ namespace las {
             }
         }
 
-        // Getters
+        // 접근자(Getter)
         [[nodiscard]] std::size_t getPointCount() const noexcept {
             return reader_ ? static_cast<std::size_t>(reader_->npoints) : 0;
         }
@@ -632,7 +632,7 @@ namespace las {
             return loaded_points_;
         }
 
-        // Enhanced utility methods
+        // 확장 유틸리티 메서드
         [[nodiscard]] std::vector<PointData> getPointsByClassification(std::uint8_t classification) const {
             std::vector<PointData> result;
             std::copy_if(loaded_points_.begin(), loaded_points_.end(),
@@ -655,7 +655,7 @@ namespace las {
             return result;
         }
 
-        // Backward compatibility
+        // 하위 호환
         [[nodiscard]] static ExportFormat parseFormat(std::string_view format_str) noexcept {
             if (format_str == "xyz") return ExportFormat::XYZ;
             if (format_str == "xyzi") return ExportFormat::XYZI;

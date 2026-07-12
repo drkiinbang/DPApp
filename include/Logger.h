@@ -18,15 +18,16 @@ namespace DPApp {
 		CRITICAL = 4
 	};
 
-	/// Helper class for stream-style logging
+	/// 스트림 방식 로깅을 위한 헬퍼 클래스. `ILOG << "x=" << x;`처럼 쓸 수 있게 해준다 --
+	/// 실제 로그 기록은 이 임시 객체가 소멸(문장 끝)될 때 한 번에 이루어진다.
 	class LogStream {
 	public:
 		LogStream(LogLevel level) : level_(level) {}
 
-		/// Perform actual logging in the destructor
+		/// 소멸자에서 실제 로그 기록을 수행
 		~LogStream();
 
-		/// << operator overloading
+		/// << 연산자 오버로딩
 		template<typename T>
 		LogStream& operator<<(const T& value) {
 			stream_ << value;
@@ -55,23 +56,23 @@ namespace DPApp {
 			auto now = std::chrono::system_clock::now();
 			std::time_t t = std::chrono::system_clock::to_time_t(now);
 
-			std::tm tm_buf{}; /// Buffer for storing results
+			std::tm tm_buf{}; /// 결과를 저장할 버퍼
 #if defined(_WIN32)
-			/// Recommended for MSVC: thread-safe
+			/// MSVC 권장: 스레드 안전
 			localtime_s(&tm_buf, &t);
 #else
-			/// POSIX: thread-safe
+			/// POSIX: 스레드 안전
 			localtime_r(&t, &tm_buf);
 #endif
 
 			std::lock_guard<std::mutex> lock(log_mutex_);
 
-			/// Console output
+			/// 콘솔 출력
 			std::cout << std::put_time(&tm_buf, "%Y-%m-%d %H:%M:%S")
 				<< " [" << levelToString(level) << "] "
 				<< message << std::endl;
 
-			/// File output
+			/// 파일 출력
 			if (log_file_.is_open()) {
 				log_file_ << std::put_time(&tm_buf, "%Y-%m-%d %H:%M:%S")
 					<< " [" << levelToString(level) << "] "
@@ -80,7 +81,7 @@ namespace DPApp {
 			}
 		}
 
-		/// Functions for stream-style logging
+		/// 스트림 방식 로깅을 위한 함수들
 		static LogStream debug() { return LogStream(LogLevel::DEBUG); }
 		static LogStream info() { return LogStream(LogLevel::INFO); }
 		static LogStream warn() { return LogStream(LogLevel::WARN); }
@@ -113,19 +114,19 @@ namespace DPApp {
 		inline static LogLevel min_level_ = LogLevel::INFO;
 	};
 
-	/// LogStream destructor implementation (after Logger is fully defined)
+	/// LogStream 소멸자 구현부 (Logger가 완전히 정의된 뒤에 위치)
 	inline LogStream::~LogStream() {
 		Logger::log(level_, stream_.str());
 	}
 
-	/// Existing macros + Stream-style macros
+	/// 기존 매크로 + 스트림 방식 매크로
 #define LOG_DEBUG(msg) DPApp::Logger::log(DPApp::LogLevel::DEBUG, msg)
 #define LOG_INFO(msg) DPApp::Logger::log(DPApp::LogLevel::INFO, msg)
 #define LOG_WARN(msg) DPApp::Logger::log(DPApp::LogLevel::WARN, msg)
 #define LOG_ERROR(msg) DPApp::Logger::log(DPApp::LogLevel::ERROR_, msg)
 #define LOG_CRITICAL(msg) DPApp::Logger::log(DPApp::LogLevel::CRITICAL, msg)
 
-/// Stream-style macros
+/// 스트림 방식 매크로
 #define DLOG DPApp::Logger::debug()
 #define ILOG DPApp::Logger::info()
 #define WLOG DPApp::Logger::warn()

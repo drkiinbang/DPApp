@@ -34,7 +34,7 @@
 
 namespace DPApp {
 
-    /// Message types
+    /// 메시지 타입
     enum class MessageType : uint8_t {
         HANDSHAKE = 0x01,
         TASK_ASSIGNMENT = 0x02,
@@ -44,8 +44,8 @@ namespace DPApp {
         SLAVE_UNREGISTER = 0x06,
         ERROR_MESSAGE = 0x07,
         SHUTDOWN = 0x08,
-        PAUSE = 0x09,      /// Pause slave processing
-        RESUME = 0x0A      /// Resume slave processing
+        PAUSE = 0x09,      /// Slave 처리 일시정지
+        RESUME = 0x0A      /// Slave 처리 재개
     };
 
     // 네트워크 메시지 헤더
@@ -87,9 +87,9 @@ namespace DPApp {
         std::atomic<bool> is_active;
         std::chrono::steady_clock::time_point last_heartbeat;
 
-        /// Serializes sends to this client's socket (see NetworkClient::send_mutex_ for the
-        /// matching issue on the Slave side: NetworkServer::heartbeatThread() and the main
-        /// task-dispatch path can both send to the same client concurrently).
+        /// 이 클라이언트 소켓으로의 전송을 직렬화한다 (Slave 쪽의 동일한 문제는
+        /// NetworkClient::send_mutex_ 참고: NetworkServer::heartbeatThread()와 메인
+        /// 태스크 분배 경로가 동시에 같은 클라이언트로 전송할 수 있음).
         std::mutex send_mutex;
 
         ClientConnection(int fd, const std::string& addr, uint16_t p)
@@ -150,7 +150,7 @@ namespace DPApp {
         DPApp::RuntimeConfig cfg_;
     };
 
-    /// Utility functions
+    /// 유틸리티 함수
     namespace NetworkUtils {
         bool recvAll(int socket_fd, std::vector<uint8_t>& buffer, size_t bytes_to_receive);
         bool sendAll(int socket_fd, const std::vector<uint8_t>& buffer);
@@ -164,13 +164,13 @@ namespace DPApp {
         std::vector<uint8_t> serializeChunk(const PointCloudChunk& chunk);
         PointCloudChunk deserializeChunk(const std::vector<uint8_t>& data);
 
-        /// BIM/PC chunk serialization/deserialization
+        /// BIM/PC 청크 직렬화/역직렬화
         std::vector<uint8_t> serializeMeshChunk(const chunkbim::MeshChunk& meshChunk);
         chunkbim::MeshChunk deserializeMeshChunk(const std::vector<uint8_t>& data);
         std::vector<uint8_t> serializeBimPcChunk(const BimPcChunk& chunk);
         BimPcChunk deserializeBimPcChunk(const std::vector<uint8_t>& data);
 
-        /// BIM/PC processing result serialization/deserialization
+        /// BIM/PC 처리 결과 직렬화/역직렬화
         std::vector<uint8_t> serializeBimPcResult(const BimPcResult& result);
         BimPcResult deserializeBimPcResult(const std::vector<uint8_t>& data);
     }
@@ -209,12 +209,12 @@ namespace DPApp {
         std::thread client_thread_;
         std::thread heartbeat_thread_;
 
-        /// Serializes sendMessage() so concurrent callers (multiple processing threads when
-        /// -t > 1, plus the independent heartbeat thread that always runs regardless of -t)
-        /// can't interleave their send() calls on the same socket. sendAll() may issue several
-        /// send() calls for one message, so without this a large result and a heartbeat (or two
-        /// results) sent at the same time could interleave mid-message and corrupt the byte
-        /// stream the Master parses as message frames.
+        /// sendMessage()를 직렬화하여, 동시에 호출하는 쪽들(-t > 1일 때의 여러 처리
+        /// 스레드, 그리고 -t 값과 무관하게 항상 실행되는 독립적인 하트비트 스레드)이
+        /// 같은 소켓에 대한 send() 호출을 뒤섞지 못하게 한다. sendAll()은 메시지 하나당
+        /// 여러 번의 send() 호출을 낼 수 있으므로, 이 락이 없으면 큰 결과와 하트비트
+        /// (또는 결과 2개)가 동시에 전송될 때 메시지 중간에 뒤섞여, Master가 메시지
+        /// 프레임으로 파싱하는 바이트 스트림이 깨질 수 있다.
         std::mutex send_mutex_;
 
         MessageCallback message_callback_;

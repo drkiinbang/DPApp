@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #pragma warning(disable:4828)
 
@@ -24,13 +24,17 @@ using namespace tinygltf;
 using Matrix4f = Eigen::Matrix4f;
 using Vector4f = Eigen::Vector4f;
 
+/// tinygltf 라이브러리를 이용해 GLTF/GLB 파일을 읽고, 각 노드(node)의 메시(mesh)를
+/// 월드 좌표계로 변환한 뒤 BimInfo(면 목록)로 적재하는 로더 클래스.
+/// 노드 계층 구조(부모->자식 변환 행렬 누적), 인덱스 버퍼 기반 삼각형 구성,
+/// (옵션) 정점-면 인접관계(vertex-to-face) 추출까지 담당한다.
 class gltf
 {
 public:
 	gltf() {}
 
 	// -------------------------------
-	// Read GLTF (Return BimInfo)
+	// GLTF 읽기 (BimInfo 반환)
 	// -------------------------------
 	BimInfo read(std::string fileName)
 	{
@@ -49,7 +53,7 @@ public:
 		}
 		else {
 			std::cerr << "Unsupported file format" << std::endl;
-			return BimInfo(); // Return empty BimInfo if unsupported file format
+			return BimInfo(); // 지원하지 않는 파일 형식이면 빈 BimInfo 반환
 		}
 
 		if (!warn.empty()) {
@@ -62,12 +66,12 @@ public:
 
 		if (!fileread) {
 			std::cerr << "Failed to parse glTF" << std::endl;
-			return BimInfo(); // Return empty BimInfo if failed to parse glTF
+			return BimInfo(); // 파싱 실패 시 빈 BimInfo 반환
 		}
 
 		BimInfo bimInfo;
 
-		// Traverse all root nodes in the scene
+		// 씬(scene)의 모든 루트 노드를 순회
 		for (size_t s = 0; s < model.scenes.size(); ++s) {
 			const tinygltf::Scene& scene = model.scenes[s];
 			for (int nodeIdx : scene.nodes) {
@@ -95,7 +99,7 @@ public:
 		}
 		else {
 			std::cerr << "Unsupported file format" << std::endl;
-			return BimInfo(); // Return empty BimInfo if unsupported file format
+			return BimInfo(); // 지원하지 않는 파일 형식이면 빈 BimInfo 반환
 		}
 
 		if (!warn.empty()) {
@@ -108,12 +112,12 @@ public:
 
 		if (!fileread) {
 			std::cerr << "Failed to parse glTF" << std::endl;
-			return BimInfo(); // Return empty BimInfo if failed to parse glTF
+			return BimInfo(); // 파싱 실패 시 빈 BimInfo 반환
 		}
 
 		BimInfo bimInfo;
 
-		// Traverse entire scene
+		// 씬 전체를 순회 (face/vertex 인접관계까지 함께 추출)
 		for (size_t s = 0; s < model.scenes.size(); ++s) {
 			const tinygltf::Scene& scene = model.scenes[s];
 			for (int nodeIdx : scene.nodes) {
@@ -125,7 +129,10 @@ public:
 	}
 
 protected:
-	// Compute final transform including parent transforms
+	// 부모 노드들의 변환까지 모두 누적한 최종(월드) 변환 행렬을 계산한다.
+	// gltf는 노드에 부모 정보를 직접 저장하지 않으므로, 매번 전체 노드를
+	// 훑어서 부모를 역으로 찾아 루트까지의 경로(hierarchy)를 구성한 뒤,
+	// 루트->자식 순서로 행렬을 곱해 나간다.
 	Matrix4f ComputeWorldTransform(const tinygltf::Model& model, int nodeIndex) {
 		Matrix4f m = Matrix4f::Identity();
 		const tinygltf::Node* node = &model.nodes[nodeIndex];
@@ -134,7 +141,7 @@ protected:
 		while (true) {
 			hierarchy.push_back(nodeIndex);
 
-			// Search for parent (gltf doesn't store parent, so we need to find it manually)
+			// 부모 노드 탐색 (gltf는 부모를 저장하지 않으므로 직접 찾아야 한다)
 			int parent = -1;
 			for (size_t i = 0; i < model.nodes.size(); i++) {
 				for (int child : model.nodes[i].children) {
@@ -149,7 +156,7 @@ protected:
 			node = &model.nodes[nodeIndex];
 		}
 
-		// Multiply in order from root to child
+		// 루트에서 자식 방향 순서로 행렬 곱셈 (역순 순회)
 		for (auto it = hierarchy.rbegin(); it != hierarchy.rend(); ++it) {
 			m = m * GetNodeTransform(model.nodes[*it]);
 		}
@@ -159,17 +166,19 @@ protected:
 private:
 	Point computeNormal(const Point& v1, const Point& v2, const Point& v3)
 	{
-		// Calculate the vectors representing two sides of the triangle
+		// 삼각형의 두 변을 나타내는 벡터 계산
 		Point side1 = v2 - v1;
 		Point side2 = v3 - v1;
 
-		// Compute the cross product of the two sides to get the normal vector
+		// 두 변의 외적(cross product)으로 법선 벡터를 구한다
 		Point normal = side1.crossProduct(side2).normalize();
 
 		return normal;
 	}
 
-	// Function to calculate node transform
+	// 노드 하나의 로컬 변환 행렬을 계산하는 함수.
+	// matrix가 직접 주어져 있으면 그대로 사용하고, 그렇지 않으면
+	// translation/rotation(quaternion)/scale을 조합해 행렬을 구성한다.
 	Matrix4f GetNodeTransform(const tinygltf::Node& node) {
 		Matrix4f m = Matrix4f::Identity();
 
@@ -178,13 +187,13 @@ private:
 				m(i / 4, i % 4) = static_cast<float>(node.matrix[i]);
 		}
 		else {
-			// translation
+			// 이동(translation)
 			if (!node.translation.empty()) {
 				m.block<3, 1>(0, 3) = Eigen::Vector3f(
 					node.translation[0], node.translation[1], node.translation[2]);
 			}
 
-			// rotation (quaternion)
+			// 회전(quaternion)
 			if (!node.rotation.empty()) {
 				Eigen::Quaternionf q(
 					node.rotation[3], node.rotation[0],
@@ -192,7 +201,7 @@ private:
 				m.block<3, 3>(0, 0) = q.toRotationMatrix();
 			}
 
-			// scale
+			// 스케일(scale)
 			if (!node.scale.empty()) {
 				m(0, 0) *= node.scale[0];
 				m(1, 1) *= node.scale[1];
@@ -202,13 +211,13 @@ private:
 		return m;
 	}
 
-	// Compare string ending
+	// 문자열 접미사(suffix) 비교
 	bool EndsWith(const std::string& str, const std::string& suffix) {
 		return str.size() >= suffix.size() &&
 			str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
 	}
 
-	// Node traversal function
+	// 노드 순회 함수 (face만 추출, vertex 인접관계는 필요 없는 경우)
 	void TraverseNode(const tinygltf::Model& model, int nodeIndex, BimInfo& bimInfo) {
 		const tinygltf::Node& node = model.nodes[nodeIndex];
 		Matrix4f world = ComputeWorldTransform(model, nodeIndex);
@@ -241,7 +250,7 @@ private:
 
 				int numIndices = idxAcc.count;
 
-				// Create triangles
+				// 삼각형 생성
 				for (int i = 0; i < numIndices; i += 3) {
 					int idx1 = indices[i];
 					int idx2 = indices[i + 1];
@@ -263,14 +272,14 @@ private:
 			}
 		}
 
-		// Traverse child nodes as well
+		// 자식 노드도 재귀적으로 순회
 		for (int child : node.children) {
 			TraverseNode(model, child, bimInfo);
 		}
 	}
 
 
-	// Node traversal function (with faces/vertices)
+	// 노드 순회 함수 (face/vertex 인접관계 포함 버전)
 	void TraverseNodeFaces(const tinygltf::Model& model, int nodeIndex,
 		BimInfo& bimInfo,
 		std::vector<chunkbim::Face>& faces,
@@ -308,7 +317,7 @@ private:
 				int numVertices = posAcc.count;
 				int numIndices = idxAcc.count;
 
-				// ---- Store vertices ----
+				// ---- 정점(vertex) 저장 ----
 				size_t baseIndex = vertices.size();
 				for (int i = 0; i < numVertices; ++i) {
 					Vector4f v = world * Vector4f(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2], 1.0f);
@@ -316,7 +325,7 @@ private:
 					vertices.push_back(p);
 				}
 
-				// ---- Store faces + BimInfo ----
+				// ---- face + BimInfo 저장 ----
 				size_t fid = 0;
 				for (int i = 0; i < numIndices; i += 3) {
 					int idx1 = indices[i] + baseIndex;
@@ -341,7 +350,7 @@ private:
 						Point(v3.x(), v3.y(), v3.z())
 					);
 
-					// Store vertex to face relationship
+					// 정점->face 인접관계 저장 (이 정점이 어느 face들에 속하는지)
 					vertices[idx1].fIds.push_back(fid);
 					vertices[idx2].fIds.push_back(fid);
 					vertices[idx3].fIds.push_back(fid);
@@ -351,7 +360,7 @@ private:
 			}
 		}
 
-		// Traverse child nodes as well
+		// 자식 노드도 재귀적으로 순회
 		for (int child : node.children) {
 			TraverseNodeFaces(model, child, bimInfo, faces, vertices);
 		}

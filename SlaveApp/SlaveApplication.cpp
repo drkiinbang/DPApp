@@ -18,14 +18,14 @@
 #include "../include/PointCloudTypes.h"
 #include "../include/NetworkManager.h"
 #include "../include/TaskManager.h"
-#include "../include/TestTask.h"  // �׽�Ʈ Task ó����
+#include "../include/TestTask.h"  // 테스트 Task 처리용
 #include "../include/bimtree/IcpProcessor.hpp"
 #include "../include/Logger.h"
 #include "../include/RuntimeConfig.h"
 
 using namespace DPApp;
 
-// Global cancellation flag for immediate stop
+// 즉시 중지를 위한 전역 취소 플래그
 namespace DPApp {
     std::atomic<bool> g_cancel_requested{ false };
 }
@@ -39,7 +39,7 @@ public:
     }
 
     bool initialize(int argc, char* argv[]) {
-        // Initialize logger
+        // 로거 초기화
         std::time_t t = std::time(nullptr);
         std::tm tm{};
 #ifdef _WIN32
@@ -52,13 +52,13 @@ public:
         DPApp::Logger::initialize(logFilename);
         DPApp::Logger::setMinLevel(DPApp::LogLevel::INFO);
 
-        // Load configuration from environment
+        // 환경변수로부터 설정 로딩
         cfg_ = DPApp::RuntimeConfig::loadFromEnv();
 
-        // Parse command line arguments
+        // 명령줄 인자 파싱
         parseCommandLine(argc, argv);
 
-        // Setup network client
+        // 네트워크 클라이언트 설정
         client_ = std::make_unique<NetworkClient>();
         client_->setMessageCallback([this](const NetworkMessage& msg, const std::string& sender_id) {
             handleMessage(msg, sender_id);
@@ -68,7 +68,7 @@ public:
             handleConnection(client_id, connected);
             });
 
-        // Setup task processor
+        // 태스크 처리기 설정
         task_processor_ = std::make_unique<TaskProcessor>();
 
         return true;
@@ -84,10 +84,11 @@ public:
         ILOG << "Processing threads: " << processing_threads_;
         ILOG << "Slave ID: " << client_->getSlaveId();
 
-        // Connect to server, retrying on failure instead of giving up after a single attempt.
-        // A transient refusal right after the master starts (or a brief network hiccup)
-        // used to kill the slave process immediately; now it retries like a lost-connection does.
-        const int max_attempts = cfg_.slave_max_reconnect_attempts; // <=0 means retry forever
+        // 서버에 연결. 한 번 시도해서 실패하면 바로 포기하는 대신 재시도한다.
+        // 예전에는 Master가 막 시작된 직후의 일시적인 연결 거부(또는 잠깐의 네트워크
+        // 문제)만으로도 Slave 프로세스가 즉시 죽어버렸다; 이제는 연결이 끊겼을 때와
+        // 마찬가지로 재시도한다.
+        const int max_attempts = cfg_.slave_max_reconnect_attempts; // <=0이면 무한 재시도
         int attempt = 0;
         bool connected = false;
         while (!connected) {
@@ -114,12 +115,12 @@ public:
 
         running_ = true;
 
-        // Start processing threads
+        // 처리 스레드 시작
         for (size_t i = 0; i < processing_threads_; ++i) {
             processing_thread_pool_.emplace_back(&SlaveApplication::processingLoop, this, i);
         }
 
-        // Start status reporting thread
+        // 상태 보고 스레드 시작
         status_thread_ = std::thread(&SlaveApplication::statusLoop, this);
 
         ILOG << "Slave worker started successfully";
@@ -132,29 +133,29 @@ public:
 
         ILOG << "Stopping slave worker...";
 
-        // Set running flag to false first
+        // running 플래그를 먼저 false로 설정
         running_ = false;
         shutdown_requested_ = true;
 
-        // Notify all waiting threads about shutdown
+        // 대기 중인 모든 스레드에게 종료를 알림
         task_queue_cv_.notify_all();
 
-        /// [Fix] The network must be disconnected first to unblock blocked send/recv calls
+        /// [수정 이력] 블로킹된 send/recv 호출을 풀어주려면 네트워크를 먼저 끊어야 한다
         if (client_) {
             ILOG << "Disconnecting network to unblock threads...";
             client_->disconnect();
         }
 
-        // Processing threads shutdown (with timeout)
+        // 처리 스레드 종료 (타임아웃 적용)
         ILOG << "Waiting for processing threads...";
         auto thread_shutdown_start = std::chrono::steady_clock::now();
-        const auto max_wait_time = std::chrono::seconds(5);  // Max 5 seconds wait
+        const auto max_wait_time = std::chrono::seconds(5);  // 최대 5초 대기
 
         for (auto& thread : processing_thread_pool_) {
             if (thread.joinable()) {
                 auto elapsed = std::chrono::steady_clock::now() - thread_shutdown_start;
                 if (elapsed < max_wait_time) {
-                    // Wait for remaining time
+                    // 남은 시간만큼 대기
                     auto remaining = max_wait_time - elapsed;
                     if (std::chrono::milliseconds(100) < remaining) {
                         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -177,19 +178,18 @@ public:
         }
         processing_thread_pool_.clear();
 
-        // Status thread shutdown (with timeout)
+        // status 스레드 종료 (타임아웃 적용)
         ILOG << "Waiting for status thread...";
         if (status_thread_.joinable()) {
-            // �ִ� 3�� ��� �� detach
+            // 최대 3초 대기 후 detach
             bool joined = false;
             for (int i = 0; i < 30 && !joined; ++i) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                // status_thread�� running_ üũ�ϹǷ� �� ����� ��
-                // ������ sleep ���� �� �����Ƿ� Ÿ�Ӿƿ� �ʿ�
+                // status_thread가 running_ 체크하므로 곧 끝날 것이므로 타임아웃 불필요
             }
 
             try {
-                // Ÿ�Ӿƿ� �Ŀ��� joinable�̸� detach
+                // 타임아웃 이후에도 joinable하면 detach
                 if (status_thread_.joinable()) {
                     WLOG << "Status thread join timeout, detaching...";
                     status_thread_.detach();
@@ -200,19 +200,19 @@ public:
             }
         }
 
-        // Close stdin for input thread
+        // 입력 스레드를 위해 stdin 닫기
         ILOG << "Closing stdin for input thread...";
 #ifdef _WIN32
         try {
-            // Windows���� stdin�� ��� ���� I/O�� ��� (���� ���� ����)
+            // Windows에서는 stdin의 대기 중인 I/O만 취소 (완전 종료는 하지 않음)
             HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
             if (hStdin != INVALID_HANDLE_VALUE && hStdin != NULL) {
-                CancelIoEx(hStdin, NULL);  // ��� ���� I/O ���
+                CancelIoEx(hStdin, NULL);  // 대기 중인 I/O 취소
             }
-            // _close()�� ȣ������ ���� - assertion �߻� ����
+            // _close()는 호출하지 않음 - assertion 발생 방지
         }
         catch (...) {
-            // Already closed or error, ignore
+            // 이미 닫혔거나 오류 발생 -- 무시
         }
 #else
         try {
@@ -221,14 +221,14 @@ public:
             }
         }
         catch (...) {
-            // Already closed or error, ignore
+            // 이미 닫혔거나 오류 발생 -- 무시
         }
 #endif
 
-        // Input thread shutdown (with timeout)
+        // 입력 스레드 종료 (타임아웃 적용)
         ILOG << "Waiting for input thread...";
         if (input_thread_.joinable()) {
-            // �ִ� 2�� ���
+            // 최대 2초 대기
             bool joined = false;
             auto input_start = std::chrono::steady_clock::now();
             while (!joined && std::chrono::steady_clock::now() - input_start < std::chrono::seconds(2)) {
@@ -264,36 +264,36 @@ public:
 
         printHelp();
 
-        // Separate thread for input processing
+        // 입력 처리를 위한 별도 스레드
         input_thread_ = std::thread([this]() {
             std::string command;
             while (running_ && !shutdown_requested_ && !force_exit_) {
                 if (std::getline(std::cin, command)) {
                     if (!processCommand(command)) {
-                        running_ = false;  // quit command processing
+                        running_ = false;  // quit 명령 처리
                         break;
                     }
                 }
 
-                // Check exit conditions even without input
+                // 입력이 없어도 종료 조건은 계속 확인
                 if (shutdown_requested_ || force_exit_) {
                     break;
                 }
             }
             });
 
-        // Main loop periodically checks status
+        // 메인 루프에서 주기적으로 상태 확인
         while (running_ && !shutdown_requested_ && !force_exit_) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-            // Check connection status
+            // 연결 상태 확인
             if (!client_->isConnected()) {
                 WLOG << "Lost connection to master server";
                 break;
             }
         }
 
-        // Log shutdown reason
+        // 종료 사유 로그
         if (shutdown_requested_) {
             ILOG << "Shutdown requested by master, stopping...";
         }
@@ -320,10 +320,10 @@ private:
         PointCloudChunk chunk;
         BimPcChunk bimpc_chunk;
         TestChunk test_chunk;
-        icp::IcpChunk icp_chunk;       /// <-- �߰�
+        icp::IcpChunk icp_chunk;       /// <-- 추가
         bool is_bimpc;
         bool is_test;
-        bool is_icp;                   /// <-- �߰�
+        bool is_icp;                   /// <-- 추가
 
         TaskQueueItem() : is_bimpc(false), is_test(false), is_icp(false) {}
         TaskQueueItem(const ProcessingTask& t, const PointCloudChunk& c)
@@ -335,7 +335,7 @@ private:
         TaskQueueItem(const ProcessingTask& t, const TestChunk& tc)
             : task(t), test_chunk(tc), is_bimpc(false), is_test(true), is_icp(false) {
         }
-        /// ICP ûũ�� ������ �߰�
+        /// ICP 청크를 위해 추가된 생성자
         TaskQueueItem(const ProcessingTask& t, const icp::IcpChunk& ic)
             : task(t), icp_chunk(ic), is_bimpc(false), is_test(false), is_icp(true) {
         }
@@ -356,9 +356,9 @@ private:
                 }
             }
             else if (arg == "-t" || arg == "--threads") {
-                /// [Fix] processing_threads_ used to be a `const size_t` hardcoded to 1,
-                /// so config/slave.ini's `processing_threads` setting had no effect no matter
-                /// what it was set to. It is now a regular member overridable from the CLI.
+                /// [수정 이력] 예전에는 processing_threads_가 1로 하드코딩된 `const size_t`여서,
+                /// config/slave.ini의 `processing_threads` 설정을 어떻게 바꿔도 아무 효과가
+                /// 없었다. 지금은 일반 멤버 변수로 바뀌어 CLI에서 재정의할 수 있다.
                 if (i + 1 < argc) {
                     int threads = std::stoi(argv[++i]);
                     if (threads > 0) {
@@ -418,15 +418,15 @@ private:
         else if (cmd == "help") {
             printHelp();
         }
-        // Graceful quit
+        // 정상(graceful) 종료
         else if (cmd == "quit" || cmd == "exit") {
             ILOG << "[GRACEFUL] finish current task then stop.";
-            // Wake up waiting threads
+            // 대기 중인 스레드들을 깨움
             task_queue_cv_.notify_all();
-            // Exit run() loop to call stop()
+            // run() 루프를 빠져나가 stop()을 호출하게 함
             return false;
         }
-        // Immediate quit: attempt to cancel in-flight tasks too
+        // 즉시 종료: 진행 중인 태스크도 취소를 시도
         else if (cmd == "quit-now" || cmd == "exit-now" || cmd == "quit!") {
             ILOG << "[IMMEDIATE] cancel in-flight task and stop NOW.";
             DPApp::g_cancel_requested.store(true, std::memory_order_relaxed);
@@ -457,19 +457,19 @@ private:
         case MessageType::SHUTDOWN:
             ILOG << "Received SHUTDOWN command from master - initiating immediate shutdown";
 
-            // Set immediate shutdown flags
+            // 즉시 종료 플래그 설정
             shutdown_requested_ = true;
             force_exit_ = true;
             running_ = false;
 
-            // Wake up all waiting threads
+            // 대기 중인 모든 스레드를 깨움
             task_queue_cv_.notify_all();
 #ifdef _WIN32
             _close(_fileno(stdin));
 #else
             close(STDIN_FILENO);
 #endif
-            // Immediately disconnect network to unblock
+            // 블로킹을 풀기 위해 네트워크를 즉시 끊음
             std::thread([this]() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
                 if (client_) {
@@ -491,14 +491,14 @@ private:
         }
         else {
             ILOG << "Disconnected from master server";
-            // Only attempt reconnection if we're still supposed to be running
-            // and the disconnection wasn't initiated by us
+            // 계속 실행 중이어야 하는 상태이고, 이 연결 끊김이 우리가 스스로 시작한 게
+            // 아닐 때만 재연결을 시도한다
             if (running_ && !shutdown_requested_) {
                 WLOG << "Connection lost, attempting to reconnect...";
-                // Reconnection logic would go here
+                // 재연결 로직은 여기에 들어갈 예정
             }
             else {
-                // If we initiated the shutdown, don't try to reconnect
+                // 우리가 직접 종료를 시작한 것이면 재연결을 시도하지 않음
                 ILOG << "Shutdown in progress, not attempting reconnection";
             }
         }
@@ -509,21 +509,21 @@ private:
             const uint8_t* data = message.data.data();
             size_t offset = 0;
 
-            /// 1. Read Task data size
+            /// 1. Task 데이터 크기 읽기
             uint32_t task_data_size = 0;
             std::memcpy(&task_data_size, data + offset, sizeof(uint32_t));
             offset += sizeof(uint32_t);
 
-            /// 2. Deserialize Task data
+            /// 2. Task 데이터 역직렬화
             std::vector<uint8_t> task_buffer(data + offset, data + offset + task_data_size);
             offset += task_data_size;
             ProcessingTask task = NetworkUtils::deserializeTask(task_buffer);
 
-            /// 3. Read is_bimpc flag
+            /// 3. is_bimpc 플래그 읽기
             uint8_t is_bimpc_flag = data[offset];
             offset += 1;
 
-            /// 4. Read Chunk data size
+            /// 4. 청크 데이터 크기 읽기
             uint32_t chunk_data_size = 0;
             std::memcpy(&chunk_data_size, data + offset, sizeof(uint32_t));
             offset += sizeof(uint32_t);
@@ -533,18 +533,18 @@ private:
                 << ", is_bimpc: " << (is_bimpc_flag ? "Yes" : "No")
                 << ", chunk_data_size: " << chunk_data_size << " bytes)";
 
-            /// ICP Task Ÿ������ Ȯ��
+            /// ICP Task 타입인지 확인
             bool is_icp_task = (task.task_type == TaskType::ICP_FINE_ALIGNMENT);
 
-            /// 5. �׽�Ʈ Task Ÿ������ Ȯ��
+            /// 5. 테스트 Task 타입인지 확인
             bool is_test_task = (task.task_type == TaskType::TEST_ECHO ||
                 task.task_type == TaskType::TEST_COMPUTE ||
                 task.task_type == TaskType::TEST_DELAY ||
                 task.task_type == TaskType::TEST_FAIL);
             
-            /// ICP Task ó��
+            /// ICP Task 처리
             if (is_icp_task && chunk_data_size > 0) {
-                /// Handle IcpChunk
+                /// IcpChunk 처리
                 std::vector<uint8_t> chunk_buffer(data + offset, data + offset + chunk_data_size);
                 icp::IcpChunk icp_chunk = icp::deserializeIcpChunk(chunk_buffer);
 
@@ -559,7 +559,7 @@ private:
                 task_queue_cv_.notify_one();
             }
             else if (is_test_task && chunk_data_size > 0) {
-                /// Handle TestChunk
+                /// TestChunk 처리
                 std::vector<uint8_t> chunk_buffer(data + offset, data + offset + chunk_data_size);
                 TestChunk test_chunk = TestChunk::deserialize(chunk_buffer);
 
@@ -575,7 +575,7 @@ private:
                 task_queue_cv_.notify_one();
             }
             else if (is_bimpc_flag && chunk_data_size > 0) {
-                /// Handle BimPcChunk
+                /// BimPcChunk 처리
                 std::vector<uint8_t> chunk_buffer(data + offset, data + offset + chunk_data_size);
                 BimPcChunk bimpc_chunk = NetworkUtils::deserializeBimPcChunk(chunk_buffer);
 
@@ -590,7 +590,7 @@ private:
                 task_queue_cv_.notify_one();
             }
             else if (chunk_data_size > 0) {
-                /// Handle PointCloudChunk
+                /// PointCloudChunk 처리
                 std::vector<uint8_t> chunk_buffer(data + offset, data + offset + chunk_data_size);
                 PointCloudChunk chunk = NetworkUtils::deserializeChunk(chunk_buffer);
 
@@ -604,7 +604,7 @@ private:
                 task_queue_cv_.notify_one();
             }
             else {
-                /// Handle case with no chunk data (�� �׽�Ʈ Task ����)
+                /// 청크 데이터가 없는 경우 처리 (예: 테스트 Task)
                 if (is_test_task) {
                     ILOG << "Task " << task.task_id << " is TEST task with default data";
                     TestChunk test_chunk = TestChunk::generate(task.chunk_id, 100, 10000);
@@ -643,7 +643,7 @@ private:
         while (running_) {
             TaskQueueItem item;
 
-            /// Get task from queqe
+            /// 큐에서 태스크 가져오기
             {
                 std::unique_lock<std::mutex> lock(task_queue_mutex_);
                 task_queue_cv_.wait(lock, [this] { return !task_queue_.empty() || !running_; });
@@ -665,7 +665,7 @@ private:
 
             auto start_time = std::chrono::steady_clock::now();
 
-            /// ICP Task ó��
+            /// ICP Task 처리
             if (item.is_icp) {
                 icp::IcpResult icp_result;
                 try {
@@ -689,7 +689,7 @@ private:
                 sendIcpResult(icp_result, item.task.task_id);
                 updateStats(icp_result.success, processing_time / 1000.0);
             }
-            /// �׽�Ʈ Task ó��
+            /// 테스트 Task 처리
             else if (item.is_test) {
                 TestResult test_result;
                 try {
@@ -714,13 +714,13 @@ private:
                     WLOG << "Test Task " << item.task.task_id << " failed: " << test_result.error_message;
                 }
 
-                /// Send Test result back to Master
+                /// 테스트 결과를 Master로 전송
                 sendTestResult(test_result);
                 updateStats(test_result.success, processing_time / 1000.0);
             }
-            /// Handle branch processing between BimPcChunk and PointCloudChunk
+            /// BimPcChunk와 PointCloudChunk 사이의 분기 처리
             else if (item.is_bimpc) {
-                /// Process BimPcChunk
+                /// BimPcChunk 처리
                 BimPcResult result;
                 try {
                     result = task_processor_->processTask(item.task, item.bimpc_chunk);
@@ -744,12 +744,12 @@ private:
                     WLOG << "Task " << item.task.task_id << " failed: " << result.error_message;
                 }
 
-                /// Send BimPc result back to Master
+                /// BimPc 결과를 Master로 전송
                 sendBimPcResult(result);
                 updateStats(result.success, processing_time / 1000.0);
             }
             else {
-                /// Process PointCloudChunk
+                /// PointCloudChunk 처리
                 ProcessingResult result;
                 try {
                     result = task_processor_->processTask(item.task, item.chunk);
@@ -773,7 +773,7 @@ private:
                     WLOG << "Task " << item.task.task_id << " failed: " << result.error_message;
                 }
 
-                /// Send result back to Master
+                /// 결과를 Master로 전송
                 sendTaskResult(result);
                 updateStats(result.success, processing_time / 1000.0);
             }
@@ -786,7 +786,7 @@ private:
         try {
             std::vector<uint8_t> result_data = NetworkUtils::serializeResult(result);
 
-            /// Add is_bimpc flag (1 byte)
+            /// is_bimpc 플래그 추가 (1바이트)
             std::vector<uint8_t> message_data;
             message_data.push_back(0);  /// is_bimpc = false
             message_data.insert(message_data.end(), result_data.begin(), result_data.end());
@@ -809,7 +809,7 @@ private:
         try {
             std::vector<uint8_t> result_data = NetworkUtils::serializeBimPcResult(result);
 
-            /// Add is_bimpc flag (1 byte)
+            /// is_bimpc 플래그 추가 (1바이트)
             std::vector<uint8_t> message_data;
             message_data.push_back(1);  /// is_bimpc = true
             message_data.insert(message_data.end(), result_data.begin(), result_data.end());
@@ -829,7 +829,7 @@ private:
     }
 
     /// =========================================
-    /// �׽�Ʈ Task ó�� �Լ�
+    /// 테스트 Task 처리 함수
     /// =========================================
 
     TestResult processTestTask(const ProcessingTask& task, TestChunk& chunk) {
@@ -866,7 +866,7 @@ private:
         return result;
     }
 
-    /// Process ICP task
+    /// ICP 태스크 처리
     icp::IcpResult processIcpTask(const ProcessingTask& task, const icp::IcpChunk& chunk) {
         ILOG << "[ICP] Processing task " << task.task_id
             << " (chunk: " << chunk.chunk_id
@@ -877,7 +877,7 @@ private:
         result.chunk_id = chunk.chunk_id;
 
         try {
-            /// Run ICP processing
+            /// ICP 처리 실행
             result = DPApp::IcpProcessors::processFineAlignment(chunk, g_cancel_requested);
 
             if (!result.success) {
@@ -893,25 +893,25 @@ private:
         return result;
     }
 
-    /// Send ICP result to master
+    /// ICP 결과를 master로 전송
     void sendIcpResult(const icp::IcpResult& result, uint32_t task_id) {
         try {
-            /// Serialize ICP result
+            /// ICP 결과 직렬화
             std::vector<uint8_t> result_data = icp::serializeIcpResult(result);
 
-            /// Message format: [result_type: 1B][task_id: 4B][result_data]
+            /// 메시지 포맷: [result_type: 1B][task_id: 4B][result_data]
             /// result_type: 0=normal, 1=bimpc, 2=test, 3=icp
             std::vector<uint8_t> message_data;
             message_data.reserve(1 + sizeof(uint32_t) + result_data.size());
 
             message_data.push_back(3);  /// result_type = 3 (ICP)
 
-            /// Add task_id
+            /// task_id 추가
             size_t pos = message_data.size();
             message_data.resize(pos + sizeof(uint32_t));
             std::memcpy(message_data.data() + pos, &task_id, sizeof(uint32_t));
 
-            /// Add result data
+            /// 결과 데이터 추가
             message_data.insert(message_data.end(), result_data.begin(), result_data.end());
 
             NetworkMessage message(MessageType::TASK_RESULT, message_data);
@@ -934,10 +934,10 @@ private:
 
     void sendTestResult(const TestResult& result) {
         try {
-            /// TestResult�� ����ȭ
+            /// TestResult를 직렬화
             std::vector<uint8_t> result_data = result.serialize();
 
-            /// is_test flag (2) �߰��Ͽ� Master�� �׽�Ʈ ������� �ν�
+            /// is_test flag (2) 추가하여 Master가 테스트 결과임을 인식
             std::vector<uint8_t> message_data;
             message_data.push_back(2);  /// is_test = true (0: normal, 1: bimpc, 2: test)
             message_data.insert(message_data.end(), result_data.begin(), result_data.end());
@@ -960,7 +960,7 @@ private:
 
     void statusLoop() {
         while (running_) {
-            // Check more frequently for quick shutdown support
+            // 빠른 종료를 위해 더 자주 확인
             for (int i = 0; i < 60 && running_; ++i) {
                 std::this_thread::sleep_for(std::chrono::seconds(1));
             }
@@ -1055,19 +1055,19 @@ private:
     uint16_t server_port_;
     size_t processing_threads_ = 1;
 
-    // Task queue
+    // 태스크 큐
     std::queue<TaskQueueItem> task_queue_;
     std::mutex task_queue_mutex_;
     std::condition_variable task_queue_cv_;
 
-    // Processing threads
+    // 처리 스레드
     std::vector<std::thread> processing_thread_pool_;
     std::thread status_thread_;
 
-    // Input thread
+    // 입력 스레드
     std::thread input_thread_;
 
-    // Statistics
+    // 통계
     std::mutex stats_mutex_;
     std::atomic<uint32_t> completed_tasks_{ 0 };
     std::atomic<uint32_t> failed_tasks_{ 0 };
@@ -1075,7 +1075,7 @@ private:
     double avg_processing_time_{ 0.0 };
 };
 
-// Global variable (for signal handler)
+// 전역 변수 (시그널 핸들러용)
 static SlaveApplication* g_app = nullptr;
 
 void signalHandler(int signal) {
@@ -1088,7 +1088,7 @@ void signalHandler(int signal) {
 }
 
 int main(int argc, char* argv[]) {
-    // Setup signal handler
+    // 시그널 핸들러 설정
     signal(SIGINT, signalHandler);
     signal(SIGTERM, signalHandler);
 

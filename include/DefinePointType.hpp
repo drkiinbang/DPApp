@@ -1,5 +1,7 @@
 #pragma once
 
+/// 포맷 변환(cnvrt) 유틸리티가 사용하는 경량 점/바운딩박스 타입 모음.
+/// icp::Transform4x4나 pctree::XYZPoint와는 별개의, 이 네임스페이스 전용 타입이다.
 #include <string>
 
 namespace cnvrt
@@ -79,6 +81,11 @@ namespace cnvrt
             }
         }
 
+        /// 바운딩 박스를 (가장 긴 변에 맞춘) 정육면체로 확장한다.
+        /// [주의] z_center 대신 x_center로 z의 min/max를 계산하고 있어(복사-붙여넣기
+        /// 오류로 보임) z축 결과가 잘못될 수 있다. 현재 이 함수는 코드베이스 어디에서도
+        /// 호출되지 않는 미사용 함수이므로 아직 실제 영향은 없지만, 향후 사용하기 전에
+        /// 반드시 수정할 것.
         void make_cube()
         {
             double x_span = max_p.x - min_p.x;

@@ -4,7 +4,7 @@ namespace pctree
 {
 	bool buildKdtree3D(const pctree::PointCloudType3D& pc, std::shared_ptr<pctree::kd_tree3D>& tree)
 	{
-		/// Build tree
+		/// 트리 구축
 		try {
 			tree.reset(new pctree::kd_tree3D(pctree::PointCloudType3D::dim, pc, nanoflann::KDTreeSingleIndexAdaptorParams(maxLeaf)));
 			tree->buildIndex();
@@ -35,7 +35,7 @@ namespace pctree
 
 	bool buildAndSaveKdtree3D(const pctree::PointCloudType3D& pc, const std::string& treePath)
 	{
-		/// Build tree
+		/// 트리 구축
 		std::shared_ptr<pctree::kd_tree3D> tree;
 		if (!buildKdtree3D(pc, tree))
 			return false;

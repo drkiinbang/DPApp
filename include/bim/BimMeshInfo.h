@@ -2,6 +2,9 @@
 
 #include "BimInfo.h"
 
+/// GLTF에서 로딩한 BIM 부재(요소) 하나를 표현하는 BimInfo 확장 클래스.
+/// BimInfo가 담당하는 face/바운딩박스/직렬화 기능에 더해, GLTF 고유의 메타데이터
+/// (부재 이름, Revit Element ID, 원본 GLTF mesh/primitive 개수 등)를 함께 가지고 있다.
 class BimMeshInfo : public BimInfo{
 private:
     /// model.mesh[].primitives.size()

@@ -53,16 +53,16 @@ namespace math
 
 	MatDatad::~MatDatad()
 	{
-		// No try-catch needed. std::vector handles destruction automatically.
+		// try-catch 불필요. std::vector가 소멸을 자동으로 처리함.
 	}
 
 	MatDatad& MatDatad::operator=(const MatDatad& copy)
 	{
-		// Self-assignment check
+		// 자기 자신에 대한 대입인지 확인
 		if (this == &copy)
 			return *this;
 
-		this->data = copy.data; // std::vector deep copy
+		this->data = copy.data; // std::vector 깊은 복사
 		this->rows = copy.rows;
 		this->cols = copy.cols;
 
@@ -71,11 +71,11 @@ namespace math
 
 	MatDatad& MatDatad::operator=(MatDatad&& other) noexcept
 	{
-		// Self-assignment check
+		// 자기 자신에 대한 대입인지 확인
 		if (this == &other)
 			return *this;
 
-		this->data = std::move(other.data); // Move semantics
+		this->data = std::move(other.data); // 이동(move) 시맨틱
 		this->rows = other.rows;
 		this->cols = other.cols;
 
@@ -113,7 +113,7 @@ namespace math
 	{
 		rows = r;
 		cols = c;
-		// Resize vector; new elements are default-initialized
+		// vector 크기 변경; 새로 생긴 원소는 기본값으로 초기화됨
 		data.resize(rows * cols);
 	}
 

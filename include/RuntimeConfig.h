@@ -4,7 +4,7 @@
 #include <cstdlib>
 
 namespace DPApp {
-	/// Helper to read integers from environment variables
+	/// 환경변수로부터 정수를 읽는 헬퍼
 	inline int getenv_int(const char* name, int default_value) {
 		int value = default_value;
 
@@ -37,7 +37,7 @@ namespace DPApp {
 		return value;
 	};
 
-	/// Read strings from environment variables
+	/// 환경변수로부터 문자열을 읽음
 	inline std::string getenv_string(const char* name, const std::string& default_value) {
 		std::string value = default_value;
 #ifdef _WIN32
@@ -57,25 +57,25 @@ namespace DPApp {
 	}
 
 	struct RuntimeConfig {
-		/// Network/Server
-		int server_backlog = 16; /// socket listen backlog
-		int server_io_threads = 0; /// 0 means automatically determined based on hardware thread count
+		/// 네트워크/서버
+		int server_backlog = 16; /// 소켓 listen backlog
+		int server_io_threads = 0; /// 0이면 하드웨어 스레드 수 기준으로 자동 결정
 
-		/// Heartbeat & Task
-		int heartbeat_timeout_seconds = 30; /// client heartbeat timeout
-		int task_timeout_seconds = 3000; /// task processing timeout
+		/// 하트비트 & 태스크
+		int heartbeat_timeout_seconds = 30; /// 클라이언트 하트비트 타임아웃
+		int task_timeout_seconds = 3000; /// 태스크 처리 타임아웃
 
 		/// REST API
-		int rest_threadpool_size = 8; /// REST request processing pool size
-		int rest_socket_recv_timeout_ms = 10000; /// request reception timeout (milliseconds)
+		int rest_threadpool_size = 8; /// REST 요청 처리용 스레드풀 크기
+		int rest_socket_recv_timeout_ms = 10000; /// 요청 수신 타임아웃 (밀리초)
 
 		std::string api_key = "";
 
-		/// Slave -> Master initial connection retry
-		int slave_reconnect_interval_seconds = 5; /// wait time between connection attempts
-		int slave_max_reconnect_attempts = 10; /// give up after this many failed attempts (<=0 means retry forever)
+		/// Slave -> Master 최초 연결 재시도
+		int slave_reconnect_interval_seconds = 5; /// 연결 시도 사이의 대기 시간
+		int slave_max_reconnect_attempts = 10; /// 이 횟수만큼 실패하면 포기 (<=0이면 무한 재시도)
 
-		/// Logging level, etc. can be extended
+		/// 로그 레벨 등 추가 확장 가능
 		static RuntimeConfig loadFromEnv() {
 			RuntimeConfig cfg;
 			cfg.server_backlog = getenv_int("DPAPP_SERVER_BACKLOG", cfg.server_backlog);

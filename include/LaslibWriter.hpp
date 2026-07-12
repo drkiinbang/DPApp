@@ -17,7 +17,7 @@
 #include <sstream>
 #include <cmath>
 
-// LAStools headers
+// LAStools 헤더
 #include "lasreader.hpp"
 #include "laswriter.hpp"
 #include "lasdefinitions.hpp"
@@ -26,6 +26,9 @@
 
 namespace las {
 
+    /// LAStools(laswriter.hpp) 위의 얇은 래퍼. HeaderInfo(LaslibReader.hpp에 정의)로
+    /// 스케일/오프셋/바운딩박스를 설정한 뒤, PointData 벡터를 한 점씩 기록한다.
+    /// static save()가 open+writeAll+close를 한 번에 처리하는 편의 함수다.
     class LASToolsWriter {
     private:
         LASwriter* writer_{ nullptr };
@@ -118,7 +121,7 @@ namespace las {
             if (header_info) applyScaleOffset(header_, header_info->coordinate_transform);
             if (header_info) applyBox(header_, header_info->bounds);
 
-            // Open file (LAS/LAZ decided by extension and build)
+            // 파일 열기 (확장자와 빌드 설정에 따라 LAS/LAZ가 결정됨)
             write_opener_.set_file_name(std::string(filename).c_str());
             writer_ = write_opener_.open(&header_);
             if (!writer_) {

@@ -7,7 +7,7 @@ namespace DPApp {
     namespace NetworkUtils {
 
         /// ================================================================
-        /// Helper Class: BinaryWriter (Safe Serialization)
+        /// 헬퍼 클래스: BinaryWriter (안전한 직렬화)
         /// ================================================================
         class BinaryWriter {
         public:
@@ -15,14 +15,14 @@ namespace DPApp {
 
             explicit BinaryWriter(std::vector<uint8_t>& buf) : buffer(buf) {}
 
-            /// Write primitive types (int, float, double, etc.)
+            /// 기본형(int, float, double 등) 쓰기
             template <typename T>
             void write(const T& value) {
                 const uint8_t* ptr = reinterpret_cast<const uint8_t*>(&value);
                 buffer.insert(buffer.end(), ptr, ptr + sizeof(T));
             }
 
-            /// Write a string (length + raw data)
+            /// 문자열 쓰기 (길이 + 원본 데이터)
             void writeString(const std::string& str) {
                 uint32_t len = static_cast<uint32_t>(str.size());
                 write(len);
@@ -32,7 +32,7 @@ namespace DPApp {
                 }
             }
 
-            /// Write array or vector data as raw bytes
+            /// 배열/벡터 데이터를 원시 바이트로 쓰기
             void writeBytes(const void* data, size_t size) {
                 const uint8_t* ptr = reinterpret_cast<const uint8_t*>(data);
                 buffer.insert(buffer.end(), ptr, ptr + size);
@@ -40,7 +40,7 @@ namespace DPApp {
         };
 
         /// ================================================================
-        /// Helper Class: BinaryReader (Safe Deserialization with Bounds Check)
+        /// 헬퍼 클래스: BinaryReader (범위 검사가 있는 안전한 역직렬화)
         /// ================================================================
         class BinaryReader {
         public:
@@ -49,14 +49,14 @@ namespace DPApp {
 
             explicit BinaryReader(const std::vector<uint8_t>& buf) : buffer(buf), offset(0) {}
 
-            /// Check remaining buffer size
+            /// 남은 버퍼 크기 확인
             void checkBounds(size_t size) const {
                 if (offset + size > buffer.size()) {
                     throw std::runtime_error("Buffer overflow: insufficient data to read.");
                 }
             }
 
-            /// Read primitive types
+            /// 기본형 읽기
             template <typename T>
             T read() {
                 checkBounds(sizeof(T));
@@ -66,7 +66,7 @@ namespace DPApp {
                 return value;
             }
 
-            /// Read a string
+            /// 문자열 읽기
             std::string readString() {
                 uint32_t len = read<uint32_t>();
                 if (len == 0) return "";
@@ -77,8 +77,8 @@ namespace DPApp {
                 return str;
             }
 
-            /// Read a fixed-size block and return a pointer reference
-            /// (Use with caution: no copy is performed)
+            /// 고정 크기 블록을 읽고 포인터 참조를 반환
+            /// (주의해서 사용할 것: 복사가 일어나지 않음)
             const void* readBytesRef(size_t size) {
                 checkBounds(size);
                 const void* ptr = buffer.data() + offset;

@@ -34,12 +34,12 @@
 using namespace DPApp;
 
 /// =========================================
-/// Forward Declarations
+/// 전방 선언 (Forward Declarations)
 /// =========================================
 
-/// Identifies which BIM element (부재) a given IcpChunk::chunk_id corresponds to, so
-/// per-chunk ICP results can be labeled and saved per element (see IcpJob::elementResults
-/// in IcpTypes.h).
+/// 주어진 IcpChunk::chunk_id가 어느 BIM 부재(element)에 해당하는지 식별한다.
+/// 이를 통해 청크별 ICP 결과를 부재 단위로 이름 붙여 저장할 수 있다
+/// (IcpTypes.h의 IcpJob::elementResults 참고).
 struct IcpElementInfo {
     std::string name;
     int revitId = 0;
@@ -51,15 +51,15 @@ namespace DPApp {
             const std::string& bim_folder,
             const std::string& pointcloud_file);
 
-        /// coarseAlignedPoints is the Master's bulk point array, stored as float and shifted
-        /// by (offsetX, offsetY, offsetZ) relative to the BIM's absolute coordinate frame (see
-        /// icp::computeBimRebaseOffset / IcpJob::rebaseOffsetX in IcpTypes.h). Each element's
-        /// resulting IcpChunk::sourcePoints stays in that same float+shifted representation
-        /// (chunk.offsetX/Y/Z records the offset; consumers widen+unshift once, at the top of
-        /// runIcp()). If outElementInfo is non-null, it is filled with one entry per chunk
-        /// actually created (same order/index as the returned vector, so outElementInfo[i]
-        /// describes chunks[i]) -- elements skipped for having too few points or a degenerate
-        /// mesh produce no chunk and are omitted here too.
+        /// coarseAlignedPoints는 Master가 들고 있는 대량 포인트 배열로, BIM의 절대좌표계
+        /// 대비 (offsetX, offsetY, offsetZ)만큼 이동된 float로 저장되어 있다 (IcpTypes.h의
+        /// icp::computeBimRebaseOffset / IcpJob::rebaseOffsetX 참고). 각 부재별로 만들어지는
+        /// IcpChunk::sourcePoints도 동일한 float+이동 표현을 그대로 유지한다
+        /// (chunk.offsetX/Y/Z에 그 offset이 기록되며, 사용하는 쪽에서 runIcp() 맨 앞에서
+        /// 한 번만 승격+offset 복원을 수행한다). outElementInfo가 null이 아니면, 실제로
+        /// 생성된 청크 하나당 항목 하나씩 채워진다(반환되는 벡터와 순서/인덱스가 동일하므로
+        /// outElementInfo[i]가 chunks[i]를 설명함) -- 점이 너무 적거나 메시가 퇴화되어
+        /// 건너뛴 부재는 청크도 만들어지지 않으므로 여기서도 함께 생략된다.
         std::vector<std::shared_ptr<icp::IcpChunk>> loadIcpElementChunks(
             const std::vector<chunkbim::MeshChunk>& elements,
             const std::vector<std::array<float, 3>>& coarseAlignedPoints,
@@ -70,7 +70,7 @@ namespace DPApp {
 }
 
 /// =========================================
-/// HTTP Client Response (for Agent communication)
+/// HTTP 클라이언트 응답 (Agent 통신용)
 /// =========================================
 
 struct HttpClientResponse {
@@ -80,7 +80,7 @@ struct HttpClientResponse {
 };
 
 /// =========================================
-/// MasterApplication Class Declaration
+/// MasterApplication 클래스 선언
 /// =========================================
 
 class MasterApplication {
@@ -100,7 +100,7 @@ private:
     bool daemon_mode_ = false;
 
     /// =========================================
-    /// Agent Management
+    /// Agent 관리
     /// =========================================
 
     struct AgentInfo {
@@ -119,28 +119,28 @@ private:
     std::thread timeout_thread_;
 
     /// =========================================
-    /// Test Task Management
+    /// 테스트 태스크 관리
     /// =========================================
 
-    std::vector<TestChunk> test_chunks_;           // �׽�Ʈ ûũ ����
-    std::vector<TestResult> test_results_;         // �׽�Ʈ ��� ����
-    std::mutex test_mutex_;                        // �׽�Ʈ ������ ����ȭ
-    uint32_t next_test_chunk_id_ = 0;              // ���� ���� ûũ ID ī����
-    /// icp member variables
+    std::vector<TestChunk> test_chunks_;           // 테스트 청크 목록
+    std::vector<TestResult> test_results_;         // 테스트 결과 목록
+    std::mutex test_mutex_;                        // 테스트 데이터 동기화
+    uint32_t next_test_chunk_id_ = 0;              // 다음 테스트 청크 ID 카운터
+    /// icp 관련 멤버 변수
     std::map<std::string, std::shared_ptr<icp::IcpJob>> icp_jobs_;
     std::mutex icp_jobs_mutex_;
     uint32_t next_icp_task_id_ = 10000;
-    /// Maps a network-dispatched ICP task_id back to the job it belongs to, so
-    /// handleIcpResult() can find and update the right IcpJob. Guarded by icp_jobs_mutex_.
-    /// Populated by processIcpJob() when it distributes fine alignment across Slaves (one
-    /// chunk per BIM element); see CHANGELOG_2026-07-11.md.
+    /// 네트워크로 분배된 ICP task_id를 그 task가 속한 job으로 역매핑한다.
+    /// 이를 통해 handleIcpResult()가 올바른 IcpJob을 찾아 갱신할 수 있다.
+    /// icp_jobs_mutex_로 보호된다. processIcpJob()이 fine alignment를 여러
+    /// Slave에 분산시킬 때(BIM 부재당 청크 1개) 채워진다; CHANGELOG_2026-07-11.md 참고.
     std::unordered_map<uint32_t, std::string> icp_task_to_job_;
-    /// task_manager_ is a single shared resource re-created by initializeTaskManager() for
-    /// whichever session (bimpc / test / distributed ICP) is currently using it. This mutex
-    /// is held for the full duration of a distributed ICP job's dispatch+wait+aggregate phase
-    /// so a second concurrent ICP job can't call initializeTaskManager() and pull the
-    /// TaskManager out from under the first one. A job that can't acquire it immediately
-    /// falls back to Master-only fine alignment rather than blocking on this lock.
+    /// task_manager_는 initializeTaskManager()가 현재 세션(bimpc / test / 분산 ICP)에
+    /// 맞춰 매번 재생성하는 단일 공유 자원이다. 이 뮤텍스는 분산 ICP 작업의
+    /// 분배+대기+통합 단계 전체 동안 계속 잡혀 있어서, 두 번째 ICP 작업이 동시에
+    /// initializeTaskManager()를 호출해 첫 번째 작업이 쓰고 있는 TaskManager를
+    /// 가로채가는 것을 막는다. 이 락을 즉시 얻지 못한 작업은 이 락을 기다리며
+    /// 블로킹되는 대신 Master 단독 fine alignment로 대체(fallback) 처리한다.
     std::mutex icp_dispatch_mutex_;
 
 public:
@@ -148,7 +148,7 @@ public:
     ~MasterApplication();
 
     /// =========================================
-    /// Core Functions (MasterApplication.cpp)
+    /// 핵심 함수들 (MasterApplication.cpp)
     /// =========================================
 
     bool isDaemonMode() const { return daemon_mode_; }
@@ -167,14 +167,14 @@ public:
     void runInteractive();
     bool loadAndProcessPointCloud(const std::string& filename, const TaskType task_type);
 
-    /// Network callbacks
+    /// 네트워크 콜백
     void handleMessage(const NetworkMessage& message, const std::string& client_id);
     void handleConnection(const std::string& client_id, bool connected);
     void handleTaskResult(const NetworkMessage& message, const std::string& client_id);
     void handleTaskCompleted(const TaskInfo& task, const ProcessingResult& result);
     void handleTaskFailed(const TaskInfo& task, const std::string& error);
 
-    /// Task management
+    /// 태스크 관리
     void createTasksFromChunks(const std::vector<std::shared_ptr<PointCloudChunk>>& chunks);
     void createTasksFromChunks(const std::vector<std::shared_ptr<BimPcChunk>>& chunks);
     void taskAssignmentLoop();
@@ -183,7 +183,7 @@ public:
     void timeoutLoop();
 
     /// =========================================
-    /// CLI Functions (MasterApplication_CLI.cpp)
+    /// CLI 함수들 (MasterApplication_CLI.cpp)
     /// =========================================
 
     void parseCommandLine(int argc, char* argv[]);
@@ -204,7 +204,7 @@ public:
     void clearCompletedTasks();
 
     /// =========================================
-    /// Test Commands (MasterApplication_CLI.cpp)
+    /// 테스트 명령어 (MasterApplication_CLI.cpp)
     /// =========================================
 
     void runTestCommand(const std::string& args);
@@ -218,7 +218,7 @@ public:
     void createTestTasks(TaskType test_type, const std::vector<TestChunk>& chunks);
 
     /// =========================================
-    /// REST API Functions (MasterApplication_REST.cpp)
+    /// REST API 함수들 (MasterApplication_REST.cpp)
     /// =========================================
 
     void setupRestApiRoutes();
@@ -239,7 +239,7 @@ public:
     HttpResponse createErrorResponse(int status_code, const std::string& error);
     std::string getCurrentTimestamp();
 
-    /// icp
+    /// icp 관련
     void setupIcpApiRoutes();
     HttpResponse handleIcpStart(const HttpRequest& req);
     HttpResponse handleIcpJobs(const HttpRequest& req);
@@ -252,15 +252,15 @@ public:
     void handleIcpResult(const icp::IcpResult& result, uint32_t task_id);
 
     /// =========================================
-    /// Agent Functions (MasterApplication_Agent.cpp)
+    /// Agent 함수들 (MasterApplication_Agent.cpp)
     /// =========================================
 
-    /// HTTP Client
+    /// HTTP 클라이언트
     HttpClientResponse httpPost(const std::string& host, uint16_t port,
         const std::string& path, const std::string& body_content);
     HttpClientResponse httpGet(const std::string& host, uint16_t port, const std::string& path);
 
-    /// Agent Management
+    /// Agent 관리
     bool loadAgentsFromConfig(const std::string& config_path);
     bool isAgentOnline(const std::string& host, uint16_t port);
     bool startSlaveOnAgent(const std::string& host, uint16_t port, uint32_t threads = 4);
@@ -268,7 +268,7 @@ public:
     int startSlavesOnAllAgents(uint32_t threads = 4);
     int stopSlavesOnAllAgents(bool force = false);
 
-    /// Agent REST Handlers
+    /// Agent REST 핸들러
     HttpResponse handleGetAgents(const HttpRequest& req);
     HttpResponse handleAddAgent(const HttpRequest& req);
     HttpResponse handleRemoveAgent(const HttpRequest& req);
@@ -276,7 +276,7 @@ public:
     HttpResponse handleStartSlavesOnAgents(const HttpRequest& req);
     HttpResponse handleStopSlavesOnAgents(const HttpRequest& req);
 
-    /// Pause/Resume REST Handlers
+    /// 일시정지/재개 REST 핸들러
     HttpResponse handlePauseSlave(const HttpRequest& req);
     HttpResponse handleResumeSlave(const HttpRequest& req);
     HttpResponse handlePauseAllSlaves(const HttpRequest& req);
@@ -284,7 +284,7 @@ public:
 };
 
 /// =========================================
-/// Global variable (for signal handler)
+/// 전역 변수 (시그널 핸들러용)
 /// =========================================
 
 extern MasterApplication* g_app;

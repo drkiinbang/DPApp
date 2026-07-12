@@ -42,7 +42,7 @@ namespace math
 
 	Matrixd::~Matrixd() = default;
 
-	/// Append rows to the existing matrix.
+	/// 기존 행렬 아래에 행을 이어붙인다.
 	void Matrixd::addRows(const Matrixd& copy)
 	{
 		if (this->getCols() != copy.getCols())
@@ -51,11 +51,11 @@ namespace math
 		unsigned int oldRows = this->getRows();
 		unsigned int addedRows = copy.getRows();
 
-		// Resize underlying vector
+		// 내부 vector 크기 변경
 		this->allocateMem(oldRows + addedRows, this->getCols());
 
-		// Copy new data
-		// Since std::vector is contiguous, we can use std::copy or loops.
+		// 새 데이터 복사
+		// std::vector는 연속 메모리이므로 std::copy나 반복문을 쓸 수 있다.
 		for (unsigned int i = 0; i < addedRows; ++i)
 		{
 			for (unsigned int j = 0; j < this->getCols(); ++j)
@@ -65,7 +65,7 @@ namespace math
 		}
 	}
 
-	/// Append columns to the existing matrix.
+	/// 기존 행렬 오른쪽에 열을 이어붙인다.
 	void Matrixd::addCols(const Matrixd& copy)
 	{
 		if (this->getRows() != copy.getRows())
@@ -88,12 +88,12 @@ namespace math
 		*this = std::move(newMat);
 	}
 
-	/// Bind two matrices diagonally.
+	/// 두 행렬을 대각선 방향으로 결합한다.
 	void Matrixd::addRowsCols(const Matrixd& copy)
 	{
 		Matrixd newMat(this->getRows() + copy.getRows(), this->getCols() + copy.getCols(), 0.0);
 
-		// Copy A
+		// A 복사
 		for (unsigned int i = 0; i < this->getRows(); ++i)
 		{
 			for (unsigned int j = 0; j < this->getCols(); ++j)
@@ -102,7 +102,7 @@ namespace math
 			}
 		}
 
-		// Copy B
+		// B 복사
 		for (unsigned int i = 0; i < copy.getRows(); ++i)
 		{
 			for (unsigned int j = 0; j < copy.getCols(); ++j)
@@ -114,7 +114,7 @@ namespace math
 		*this = std::move(newMat);
 	}
 
-	/// Insert a matrix at a specific position.
+	/// 지정된 위치에 행렬을 삽입한다.
 	void Matrixd::insert(const unsigned int rIdx, const unsigned int cIdx, const Matrixd& copy)
 	{
 		if ((this->getRows() < (rIdx + copy.getRows())) || (this->getCols() < (cIdx + copy.getCols())))
@@ -143,7 +143,7 @@ namespace math
 		}
 	}
 
-	/// Accumulate a matrix at a specific position (+=).
+	/// 지정된 위치에 행렬 값을 누적(+=)한다.
 	void Matrixd::insertPlus(const unsigned int rIdx, const unsigned int cIdx, const Matrixd& copy)
 	{
 		if ((this->getRows() < (rIdx + copy.getRows())) || (this->getCols() < (cIdx + copy.getCols())))
@@ -160,7 +160,7 @@ namespace math
 		}
 	}
 
-	/// Accumulate a matrix at a specific position (+=) with resize.
+	/// 지정된 위치에 행렬 값을 누적(+=)하되, 필요하면 크기를 늘린다.
 	void Matrixd::insertPlusResize(const unsigned int rIdx, const unsigned int cIdx, const Matrixd& copy)
 	{
 		if ((this->getRows() < (rIdx + copy.getRows())) || (this->getCols() < (cIdx + copy.getCols())))
@@ -182,7 +182,7 @@ namespace math
 		insertPlus(rIdx, cIdx, copy);
 	}
 
-	/// Get a subset from an existing matrix.
+	/// 기존 행렬에서 부분 행렬을 추출한다.
 	Matrixd Matrixd::getSubset(const unsigned int rIdx, const unsigned int cIdx, const unsigned int size_r, const unsigned int size_c) const
 	{
 		if ((this->getRows() < (rIdx + size_r)) || (this->getCols() < (cIdx + size_c)))
@@ -201,7 +201,7 @@ namespace math
 		return ret;
 	}
 
-	/// Get a max absolute value element.
+	/// 절대값이 가장 큰 원소를 반환.
 	double Matrixd::getMaxabsElement() const
 	{
 		double val = 0.0;
@@ -212,7 +212,7 @@ namespace math
 		return val;
 	}
 
-	/// Get a max value element.
+	/// 가장 큰 원소를 반환.
 	double Matrixd::getMaxElement() const
 	{
 		double val = -DBL_MAX;
@@ -223,7 +223,7 @@ namespace math
 		return val;
 	}
 
-	/// Get a min absolute value element.
+	/// 절대값이 가장 작은 원소를 반환.
 	double Matrixd::getMinabsElement() const
 	{
 		if (data.empty()) return 0.0;
@@ -235,7 +235,7 @@ namespace math
 		return val;
 	}
 
-	/// Get a min value element.
+	/// 가장 작은 원소를 반환.
 	double Matrixd::getMinElement() const
 	{
 		double val = DBL_MAX;
@@ -246,14 +246,14 @@ namespace math
 		return val;
 	}
 
-	/// Find 1d array index from row and col indices.
+	/// 행/열 인덱스로부터 1차원 배열 인덱스를 계산.
 	unsigned int Matrixd::findIndex(const unsigned int rIdx, const unsigned int cIdx) const
 	{
-		// Removed exceptions for performance, but can be added back for debug
+		// 성능을 위해 예외 검사를 제거함 (디버그 시에는 다시 추가 가능)
 		return (rIdx * cols) + cIdx;
 	}
 
-	/// Make an identity matrix.
+	/// 단위 행렬을 만든다.
 	void Matrixd::makeIdentityMat(const double& init_val)
 	{
 		if (this->getCols() != this->getRows())
@@ -266,12 +266,12 @@ namespace math
 		}
 	}
 
-	/// Make a transpose matrix.
+	/// 전치 행렬을 만든다.
 	Matrixd Matrixd::transpose() const
 	{
 		Matrixd result(this->getCols(), this->getRows());
-		// Optimized loop order for write locality?
-		// Actually for transpose, one side will always be non-sequential.
+		// 쓰기 지역성(write locality)을 위한 루프 순서 최적화?
+		// 사실 전치 연산은 어느 한쪽은 항상 비순차 접근이 될 수밖에 없다.
 		for (unsigned int i = 0; i < this->getRows(); ++i)
 		{
 			for (unsigned int j = 0; j < this->getCols(); ++j)
@@ -282,7 +282,7 @@ namespace math
 		return result;
 	}
 
-	/// Make an inverse matrix.
+	/// 역행렬을 만든다.
 	Matrixd Matrixd::inverse() const
 	{
 		if (this->getCols() != this->getRows())
@@ -304,11 +304,11 @@ namespace math
 		}
 	}
 
-	// --- Operators ---
+	// --- 연산자 ---
 
 	Matrixd& Matrixd::operator=(const Matrixd& copy)
 	{
-		if (this != &copy) // Self-assignment check
+		if (this != &copy) // 자기 자신에 대한 대입인지 확인
 		{
 			MatDatad::operator=(copy);
 		}
@@ -317,14 +317,14 @@ namespace math
 
 	Matrixd& Matrixd::operator=(Matrixd&& other) noexcept
 	{
-		if (this != &other) // Self-assignment check
+		if (this != &other) // 자기 자신에 대한 대입인지 확인
 		{
 			MatDatad::operator=(std::move(other));
 		}
 		return *this;
 	}
 
-	/// Operator +
+	/// 연산자 +
 	Matrixd Matrixd::operator+(const Matrixd& mat) const
 	{
 		if (rows != mat.getRows() || cols != mat.getCols())
@@ -334,10 +334,10 @@ namespace math
 		for (size_t i = 0; i < data.size(); ++i)
 			result.data[i] = this->data[i] + mat.data[i];
 
-		return result; // RVO optimization
+		return result; // RVO 최적화
 	}
 
-	/// Operator +=
+	/// 연산자 +=
 	void Matrixd::operator+=(const Matrixd& mat)
 	{
 		if (rows != mat.getRows() || cols != mat.getCols())
@@ -347,7 +347,7 @@ namespace math
 			this->data[i] += mat.data[i];
 	}
 
-	/// Operator + (scalar)
+	/// 연산자 + (스칼라)
 	Matrixd Matrixd::operator+(const double& val) const
 	{
 		Matrixd result(*this);
@@ -355,13 +355,13 @@ namespace math
 		return result;
 	}
 
-	/// Operator += (scalar)
+	/// 연산자 += (스칼라)
 	void Matrixd::operator+=(const double& val)
 	{
 		for (double& d : data) d += val;
 	}
 
-	/// Operator - (Unary)
+	/// 연산자 - (단항)
 	Matrixd Matrixd::operator-() const
 	{
 		Matrixd result(*this);
@@ -369,7 +369,7 @@ namespace math
 		return result;
 	}
 
-	/// Operator -
+	/// 연산자 -
 	Matrixd Matrixd::operator-(const Matrixd& mat) const
 	{
 		if (rows != mat.getRows() || cols != mat.getCols())
@@ -381,7 +381,7 @@ namespace math
 		return result;
 	}
 
-	/// Operator -=
+	/// 연산자 -=
 	void Matrixd::operator-=(const Matrixd& mat)
 	{
 		if (rows != mat.getRows() || cols != mat.getCols())
@@ -391,7 +391,7 @@ namespace math
 			this->data[i] -= mat.data[i];
 	}
 
-	/// Operator - (scalar)
+	/// 연산자 - (스칼라)
 	Matrixd Matrixd::operator-(const double& val) const
 	{
 		Matrixd result(*this);
@@ -399,13 +399,13 @@ namespace math
 		return result;
 	}
 
-	/// Operator -= (scalar)
+	/// 연산자 -= (스칼라)
 	void Matrixd::operator-=(const double& val)
 	{
 		for (double& d : data) d -= val;
 	}
 
-	/// Operator * (Element-wise)
+	/// 연산자 * (원소별)
 	Matrixd Matrixd::operator*(const Matrixd& mat) const
 	{
 		if (rows != mat.getRows() || cols != mat.getCols())
@@ -417,7 +417,7 @@ namespace math
 		return result;
 	}
 
-	/// Operator *= (Element-wise)
+	/// 연산자 *= (원소별)
 	void Matrixd::operator*=(const Matrixd& mat)
 	{
 		if (rows != mat.getRows() || cols != mat.getCols())
@@ -427,7 +427,7 @@ namespace math
 			this->data[i] *= mat.data[i];
 	}
 
-	/// Operator * (scalar)
+	/// 연산자 * (스칼라)
 	Matrixd Matrixd::operator*(const double& val) const
 	{
 		Matrixd result(*this);
@@ -435,13 +435,13 @@ namespace math
 		return result;
 	}
 
-	/// Operator *= (scalar)
+	/// 연산자 *= (스칼라)
 	void Matrixd::operator*=(const double& val)
 	{
 		for (double& d : data) d *= val;
 	}
 
-	/// Operator / (Element-wise)
+	/// 연산자 / (원소별)
 	Matrixd Matrixd::operator/(const Matrixd& mat) const
 	{
 		if (rows != mat.getRows() || cols != mat.getCols())
@@ -456,7 +456,7 @@ namespace math
 		return result;
 	}
 
-	/// Operator /= (Element-wise)
+	/// 연산자 /= (원소별)
 	void Matrixd::operator/=(const Matrixd& mat)
 	{
 		if (rows != mat.getRows() || cols != mat.getCols())
@@ -469,7 +469,7 @@ namespace math
 		}
 	}
 
-	/// Operator / (scalar)
+	/// 연산자 / (스칼라)
 	Matrixd Matrixd::operator/(const double& val) const
 	{
 		if (std::abs(val) < DBL_EPSILON)
@@ -480,7 +480,7 @@ namespace math
 		return result;
 	}
 
-	/// Operator /= (scalar)
+	/// 연산자 /= (스칼라)
 	void Matrixd::operator/=(const double& val)
 	{
 		if (std::abs(val) < DBL_EPSILON)
@@ -489,8 +489,8 @@ namespace math
 		for (double& d : data) d /= val;
 	}
 
-	/// Matrix Multiplication (%)
-	/// Optimization: Transpose the second matrix to improve cache locality.
+	/// 행렬 곱셈 (%)
+	/// 최적화: 캐시 지역성을 높이기 위해 두 번째 행렬을 전치해 둔다.
 	Matrixd Matrixd::operator%(const Matrixd& mat) const
 	{
 		if (this->getCols() != mat.getRows())
@@ -498,14 +498,14 @@ namespace math
 
 		Matrixd result(this->getRows(), mat.getCols(), 0.0);
 
-		// Optimization: Transpose mat to allow sequential access
+		// 최적화: mat을 전치해서 순차 접근이 가능하게 함
 		Matrixd matT = mat.transpose();
 
 		const unsigned int M = this->getRows();
 		const unsigned int N = mat.getCols();
 		const unsigned int K = this->getCols();
 
-		// Use raw pointers for maximum speed in inner loops
+		// 내부 루프에서 최대 속도를 위해 raw 포인터 사용
 		const double* A_ptr = this->data.data();
 		const double* B_ptr = matT.data.data();
 		double* R_ptr = result.getDataHandle();
@@ -517,7 +517,7 @@ namespace math
 				double sum = 0.0;
 				for (unsigned int k = 0; k < K; ++k)
 				{
-					// Access A by row i, Access B_T by row j (which is col j of B)
+					// A는 i번째 행으로, B_T는 j번째 행(= B의 j번째 열)으로 접근
 					sum += A_ptr[i * K + k] * B_ptr[j * K + k];
 				}
 				R_ptr[i * N + j] = sum;
@@ -526,7 +526,7 @@ namespace math
 		return result;
 	}
 
-	/// Get sum of elements.
+	/// 원소들의 합을 반환.
 	double Matrixd::getSum() const
 	{
 		double sum = 0.0;
@@ -534,11 +534,11 @@ namespace math
 		return sum;
 	}
 
-	/// Get sum of squares.
+	/// 원소들의 제곱합을 반환.
 	double Matrixd::getSumOfSquares() const
 	{
-		// Note: Original code did (*this) * (*this) which is element-wise mult, 
-		// then getSum(). We can do it in one loop.
+		// 참고: 원래 코드는 (*this) * (*this)(원소별 곱셈)를 한 다음
+		// getSum()을 호출했다. 여기서는 반복문 하나로 합쳐서 처리한다.
 		double sum = 0.0;
 		for (double d : data) sum += (d * d);
 		return sum;
@@ -569,9 +569,9 @@ namespace math
 		if (this->getRows() != copy.getRows() || this->getCols() != copy.getCols())
 			return false;
 
-		// Vector equality check is fast and optimized
+		// vector 비교는 빠르고 최적화되어 있음
 		return this->data == copy.data;
-		// Note: Exact float equality. If epsilon check is needed, keep loop.
+		// 참고: 부동소수점 완전 일치 비교임. 오차범위(epsilon) 비교가 필요하면 반복문으로 바꿀 것.
 	}
 
 	bool Matrixd::operator!=(const Matrixd& copy) const
@@ -579,7 +579,7 @@ namespace math
 		return !(*this == copy);
 	}
 
-	/// LU Decompose.
+	/// LU 분해.
 	Matrixd Matrixd::LUDcompose()
 	{
 		unsigned int i, j, k, k2, t;
@@ -592,7 +592,7 @@ namespace math
 		for (k = 0; k < (this->getRows() - 1); ++k)
 		{
 			p = 0.0;
-			k2 = k; // Initialize k2 to avoid warning
+			k2 = k; // 경고 방지를 위해 k2 초기화
 
 			for (i = k; i < this->getRows(); ++i)
 			{
@@ -607,13 +607,13 @@ namespace math
 			if (p == 0.0)
 				throw std::runtime_error("LUDcompose: Singular Matrix.");
 
-			// Exchange rows
+			// 행 교환
 			t = static_cast<unsigned int>(perm(k, 0));
 			perm(k, 0) = perm(k2, 0);
 			perm(k2, 0) = static_cast<double>(t);
 
-			// Swap rows in this matrix
-			for (i = 0; i < this->getCols(); ++i) // Changed from Rows to Cols for correctness, though square
+			// 이 행렬 내에서 행을 교환
+			for (i = 0; i < this->getCols(); ++i) // 정사각 행렬이지만 정확성을 위해 Rows 대신 Cols 사용
 			{
 				std::swap((*this)(k, i), (*this)(k2, i));
 			}
@@ -629,7 +629,7 @@ namespace math
 		return perm;
 	}
 
-	/// LU Invert.
+	/// LU 분해를 이용한 역행렬 계산.
 	Matrixd Matrixd::LUInvert(Matrixd& perm)
 	{
 		unsigned int i, j;
@@ -649,14 +649,14 @@ namespace math
 		return result;
 	}
 
-	/// LU Solve.
+	/// LU 분해를 이용한 선형방정식 풀이.
 	Matrixd Matrixd::LUSolve(Matrixd& perm, Matrixd& b)
 	{
 		unsigned int i, j;
 		double sum;
 		Matrixd y(this->getRows(), 1, 0.0), x(this->getRows(), 1, 0.0);
 
-		// Forward substitution
+		// 전진 대입(forward substitution)
 		for (i = 0; i < this->getRows(); ++i)
 		{
 			sum = 0.0;
@@ -667,7 +667,7 @@ namespace math
 			y(i, 0) = b(static_cast<unsigned int>(perm(i, 0)), 0) - sum;
 		}
 
-		// Backward substitution
+		// 후진 대입(backward substitution)
 		for (int i_idx = this->getRows() - 1; i_idx >= 0; --i_idx)
 		{
 			i = static_cast<unsigned int>(i_idx);
@@ -681,7 +681,7 @@ namespace math
 		return x;
 	}
 
-	/// Inverse partitioned matrix.
+	/// 분할 행렬(partitioned matrix)의 역행렬 계산.
 	Matrixd inversePartitionedMatrixd(const Matrixd& a, const Matrixd& b, const Matrixd& c, const Matrixd& d)
 	{
 		if (a.getCols() != c.getCols() || a.getRows() != b.getRows() ||
@@ -690,9 +690,9 @@ namespace math
 			throw std::runtime_error("inversePartitionedMatrixd: Size mismatch.");
 		}
 
-		// Schur complement: M/A
+		// 슈어 보수(Schur complement): M/A
 		auto aInv = a.inverse();
-		auto ma = d - ((c % aInv) % b); // Using % for matrix mult
+		auto ma = d - ((c % aInv) % b); // 행렬곱에는 % 사용
 		auto result22 = ma.inverse();
 		auto temp = ((aInv % b) % result22);
 		auto result12 = -temp;

@@ -1,13 +1,13 @@
 #pragma once
 
 /// ============================================================================
-/// IcpProcessor.hpp - ICP Task Processor for Slave
+/// IcpProcessor.hpp - Slave용 ICP 태스크 처리기
 /// ============================================================================
-/// 
-/// This header provides the ICP task processor that runs on Slave nodes.
-/// Integrates with the existing TaskProcessor pattern in DPApp.
-/// 
-/// Location: F:\repository\DPApp\include\bimtree\IcpProcessor.hpp
+///
+/// 이 헤더는 Slave 노드에서 실행되는 ICP 태스크 처리기를 제공한다.
+/// DPApp에 이미 있는 TaskProcessor 패턴과 통합된다.
+///
+/// 위치: D:\repository\DPApp_II\include\bimtree\IcpProcessor.hpp
 /// ============================================================================
 
 #include "../IcpTypes.h"
@@ -21,16 +21,16 @@
 
 namespace icp {
 
-    /// ICP Task Processor for Slave nodes
+    /// Slave 노드용 ICP 태스크 처리기
     class IcpProcessor {
     public:
         IcpProcessor() = default;
         ~IcpProcessor() = default;
 
-        /// Process ICP fine alignment task
-        /// @param chunk ICP chunk data received from Master
-        /// @param cancelRequested Atomic flag for task cancellation
-        /// @return ICP result
+        /// ICP 미세 정합(fine alignment) 태스크 처리
+        /// @param chunk Master로부터 받은 ICP 청크 데이터
+        /// @param cancelRequested 태스크 취소용 atomic 플래그
+        /// @return ICP 결과
         IcpResult processFineAlignment(
             const IcpChunk& chunk,
             std::atomic<bool>& cancelRequested)
@@ -41,24 +41,24 @@ namespace icp {
             auto startTime = std::chrono::high_resolution_clock::now();
 
             try {
-                /// Validate input
+                /// 입력 유효성 검사
                 if (!chunk.isValid()) {
                     result.success = false;
                     result.errorMessage = "Invalid chunk data";
                     return result;
                 }
 
-                /// Log start (if verbose)
+                /// 시작 로그 (verbose 모드일 때만)
                 if (chunk.config.verbose) {
                     std::cout << "[ICP] Processing chunk " << chunk.chunk_id
                               << " (source: " << chunk.sourcePoints.size()
                               << ", target: " << chunk.targetPoints.size() << " pts)\n";
                 }
 
-                /// Run ICP algorithm
+                /// ICP 알고리즘 실행
                 result = runIcp(chunk, cancelRequested);
 
-                /// Log completion (if verbose)
+                /// 완료 로그 (verbose 모드일 때만)
                 if (chunk.config.verbose) {
                     std::cout << "[ICP] Chunk " << chunk.chunk_id << " completed: "
                               << (result.success ? "SUCCESS" : "FAILED")
@@ -83,22 +83,22 @@ namespace icp {
             return result;
         }
 
-        /// Process ICP task from serialized data (for network integration)
-        /// @param chunkData Serialized IcpChunk data
-        /// @param cancelRequested Cancellation flag
-        /// @return Serialized IcpResult data
+        /// 직렬화된 데이터로부터 ICP 태스크를 처리한다 (네트워크 연동용)
+        /// @param chunkData 직렬화된 IcpChunk 데이터
+        /// @param cancelRequested 취소 플래그
+        /// @return 직렬화된 IcpResult 데이터
         std::vector<uint8_t> processTaskFromBytes(
             const std::vector<uint8_t>& chunkData,
             std::atomic<bool>& cancelRequested)
         {
             try {
-                /// Deserialize chunk
+                /// 청크 역직렬화
                 IcpChunk chunk = deserializeIcpChunk(chunkData);
 
-                /// Process
+                /// 처리
                 IcpResult result = processFineAlignment(chunk, cancelRequested);
 
-                /// Serialize and return result
+                /// 결과를 직렬화하여 반환
                 return serializeIcpResult(result);
             }
             catch (const std::exception& e) {
@@ -115,11 +115,11 @@ namespace icp {
 
 namespace DPApp {
 
-    /// ICP Processors namespace (integrates with existing TaskProcessor pattern)
+    /// ICP 처리기 네임스페이스 (기존 TaskProcessor 패턴과 통합)
     namespace IcpProcessors {
 
-        /// Process ICP fine alignment task
-        /// Entry point for SlaveApplication task processing
+        /// ICP 미세 정합(fine alignment) 태스크 처리
+        /// SlaveApplication 태스크 처리의 진입점
         inline icp::IcpResult processFineAlignment(
             const icp::IcpChunk& chunk,
             std::atomic<bool>& cancelRequested)
@@ -128,16 +128,16 @@ namespace DPApp {
             return processor.processFineAlignment(chunk, cancelRequested);
         }
 
-        /// Check if task type is ICP-related
+        /// 태스크 타입이 ICP 관련인지 확인
         inline bool isIcpTask(TaskType type) {
             return type == TaskType::ICP_COARSE_ALIGNMENT ||
                    type == TaskType::ICP_FINE_ALIGNMENT ||
                    type == TaskType::ICP_APPLY_TRANSFORM;
         }
 
-        /// Process ICP task from serialized chunk data
-        /// @param chunkData Serialized IcpChunk
-        /// @param cancelRequested Cancellation flag
+        /// 직렬화된 청크 데이터로부터 ICP 태스크를 처리
+        /// @param chunkData 직렬화된 IcpChunk
+        /// @param cancelRequested 취소 플래그
         /// @return IcpResult
         inline icp::IcpResult processIcpTask(
             const std::vector<uint8_t>& chunkData,
@@ -147,10 +147,10 @@ namespace DPApp {
             return processFineAlignment(chunk, cancelRequested);
         }
 
-        /// Process ICP task and return serialized result
-        /// @param chunkData Serialized IcpChunk
-        /// @param cancelRequested Cancellation flag
-        /// @return Serialized IcpResult
+        /// ICP 태스크를 처리하고 직렬화된 결과를 반환
+        /// @param chunkData 직렬화된 IcpChunk
+        /// @param cancelRequested 취소 플래그
+        /// @return 직렬화된 IcpResult
         inline std::vector<uint8_t> processIcpTaskToBytes(
             const std::vector<uint8_t>& chunkData,
             std::atomic<bool>& cancelRequested)

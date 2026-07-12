@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <vector>
 #include <string>
@@ -15,7 +15,7 @@
 
 namespace DPApp {
 
-    /// Task type enumeration
+    /// 태스크 타입 열거형
     enum class TaskType : uint8_t {
         UNKNOWN = 0,
         CONVERT_PTS = 1,
@@ -34,7 +34,7 @@ namespace DPApp {
         ICP_APPLY_TRANSFORM = 22,   // Transform 적용 (결과 저장)
     };
 
-    /// Convert TaskType to string
+    /// TaskType을 문자열로 변환
     inline const char* taskStr(TaskType type) {
         switch (type) {
         case TaskType::CONVERT_PTS: return "convert_pts";
@@ -51,7 +51,7 @@ namespace DPApp {
         }
     }
 
-    /// Convert string to TaskType
+    /// 문자열을 TaskType으로 변환
     inline TaskType strTask(const std::string& str) {
         if (str == "convert_pts") return TaskType::CONVERT_PTS;
         if (str == "bim_distance_calculation") return TaskType::BIM_DISTANCE_CALCULATION;
@@ -68,18 +68,18 @@ namespace DPApp {
         return TaskType::UNKNOWN;
     }
 
-    /// 3D point type definition
+    /// 3차원 점 타입 정의
     using Point3D = pctree::XYZPoint;
 
-    /// Alternative Point3D implementations (deprecated / experimental)
+    /// Point3D의 다른 구현들 (사용 중단 / 실험적)
     /// struct Point3D {
     ///     double x, y, z;
     /// };
 
-    /// Detailed Point3D class (legacy implementation)
+    /// Point3D 상세 클래스 (레거시 구현)
     /// class Point3D { ... };
 
-    /// Point cloud header information
+    /// 포인트클라우드 헤더 정보
     struct PointCloudHeader {
         std::string filename;
         uint64_t point_count;
@@ -94,13 +94,13 @@ namespace DPApp {
         }
     };
 
-    /// Point cloud chunk structure
+    /// 포인트클라우드 청크 구조체
     struct PointCloudChunk {
         uint32_t chunk_id;
         std::vector<Point3D> points;
         PointCloudHeader header;
 
-        /// Bounding box of the chunk
+        /// 청크의 바운딩 박스
         double min_x, min_y, min_z;
         double max_x, max_y, max_z;
 
@@ -110,7 +110,7 @@ namespace DPApp {
             max_x(0), max_y(0), max_z(0) {
         }
 
-        /// Compute bounding box of the chunk
+        /// 청크의 바운딩 박스 계산
         void calculateBounds() {
             if (points.empty()) {
                 min_x = min_y = min_z = 0;
@@ -132,25 +132,26 @@ namespace DPApp {
             }
         }
 
-        /// Get estimated chunk size in bytes
+        /// 청크의 대략적인 바이트 크기 계산
         size_t getSize() const {
             return sizeof(PointCloudChunk) + points.size() * sizeof(Point3D);
         }
     };
 
-    /// BIM and PointCloud combined chunk. `points` is stored as `float`, shifted by
-    /// (offsetX, offsetY, offsetZ) relative to absolute coordinates -- `bim` (the mesh) stays
-    /// double/absolute. Consumers (processBimPc) widen `points` back to double and add the
-    /// offset back exactly once, at the top of the function, before comparing against `bim`.
+    /// BIM과 포인트클라우드를 결합한 청크. `points`는 절대좌표 대비
+    /// (offsetX, offsetY, offsetZ)만큼 이동된 `float`로 저장된다 -- `bim`(메시)은
+    /// double/절대좌표 그대로 유지된다. 이를 사용하는 쪽(processBimPc)은 함수 맨
+    /// 앞에서 딱 한 번 `points`를 double로 승격시키고 offset을 다시 더한 뒤 `bim`과
+    /// 비교한다.
     struct BimPcChunk {
         uint32_t chunk_id;
-        chunkbim::MeshChunk bim;               /// BIM mesh chunk (double, absolute)
-        std::vector<std::array<float, 3>> points; /// Point cloud chunk, shifted, float
+        chunkbim::MeshChunk bim;               /// BIM 메시 청크 (double, 절대좌표)
+        std::vector<std::array<float, 3>> points; /// 포인트클라우드 청크, 이동됨, float
 
-        /// Rebase offset applied to `points` (double, exact)
+        /// `points`에 적용된 재배치(rebase) offset (double, 정확한 값)
         double offsetX = 0.0, offsetY = 0.0, offsetZ = 0.0;
 
-        /// Bounding box of point cloud
+        /// 포인트클라우드의 바운딩 박스
         double min_x, min_y, min_z;
         double max_x, max_y, max_z;
 
@@ -160,12 +161,12 @@ namespace DPApp {
             max_x(0), max_y(0), max_z(0) {
         }
 
-        /// Estimate memory usage
+        /// 메모리 사용량 추정
         size_t estimateMemoryUsage() const {
             return sizeof(BimMeshInfo) + points.size() * sizeof(std::array<float, 3>);
         }
 
-        /// Compute bounding box for BIM and point cloud
+        /// BIM과 포인트클라우드의 바운딩 박스 계산
         void calculateBounds() {
             bim.calculateBounds();
 
@@ -189,13 +190,13 @@ namespace DPApp {
             }
         }
 
-        /// Get estimated chunk size in bytes
+        /// 청크의 대략적인 바이트 크기 계산
         size_t getSize() const {
             return sizeof(BimPcChunk) + points.size() * sizeof(std::array<float, 3>);
         }
     };
 
-    /// Processing task definition
+    /// 처리 태스크 정의
     struct ProcessingTask {
         uint32_t task_id;
         uint32_t chunk_id;
@@ -209,14 +210,14 @@ namespace DPApp {
         }
     };
 
-    /// Generic processing result
+    /// 범용 처리 결과
     struct ProcessingResult {
         uint32_t task_id;
         uint32_t chunk_id;
         bool success;
         std::string error_message;
-        std::vector<Point3D> processed_points;   /// Output points
-        std::vector<uint8_t> result_data;         /// Additional binary data
+        std::vector<Point3D> processed_points;   /// 출력 점들
+        std::vector<uint8_t> result_data;         /// 추가 바이너리 데이터
 
         ProcessingResult()
             : task_id(0),
@@ -225,33 +226,33 @@ namespace DPApp {
         }
     };
 
-    /// BIM–PointCloud processing result
+    /// BIM–포인트클라우드 처리 결과
     struct BimPcResult {
         uint32_t task_id;
         uint32_t chunk_id;
         bool success;
         std::string error_message;
 
-        /// Processing statistics
+        /// 처리 통계
         uint32_t total_points_processed;
         uint32_t total_faces_processed;
         double processing_time_ms;
 
-        /// Distance statistics
+        /// 거리 통계
         double min_distance;
         double max_distance;
         double avg_distance;
         double std_deviation;
 
-        /// Per-point results
+        /// 점별 결과
         std::vector<double> point_distances;
         std::vector<int32_t> nearest_face_ids;
 
-        /// Classification statistics
+        /// 분류 통계
         uint32_t points_within_threshold;
         uint32_t points_outside_threshold;
 
-        /// Additional extensible data
+        /// 추가 확장 데이터
         std::vector<uint8_t> extra_data;
 
         BimPcResult()
@@ -270,13 +271,13 @@ namespace DPApp {
         }
     };
 
-    /// Point cloud container class
+    /// 포인트클라우드 컨테이너 클래스
     class PointCloud {
     public:
         PointCloud() { clear(); }
         ~PointCloud() {}
 
-        /// Load point cloud from file (XYZ format)
+        /// 파일로부터 포인트클라우드 로딩 (XYZ 포맷)
         bool loadFromFile(const std::string& filename) {
             std::ifstream file(filename);
             if (!file.is_open()) {
@@ -306,7 +307,7 @@ namespace DPApp {
             return true;
         }
 
-        /// Save point cloud to file
+        /// 포인트클라우드를 파일로 저장
         bool saveToFile(const std::string& filename) {
             std::ofstream file(filename);
             if (!file.is_open()) {
@@ -326,7 +327,7 @@ namespace DPApp {
             return true;
         }
 
-        /// Split point cloud into chunks
+        /// 포인트클라우드를 청크 단위로 분할
         std::vector<PointCloudChunk> splitIntoChunks(size_t max_points_per_chunk) {
             std::vector<PointCloudChunk> chunks;
             if (points_.empty()) return chunks;
@@ -350,7 +351,7 @@ namespace DPApp {
             return chunks;
         }
 
-        /// Merge chunks into a single point cloud
+        /// 청크들을 하나의 포인트클라우드로 병합
         void mergeChunks(const std::vector<PointCloudChunk>& chunks) {
             clear();
             for (const auto& chunk : chunks) {
@@ -359,28 +360,28 @@ namespace DPApp {
             updateBounds();
         }
 
-        /// Add a single point
+        /// 점 하나 추가
         void addPoint(const Point3D& point) {
             points_.push_back(point);
         }
 
-        /// Add multiple points
+        /// 여러 점 추가
         void addPoints(const std::vector<Point3D>& points) {
             points_.insert(points_.end(), points.begin(), points.end());
         }
 
-        /// Clear all data
+        /// 모든 데이터 지우기
         void clear() {
             points_.clear();
             header_ = PointCloudHeader();
         }
 
-        /// Accessors
+        /// 접근자
         size_t getPointCount() const { return points_.size(); }
         const PointCloudHeader& getHeader() const { return header_; }
         const std::vector<Point3D>& getPoints() const { return points_; }
 
-        /// Update bounding box
+        /// 바운딩 박스 갱신
         void updateBounds() {
             if (points_.empty()) {
                 header_.min_x = header_.min_y = header_.min_z = 0;
@@ -409,7 +410,7 @@ namespace DPApp {
         PointCloudHeader header_;
     };
 
-    /// Shared pointer alias for PointCloud
+    /// PointCloud용 shared_ptr 별칭
     using PointCloudPtr = std::shared_ptr<PointCloud>;
 
 } /// namespace DPApp

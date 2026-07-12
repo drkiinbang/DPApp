@@ -1,20 +1,20 @@
 /**
  * @file MasterApplication_Agent.cpp
- * @brief Agent management and Slave control implementation
- * 
- * This file contains:
- * - HTTP client for Agent communication
- * - Agent configuration loading
- * - Agent management (start/stop slaves)
- * - Agent REST API handlers
- * - Slave Pause/Resume handlers
+ * @brief Agent 관리 및 Slave 제어 구현
+ *
+ * 이 파일이 담고 있는 내용:
+ * - Agent 통신을 위한 HTTP 클라이언트
+ * - Agent 설정 로딩
+ * - Agent 관리 (slave 시작/중지)
+ * - Agent REST API 핸들러
+ * - Slave 일시정지/재개 핸들러
  */
 
 #include "MasterApplication.h"
 #include "../include/MiniJson.h"
 
 /// =========================================
-/// HTTP Client for Agent Communication
+/// Agent 통신을 위한 HTTP 클라이언트
 /// =========================================
 
 HttpClientResponse MasterApplication::httpPost(const std::string& host, uint16_t port,
@@ -170,7 +170,7 @@ HttpClientResponse MasterApplication::httpGet(const std::string& host, uint16_t 
 }
 
 /// =========================================
-/// Agent Configuration
+/// Agent 설정
 /// =========================================
 
 bool MasterApplication::loadAgentsFromConfig(const std::string& config_path) {
@@ -183,19 +183,19 @@ bool MasterApplication::loadAgentsFromConfig(const std::string& config_path) {
     std::stringstream buffer;
     buffer << file.rdbuf();
 
-    /// Use extended parser (supports arrays and nested objects)
+    /// 확장 파서 사용 (배열과 중첩 객체를 지원)
     auto parsed = MiniJson::parse_object_ex(buffer.str());
     if (!parsed) {
         ELOG << "Invalid JSON in agents config";
         return false;
     }
 
-    /// Get master_external_ip
+    /// master_external_ip 값 조회
     if (auto v = MiniJson::get_ex<std::string>(*parsed, "master_external_ip")) {
         master_external_ip_ = *v;
     }
 
-    /// Get agents array
+    /// agents 배열 조회
     auto agents_arr = MiniJson::get_array(*parsed, "agents");
     if (!agents_arr) {
         WLOG << "Missing 'agents' array in config";
@@ -231,7 +231,7 @@ bool MasterApplication::loadAgentsFromConfig(const std::string& config_path) {
 }
 
 /// =========================================
-/// Agent Management Functions
+/// Agent 관리 함수
 /// =========================================
 
 bool MasterApplication::isAgentOnline(const std::string& host, uint16_t port) {
@@ -299,7 +299,7 @@ int MasterApplication::stopSlavesOnAllAgents(bool force) {
 }
 
 /// =========================================
-/// Agent REST API Handlers
+/// Agent REST API 핸들러
 /// =========================================
 
 HttpResponse MasterApplication::handleGetAgents(const HttpRequest& req) {
@@ -459,7 +459,7 @@ HttpResponse MasterApplication::handleStopSlavesOnAgents(const HttpRequest& req)
 }
 
 /// =========================================
-/// Slave Pause/Resume REST Handlers
+/// Slave 일시정지/재개 REST 핸들러
 /// =========================================
 
 HttpResponse MasterApplication::handlePauseSlave(const HttpRequest& req) {

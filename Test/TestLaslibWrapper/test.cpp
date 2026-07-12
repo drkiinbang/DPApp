@@ -16,7 +16,7 @@ using namespace las;
 using std::filesystem::path;
 using std::filesystem::temp_directory_path;
 
-// ---------- Helpers ----------
+// ---------- 헬퍼 함수 ----------
 static PointData mk(double x, double y, double z,
     uint16_t intensity = 0,
     uint8_t classification = 0,
@@ -103,7 +103,7 @@ static void save_points_as(const std::string& filename,
 }
 
 // ======================================================
-// PointData tests
+// PointData 테스트 (RGB/GPS 보유 여부 판별, 2D/3D 거리 계산, 비교 연산자)
 // ======================================================
 TEST(PointDataTest, HasRGBAndGPSAndDistance)
 {
@@ -125,7 +125,7 @@ TEST(PointDataTest, HasRGBAndGPSAndDistance)
 }
 
 // ======================================================
-// HeaderInfo::BoundingBox tests
+// HeaderInfo::BoundingBox 테스트 (포함 여부 판정, 폭/높이/깊이 계산)
 // ======================================================
 TEST(HeaderInfoTest, BoundingBoxContainsAndDims)
 {
@@ -150,7 +150,7 @@ TEST(HeaderInfoTest, BoundingBoxContainsAndDims)
 }
 
 // ======================================================
-// Exception test
+// 예외 테스트 (LASException 메시지에 "LAS Error: " 접두사가 붙는지 확인)
 // ======================================================
 TEST(ExceptionTest, LASExceptionHasPrefix)
 {
@@ -165,7 +165,7 @@ TEST(ExceptionTest, LASExceptionHasPrefix)
 }
 
 // ======================================================
-// Reader default/move semantics
+// Reader 기본 상태/move semantics 테스트 (복사 불가, noexcept move 가능 여부 확인)
 // ======================================================
 TEST(ReaderTest, DefaultStateAndMoveSemantics)
 {
@@ -186,7 +186,7 @@ TEST(ReaderTest, DefaultStateAndMoveSemantics)
 }
 
 // ======================================================
-// Util parse
+// 유틸리티 파싱 테스트 (문자열 -> ExportFormat 변환, 대소문자/빈 문자열 처리)
 // ======================================================
 TEST(UtilTest, ParseExportFormat)
 {
@@ -199,7 +199,7 @@ TEST(UtilTest, ParseExportFormat)
 }
 
 // ======================================================
-// Writer tests (round-trip with small datasets)
+// Writer 테스트 (소규모 데이터셋으로 쓰기 -> 다시 읽기 round-trip 검증)
 // ======================================================
 TEST(WriterTest, WriteLasAndReadBack)
 {
@@ -372,7 +372,7 @@ TEST(WriterTest, HeaderPresetBoundsAndScalePersist)
 }
 
 // ======================================================
-// Integration tests (quantization-aware header checks)
+// 통합 테스트 (양자화(quantization)를 고려한 헤더 검증 포함 — 실제 파일 생성/읽기)
 // ======================================================
 TEST(WriterIntegrationTest, CreateAndReadLAS)
 {

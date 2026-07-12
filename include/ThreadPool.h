@@ -8,6 +8,11 @@
 #include <atomic>
 
 namespace DPApp {
+	/// 고정 개수의 워커 스레드가 공유 작업 큐를 처리하는 범용 스레드 풀.
+	/// 생성자에서 워커 스레드들을 미리 띄워두고, enqueue()로 넘어온 작업을
+	/// 조건 변수(cv_)로 깨워 순서대로 처리한다. shutdown()이 호출되면(또는
+	/// 소멸자에서) stopping_ 플래그를 세우고 모든 워커가 큐를 비운 뒤
+	/// 종료하도록 한다.
 	class ThreadPool {
 	public:
 		explicit ThreadPool(size_t thread_count) {

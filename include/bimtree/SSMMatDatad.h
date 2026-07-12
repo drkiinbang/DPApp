@@ -28,70 +28,71 @@
 namespace math
 {
 	/// @class MatDatad
-	/// @brief Data class for Matrix operations using double type with std::vector management.
+	/// @brief std::vector로 관리되는, double 타입 기반 행렬 연산용 데이터 클래스.
+	/// Matrixd(SSMMatrixd.h)의 기반(base) 클래스로, 실제 저장소와 크기 관리만 담당한다.
 	class MatDatad
 	{
 	public:
-		/// Default constructor.
+		/// 기본 생성자.
 		MatDatad();
 
-		/// Constructor with size.
+		/// 크기를 지정하는 생성자.
 		MatDatad(const unsigned int r, const unsigned int c);
 
-		/// Constructor with size and initial value.
+		/// 크기와 초기값을 지정하는 생성자.
 		MatDatad(const unsigned int r, const unsigned int c, const double val);
 
-		/// Copy constructor.
+		/// 복사 생성자.
 		MatDatad(const MatDatad& copy);
 
-		/// Move constructor.
+		/// 이동 생성자.
 		MatDatad(MatDatad&& other) noexcept;
 
-		/// Destructor.
+		/// 소멸자.
 		virtual ~MatDatad();
 
-		/// Copy assignment operator.
+		/// 복사 대입 연산자.
 		MatDatad& operator=(const MatDatad& copy);
 
-		/// Move assignment operator.
+		/// 이동 대입 연산자.
 		MatDatad& operator=(MatDatad&& other) noexcept;
 
-		/// Clear data and reset size.
+		/// 데이터를 비우고 크기를 초기화.
 		void del();
 
-		/// Get the number of rows.
+		/// 행(row) 개수 반환.
 		unsigned int getRows() const;
 
-		/// Get the number of columns.
+		/// 열(column) 개수 반환.
 		unsigned int getCols() const;
 
-		/// Get the total size of data (rows * cols).
+		/// 전체 데이터 크기 반환 (rows * cols).
 		unsigned int getSize() const;
 
-		/// Get the pointer to the data (modifiable).
+		/// 데이터에 대한 포인터 반환 (수정 가능).
 		double* getDataHandle();
 
-		/// Get the const pointer to the data (read-only).
+		/// 데이터에 대한 const 포인터 반환 (읽기 전용).
 		const double* getAccessData() const;
 
-		/// Resize the matrix.
+		/// 행렬 크기 변경.
 		void resize(const unsigned int r, const unsigned int c, double val = 0.0);
 
 	protected:
-		/// Allocate memory (internal use, wraps vector resize).
+		/// 메모리 할당 (내부용, vector resize를 감쌈).
 		void allocateMem(const unsigned int r, const unsigned int c);
 
-		/// Initialize data with a value.
+		/// 데이터를 특정 값으로 초기화.
 		void initialize(double val);
 
 	protected:
-		std::vector<double> data; /// Container for matrix elements.
-		unsigned int rows;        /// Number of rows.
-		unsigned int cols;        /// Number of columns.
+		std::vector<double> data; /// 행렬 원소를 담는 컨테이너.
+		unsigned int rows;        /// 행 개수.
+		unsigned int cols;        /// 열 개수.
 	};
 
 	/// @class Arrayd
-	/// @brief Helper class for 1D array (column vector).
+	/// @brief 1차원 배열(열 벡터)을 위한 헬퍼 클래스.
 	class Arrayd : public MatDatad
 	{
 	public:
@@ -123,7 +124,7 @@ namespace math
 			return data[idx];
 		}
 
-		/// Resize the array with a default value.
+		/// 기본값을 지정해 배열 크기 변경.
 		void resize(const unsigned int r, double val = 0.0)
 		{
 			MatDatad::resize(r, 1, val);

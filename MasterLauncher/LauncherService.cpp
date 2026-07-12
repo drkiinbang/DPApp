@@ -1,8 +1,8 @@
 /// ============================================
 /// LauncherService.cpp
-/// Agent service running on Master machine
-/// Manages Master process lifecycle via REST API
-/// Windows version
+/// Master 컴퓨터에서 실행되는 Agent 서비스
+/// REST API를 통해 Master 프로세스의 생명주기를 관리
+/// Windows 버전
 /// ============================================
 
 #define WIN32_LEAN_AND_MEAN
@@ -33,13 +33,13 @@
 using namespace DPApp;
 
 /// ============================================
-/// Global shutdown flag (must be declared before use)
+/// 전역 종료 플래그 (사용 전에 반드시 선언되어야 함)
 /// ============================================
 static std::atomic<bool> g_shutdown_requested{ false };
 static std::atomic<bool> g_shutdown_complete{ false };
 
 /// ============================================
-/// Master Process Status
+/// Master 프로세스 상태
 /// ============================================
 
 enum class MasterStatus : uint8_t {
@@ -50,7 +50,7 @@ enum class MasterStatus : uint8_t {
     FAILED = 4
 };
 
-/// Convert MasterStatus to string representation
+/// MasterStatus를 문자열로 변환
 inline const char* masterStatusStr(MasterStatus status) {
     switch (status) {
     case MasterStatus::STOPPED: return "stopped";
@@ -63,14 +63,14 @@ inline const char* masterStatusStr(MasterStatus status) {
 }
 
 /// ============================================
-/// Helper function to wake up blocked accept()
+/// 블로킹된 accept()를 깨우기 위한 헬퍼 함수
 /// ============================================
 static void wakeUpServer(uint16_t port) {
-    /// Send dummy connection to wake up accept()
+    /// accept()를 깨우기 위해 더미 연결을 보냄
     SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock == INVALID_SOCKET) return;
 
-    /// Set short timeout
+    /// 짧은 타임아웃 설정
     DWORD timeout = 100;
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
     setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout));
@@ -80,13 +80,13 @@ static void wakeUpServer(uint16_t port) {
     addr.sin_port = htons(port);
     inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
 
-    /// Just connect and close - this wakes up accept()
+    /// 그냥 연결하고 닫기 - 이것으로 accept()가 깨어남
     connect(sock, (sockaddr*)&addr, sizeof(addr));
     closesocket(sock);
 }
 
 /// ============================================
-/// LauncherService Class
+/// LauncherService 클래스
 /// ============================================
 
 class LauncherService {
@@ -94,21 +94,21 @@ public:
     LauncherService() = default;
 
     ~LauncherService() {
-        /// Destructor should not call stop() again if already stopped
-        /// The stop() is called explicitly from main()
+        /// 소멸자에서는 이미 멈춰있다면 stop()을 다시 호출하지 않아야 함
+        /// stop()은 main()에서 명시적으로 호출됨
     }
 
-    /// Initialize launcher with command line arguments
+    /// 명령줄 인자로 런처 초기화
     bool initialize(int argc, char* argv[]) {
-        /// Default configuration
+        /// 기본 설정
         launcher_port_ = 8090;
-        ///[ToDo] put exe file name into config
+        ///[ToDo] exe 파일 이름을 설정 파일에 넣을 것
         std::string master_executable_ = "MasterApp.exe";
         master_server_port_ = 8080;
         master_api_port_ = 8081;
         config_file_ = "launcher_config.json";
 
-        /// Parse command line arguments
+        /// 명령줄 인자 파싱
         for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
 
@@ -131,10 +131,10 @@ public:
         master_executable_ = std::string("MasterAppd.exe");
 #endif
 
-        /// Load configuration file if exists
+        /// 설정 파일이 있으면 로딩
         loadConfig();
 
-        /// Initialize logger
+        /// 로거 초기화
         Logger::initialize("launcher.log");
 
         ILOG << "===========================================";
@@ -146,14 +146,14 @@ public:
         return true;
     }
 
-    /// Start the launcher service
+    /// 런처 서비스 시작
     bool start() {
         running_ = true;
 
-        /// Setup REST API routes
+        /// REST API 라우트 설정
         setupApiRoutes();
 
-        /// Start API server
+        /// API 서버 시작
         if (!api_server_->start(launcher_port_)) {
             ELOG << "Failed to start REST API server on port " << launcher_port_;
             return false;
@@ -161,15 +161,15 @@ public:
 
         ILOG << "Launcher REST API started on port " << launcher_port_;
 
-        /// Start monitor thread
+        /// 모니터 스레드 시작
         monitor_thread_ = std::thread(&LauncherService::monitorLoop, this);
 
         return true;
     }
 
-    /// Stop the launcher service
+    /// 런처 서비스 중지
     void stop() {
-        /// Prevent re-entry
+        /// 재진입 방지
         bool expected = true;
         if (!running_.compare_exchange_strong(expected, false)) {
             return;
@@ -177,18 +177,18 @@ public:
 
         ILOG << "Stopping launcher service...";
 
-        /// Stop master if running
+        /// 실행 중이면 master 중지
         stopMaster(false);
 
-        /// Wake up the server accept() before stopping
+        /// 중지하기 전에 서버의 accept()를 깨움
         wakeUpServer(launcher_port_);
 
-        /// Stop API server
+        /// API 서버 중지
         if (api_server_) {
             api_server_->stop();
         }
 
-        /// Wait for monitor thread with timeout
+        /// 타임아웃을 두고 모니터 스레드를 기다림
         if (monitor_thread_.joinable()) {
             monitor_thread_.join();
         }
@@ -196,7 +196,7 @@ public:
         ILOG << "Launcher service stopped";
     }
 
-    /// Run main loop (blocking)
+    /// 메인 루프 실행 (블로킹)
     void run() {
         ILOG << "Launcher service running. Press Ctrl+C to exit.";
 
@@ -204,15 +204,15 @@ public:
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
 
-        /// Exit loop
+        /// 루프 종료
         running_ = false;
     }
 
-    /// Get launcher port
+    /// 런처 포트 조회
     uint16_t getPort() const { return launcher_port_; }
 
 private:
-    /// Print usage information
+    /// 사용법 출력
     void printUsage(const char* program) {
         std::cout << "Usage: " << program << " [options]\n"
             << "Options:\n"
@@ -222,7 +222,7 @@ private:
             << "  -h, --help             Show this help message\n";
     }
 
-    /// Load configuration from JSON file
+    /// JSON 파일로부터 설정 로딩
     void loadConfig() {
         std::ifstream file(config_file_);
         if (!file.is_open()) {
@@ -253,46 +253,46 @@ private:
         ILOG << "Loaded configuration from " << config_file_;
     }
 
-    /// Setup REST API routes
+    /// REST API 라우트 설정
     void setupApiRoutes() {
         api_server_ = std::make_unique<RestApiServer>();
 
-        /// Health check endpoint
+        /// 헬스 체크 엔드포인트
         api_server_->GET("/api/health", [this](const HttpRequest& req) {
             return handleHealth(req);
             });
 
-        /// Get launcher and master status
+        /// 런처와 master 상태 조회
         api_server_->GET("/api/status", [this](const HttpRequest& req) {
             return handleGetStatus(req);
             });
 
-        /// Start master process
+        /// Master 프로세스 시작
         api_server_->POST("/api/master/start", [this](const HttpRequest& req) {
             return handleStartMaster(req);
             });
 
-        /// Stop master process
+        /// Master 프로세스 중지
         api_server_->POST("/api/master/stop", [this](const HttpRequest& req) {
             return handleStopMaster(req);
             });
 
-        /// Restart master process
+        /// Master 프로세스 재시작
         api_server_->POST("/api/master/restart", [this](const HttpRequest& req) {
             return handleRestartMaster(req);
             });
 
-        /// Shutdown launcher service
+        /// 런처 서비스 종료
         api_server_->POST("/api/shutdown", [this](const HttpRequest& req) {
             return handleShutdown(req);
             });
     }
 
     /// =========================================
-    /// Master Process Management
+    /// Master 프로세스 관리
     /// =========================================
 
-    /// Start master process
+    /// Master 프로세스 시작
     bool startMaster() {
         std::lock_guard<std::mutex> lock(master_mutex_);
 
@@ -303,7 +303,7 @@ private:
 
         master_status_ = MasterStatus::STARTING;
 
-        /// Build command line
+        /// 명령줄 구성
         std::ostringstream cmd;
         cmd << master_executable_;
         cmd << " --daemon";
@@ -317,11 +317,11 @@ private:
         std::string cmdLine = cmd.str();
         ILOG << "Starting master: " << cmdLine;
 
-        /// Create process using Windows API
+        /// Windows API를 이용해 프로세스 생성
         STARTUPINFOA si = { sizeof(si) };
         PROCESS_INFORMATION pi = {};
 
-        /// Convert to mutable char array for CreateProcessA
+        /// CreateProcessA를 위해 수정 가능한 char 배열로 변환
         std::vector<char> cmdBuffer(cmdLine.begin(), cmdLine.end());
         cmdBuffer.push_back('\0');
 
@@ -353,7 +353,7 @@ private:
 
         ILOG << "Master process started with PID: " << master_pid_;
 
-        /// Wait briefly and verify process is running
+        /// 잠시 대기한 뒤 프로세스가 실행 중인지 확인
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
         if (isMasterRunning()) {
@@ -373,7 +373,7 @@ private:
         }
     }
 
-    /// Stop master process
+    /// Master 프로세스 중지
     bool stopMaster(bool force = false) {
         std::lock_guard<std::mutex> lock(master_mutex_);
 
@@ -389,11 +389,11 @@ private:
         bool stopped = false;
 
         if (!force) {
-            /// Try graceful shutdown first via REST API
+            /// REST API를 통한 정상 종료를 먼저 시도
             stopped = sendShutdownToMaster();
 
             if (stopped) {
-                /// Wait for process to exit
+                /// 프로세스가 종료될 때까지 대기
                 if (master_handle_ != NULL) {
                     DWORD waitResult = WaitForSingleObject(master_handle_, 5000);
                     if (waitResult == WAIT_OBJECT_0) {
@@ -408,7 +408,7 @@ private:
             }
         }
 
-        /// Force terminate if graceful shutdown failed or force requested
+        /// 정상 종료가 실패했거나 강제 종료가 요청되면 강제 종료
         if (!stopped || force) {
             if (master_handle_ != NULL) {
                 ILOG << "Force terminating master process";
@@ -417,7 +417,7 @@ private:
             }
         }
 
-        /// Cleanup
+        /// 정리
         if (master_handle_ != NULL) {
             CloseHandle(master_handle_);
             master_handle_ = NULL;
@@ -429,7 +429,7 @@ private:
         return true;
     }
 
-    /// Check if master process is still running
+    /// Master 프로세스가 아직 실행 중인지 확인
     bool isMasterRunning() {
         if (master_handle_ == NULL) return false;
 
@@ -440,7 +440,7 @@ private:
         return false;
     }
 
-    /// Send shutdown command to master via REST API
+    /// REST API를 통해 master에 종료 명령 전송
     bool sendShutdownToMaster() {
         SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (sock == INVALID_SOCKET) {
@@ -448,7 +448,7 @@ private:
             return false;
         }
 
-        /// Set timeout
+        /// 타임아웃 설정
         DWORD timeout = 3000;
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
         setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout));
@@ -464,7 +464,7 @@ private:
             return false;
         }
 
-        /// Send shutdown request
+        /// 종료 요청 전송
         std::string request =
             "POST /api/shutdown HTTP/1.1\r\n"
             "Host: 127.0.0.1\r\n"
@@ -474,7 +474,7 @@ private:
 
         send(sock, request.c_str(), static_cast<int>(request.length()), 0);
 
-        /// Receive response (brief)
+        /// 응답 수신 (간단히)
         char buffer[512];
         recv(sock, buffer, sizeof(buffer) - 1, 0);
 
@@ -484,7 +484,7 @@ private:
         return true;
     }
 
-    /// Monitor loop for checking master status
+    /// master 상태를 확인하는 모니터 루프
     void monitorLoop() {
         ILOG << "Monitor thread started";
 
@@ -505,7 +505,7 @@ private:
                 }
             }
 
-            /// Check every 5 seconds (but check shutdown flag more frequently)
+            /// 5초마다 확인 (단, 종료 플래그는 더 자주 확인)
             for (int i = 0; i < 50 && running_ && !g_shutdown_requested.load(); ++i) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
@@ -515,7 +515,7 @@ private:
     }
 
     /// =========================================
-    /// REST API Handlers
+    /// REST API 핸들러
     /// =========================================
 
     HttpResponse handleHealth(const HttpRequest& req) {
@@ -659,7 +659,7 @@ private:
     }
 
 private:
-    /// Configuration
+    /// 설정
     uint16_t launcher_port_ = 8090;
     std::string master_executable_ = "MasterApp.exe";
     uint16_t master_server_port_ = 8080;
@@ -667,12 +667,12 @@ private:
     std::string master_config_file_;
     std::string config_file_ = "launcher_config.json";
 
-    /// Runtime state
+    /// 런타임 상태
     std::atomic<bool> running_{ false };
     std::unique_ptr<RestApiServer> api_server_;
     std::thread monitor_thread_;
 
-    /// Master process state
+    /// Master 프로세스 상태
     std::mutex master_mutex_;
     DWORD master_pid_ = 0;
     HANDLE master_handle_ = NULL;
@@ -681,23 +681,23 @@ private:
 };
 
 /// ============================================
-/// Global instance for console control handling
+/// 콘솔 제어 처리를 위한 전역 인스턴스
 /// ============================================
 
 static LauncherService* g_launcher = nullptr;
 
-/// Windows console control handler for Ctrl+C
+/// Ctrl+C를 위한 Windows 콘솔 제어 핸들러
 static BOOL WINAPI ConsoleHandler(DWORD signal) {
     if (signal == CTRL_C_EVENT || signal == CTRL_BREAK_EVENT) {
-        /// Set shutdown flag only - do NOT perform complex operations here
+        /// 종료 플래그만 설정 - 여기서 복잡한 작업을 수행하지 말 것
         g_shutdown_requested = true;
 
-        /// Wake up the server to unblock accept()
+        /// accept()를 풀어주기 위해 서버를 깨움
         if (g_launcher) {
             wakeUpServer(g_launcher->getPort());
         }
 
-        /// Wait for graceful shutdown to complete (max 5 seconds)
+        /// 정상 종료가 완료될 때까지 대기 (최대 5초)
         for (int i = 0; i < 50 && !g_shutdown_complete.load(); ++i) {
             Sleep(100);
         }
@@ -708,40 +708,40 @@ static BOOL WINAPI ConsoleHandler(DWORD signal) {
 }
 
 /// ============================================
-/// Main Entry Point
+/// 메인 진입점
 /// ============================================
 
 int main(int argc, char* argv[]) {
-    /// Disable abort message box in debug mode
+    /// 디버그 모드에서 abort 메시지 박스 비활성화
     _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
 
     LauncherService launcher;
     g_launcher = &launcher;
 
-    /// Setup Windows console control handler
+    /// Windows 콘솔 제어 핸들러 설정
     SetConsoleCtrlHandler(ConsoleHandler, TRUE);
 
-    /// Initialize launcher
+    /// 런처 초기화
     if (!launcher.initialize(argc, argv)) {
         return 1;
     }
 
-    /// Start launcher service
+    /// 런처 서비스 시작
     if (!launcher.start()) {
         return 1;
     }
 
-    /// Run main loop (blocking until Ctrl+C or shutdown request)
+    /// 메인 루프 실행 (Ctrl+C 또는 종료 요청까지 블로킹)
     launcher.run();
 
-    /// Graceful shutdown
+    /// 정상 종료
     ILOG << "Initiating graceful shutdown...";
     launcher.stop();
 
     ILOG << "Launcher terminated successfully.";
     Logger::shutdown();
 
-    /// Signal that shutdown is complete
+    /// 종료가 완료되었음을 알림
     g_shutdown_complete = true;
 
     return 0;

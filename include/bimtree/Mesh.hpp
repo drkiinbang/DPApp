@@ -7,7 +7,7 @@
 #include "PseudoPtsInMesh.hpp"
 #include "xyzpoint.hpp"
 
-namespace chunkbim /// Use this one
+namespace chunkbim /// 이 클래스를 사용할 것 (MeshData가 이 네임스페이스의 대표 메시 표현임)
 {
 	class MeshData
 	{
@@ -15,11 +15,11 @@ namespace chunkbim /// Use this one
 		std::vector<Face> faces;
 		pctree::PointCloudType3D pc;
 		std::shared_ptr<pctree::kd_tree3D> meshTree;
-		//size_t numVertices;		
+		//size_t numVertices;
 		//FILE* idxFile;
 
 	private:
-		/// Serialize XYZPoint
+		/// XYZPoint 직렬화
 		void serializeXYZPoint(std::ostream& out, const pctree::XYZPoint& point) const {
 			out.write(reinterpret_cast<const char*>(&point.xyz), sizeof(point.xyz));
 			size_t fIdsSize = point.fIds.size();
@@ -27,7 +27,7 @@ namespace chunkbim /// Use this one
 			out.write(reinterpret_cast<const char*>(point.fIds.data()), fIdsSize * sizeof(size_t));
 		}
 
-		/// Deserialize XYZPoint
+		/// XYZPoint 역직렬화
 		void deserializeXYZPoint(std::istream& in, pctree::XYZPoint& point) {
 			in.read(reinterpret_cast<char*>(&point.xyz), sizeof(point.xyz));
 			size_t fIdsSize;
@@ -36,17 +36,17 @@ namespace chunkbim /// Use this one
 			in.read(reinterpret_cast<char*>(point.fIds.data()), fIdsSize * sizeof(size_t));
 		}
 
-		/// Serialize MatrixForMesh
+		/// MatrixForMesh 직렬화
 		void serializeMatrixForMesh(std::ostream& out, const pctree::MatrixForMesh& matrix) const {
 			out.write(reinterpret_cast<const char*>(&matrix.r), sizeof(matrix.r));
 		}
 
-		/// Deserialize MatrixForMesh
+		/// MatrixForMesh 역직렬화
 		void deserializeMatrixForMesh(std::istream& in, pctree::MatrixForMesh& matrix) {
 			in.read(reinterpret_cast<char*>(&matrix.r), sizeof(matrix.r));
 		}
 
-		/// Serialize TempBaryCentVar
+		/// TempBaryCentVar 직렬화
 		void serializeTempBaryCentVar(std::ostream& out, const geo::TempBaryCentVar& baryTemp) const {
 			serializeXYZPoint(out, baryTemp.v0);
 			serializeXYZPoint(out, baryTemp.v1);
@@ -56,7 +56,7 @@ namespace chunkbim /// Use this one
 			out.write(reinterpret_cast<const char*>(&baryTemp.invDenom), sizeof(baryTemp.invDenom));
 		}
 
-		/// Deserialize TempBaryCentVar
+		/// TempBaryCentVar 역직렬화
 		void deserializeTempBaryCentVar(std::istream& in, geo::TempBaryCentVar& baryTemp) {
 			deserializeXYZPoint(in, baryTemp.v0);
 			deserializeXYZPoint(in, baryTemp.v1);
@@ -66,7 +66,7 @@ namespace chunkbim /// Use this one
 			in.read(reinterpret_cast<char*>(&baryTemp.invDenom), sizeof(baryTemp.invDenom));
 		}
 
-		/// Serialize Face
+		/// Face 직렬화
 		void serializeFace(std::ostream& out, const Face& face) const {
 			out.write(reinterpret_cast<const char*>(&face.partId), sizeof(face.partId));
 			out.write(reinterpret_cast<const char*>(face.vtxIds.data()), face.vtxIds.size() * sizeof(int));
@@ -83,7 +83,7 @@ namespace chunkbim /// Use this one
 			out.write(reinterpret_cast<const char*>(&face.baryAvailability), sizeof(face.baryAvailability));
 		}
 
-		/// Deserialize Face
+		/// Face 역직렬화
 		void deserializeFace(std::istream& in, Face& face) {
 			in.read(reinterpret_cast<char*>(&face.partId), sizeof(face.partId));
 			in.read(reinterpret_cast<char*>(face.vtxIds.data()), face.vtxIds.size() * sizeof(int));
@@ -102,10 +102,13 @@ namespace chunkbim /// Use this one
 		}
 
 	public:
-		
+
+		/// 기존 메시에 새 face/vertex들을 추가한다. 추가되는 데이터의 인덱스는
+		/// 항상 0부터 시작하므로, 기존에 이미 들어있던 개수만큼 오프셋을
+		/// 더해줘야 전체 메시 기준의 올바른 인덱스가 된다.
 		void addMeshData(std::vector<Face>& addedFaces, std::vector<pctree::XYZPoint>& addedVertices)
 		{
-			/// update ids for added data
+			/// 추가되는 데이터의 id를 갱신 (기존 데이터 개수만큼 오프셋)
 			unsigned int lastNumPts = static_cast<int>(this->pc.points.size());
 			unsigned int lastNumFaces = static_cast<int>(this->faces.size());
 
@@ -127,7 +130,7 @@ namespace chunkbim /// Use this one
 				}
 			}
 
-			/// insert
+			/// 삽입
 			this->faces.insert(this->faces.end(), addedFaces.begin(), addedFaces.end());
 			this->pc.points.insert(this->pc.points.end(), addedVertices.begin(), addedVertices.end());
 
@@ -137,7 +140,7 @@ namespace chunkbim /// Use this one
 #endif
 		}
 
-		/// Save pc
+		/// 포인트클라우드(pc) 저장
 		bool savePc(const std::string& filename) const {
 			std::ofstream ofs(filename, std::ios::binary | std::ios::out);
 			if (!ofs) {
@@ -163,7 +166,7 @@ namespace chunkbim /// Use this one
 			return true;
 		}
 
-		/// Load pc
+		/// 포인트클라우드(pc) 로딩
 		bool loadPc(const std::string& filename) {
 			std::ifstream ifs(filename, std::ios::binary | std::ios::in);
 			if (!ifs) {
@@ -189,7 +192,7 @@ namespace chunkbim /// Use this one
 			return true;
 		}
 
-		/// Save faces
+		/// face 목록 저장
 		bool saveFaces(const std::string& filename) const {
 			std::ofstream outFile(filename, std::ios::binary);
 			if (!outFile) {
@@ -229,7 +232,7 @@ namespace chunkbim /// Use this one
 			return true;
 		}
 
-		/// Load faces
+		/// face 목록 로딩
 		bool loadFaces(const std::string& filename) {
 			std::ifstream inFile(filename, std::ios::binary);
 			if (!inFile) {
@@ -248,13 +251,13 @@ namespace chunkbim /// Use this one
 			inFile.close();
 		}
 
-		/// Generate pseudo pts
+		/// 가상점(pseudo point) 생성
 		void generatePseudoPts(const float lengthTh)
 		{
 			geo::generatePseudoGridPts(this->faces, this->pc.points, lengthTh);
 		}
 
-		/// Build tree
+		/// KD-Tree 구축
 		bool buildTree()
 		{
 			if (!pctree::buildKdtree3D(this->pc, meshTree))
@@ -286,7 +289,7 @@ namespace chunkbim /// Use this one
 
 		}
 
-		/// export tree
+		/// 트리와 메시를 함께 내보내기(export)
 		bool exportTreeAndMesh(const std::string& treePath)
 		{
 			//pctree::
@@ -308,8 +311,13 @@ namespace chunkbim /// Use this one
 			return true;
 		}
 
+		/// queryPt에 가장 가까운 face를 찾는다. 1) KD-Tree로 queryPt에 가까운 정점
+		/// N개를 찾고, 2) 그 정점들이 속한 (아직 방문하지 않은) face들을 후보로
+		/// 모은 뒤, 3) 각 후보 face의 평면으로 queryPt를 회전 투영해 평면까지의
+		/// 수직 거리가 가장 작은 face를 선택한다. N(템플릿 매개변수)이 클수록
+		/// 더 넓은 범위의 face를 후보로 검토하지만 그만큼 느려진다.
 		template<std::size_t N>
-		bool searchFace_closest(const pctree::XYZPoint& queryPt, 
+		bool searchFace_closest(const pctree::XYZPoint& queryPt,
 			size_t& foundFaceId, 
 			float& minDistToFace, 
 			std::array<float, N>& squareDist, 

@@ -11,24 +11,24 @@ namespace DPApp {
 
     const size_t MAX_DEPTH = 32;
 
-    /// Forward declaration for recursive types
+    /// 재귀 타입을 위한 전방 선언
     struct JsonValueEx;
 
-    /// JSON Object type (string -> JsonValueEx)
+    /// JSON 객체 타입 (문자열 -> JsonValueEx)
     using JsonObjectEx = std::unordered_map<std::string, JsonValueEx>;
 
-    /// JSON Array type (vector of JsonValueEx)
+    /// JSON 배열 타입 (JsonValueEx의 vector)
     using JsonArrayEx = std::vector<JsonValueEx>;
 
-    /// Extended JSON Value - supports string, double, bool, null, object, array
+    /// 확장 JSON 값 - 문자열, 실수, 불리언, null, 객체, 배열을 지원
     struct JsonValueEx {
         std::variant<
             std::nullptr_t,                         /// null
-            std::string,                            /// string
-            double,                                 /// number
-            bool,                                   /// boolean
-            std::shared_ptr<JsonObjectEx>,          /// nested object
-            std::shared_ptr<JsonArrayEx>            /// array
+            std::string,                            /// 문자열
+            double,                                 /// 숫자
+            bool,                                   /// 불리언
+            std::shared_ptr<JsonObjectEx>,          /// 중첩 객체
+            std::shared_ptr<JsonArrayEx>            /// 배열
         > data;
 
         JsonValueEx() : data(nullptr) {}
@@ -56,24 +56,24 @@ namespace DPApp {
     };
 
     /// =========================================
-    /// Legacy types for backward compatibility
+    /// 하위 호환을 위한 레거시 타입
     /// =========================================
     using JsonValue = std::variant<std::string, double, bool>;
     using JsonObject = std::unordered_map<std::string, JsonValue>;
 
     /// =========================================
-    /// MiniJson Parser
+    /// MiniJson 파서
     /// =========================================
     class MiniJson {
     public:
         MiniJson() {}
 
-        /// Skip whitespace
+        /// 공백 건너뛰기
         static void skip_ws(const std::string& s, size_t& i) {
             while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
         }
 
-        /// Parse string
+        /// 문자열 파싱
         static bool parse_string(const std::string& s, size_t& i, std::string& out, size_t max_length = 1024 * 1024) {
             if (i >= s.size() || s[i] != '"') return false;
             ++i;
@@ -99,10 +99,10 @@ namespace DPApp {
                     case 'r': tmp.push_back('\r'); break;
                     case 't': tmp.push_back('\t'); break;
                     case 'u': {
-                        /// Skip \uXXXX (simplified - just skip 4 hex digits)
+                        /// \uXXXX 건너뛰기 (단순화 -- 16진수 4자리만 건너뜀)
                         if (i + 4 <= s.size()) {
                             i += 4;
-                            tmp.push_back('?');  /// Placeholder
+                            tmp.push_back('?');  /// 자리표시자(placeholder)
                         }
                         else return false;
                         break;
@@ -120,7 +120,7 @@ namespace DPApp {
             return false;
         }
 
-        /// Parse number
+        /// 숫자 파싱
         static bool parse_number(const std::string& s, size_t& i, double& out) {
             size_t start = i;
             if (i < s.size() && (s[i] == '-' || s[i] == '+')) ++i;
@@ -130,7 +130,7 @@ namespace DPApp {
                 ++i;
                 while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i]))) { ++i; has_digit = true; }
             }
-            /// Handle exponent (e.g., 1e10, 2.5E-3)
+            /// 지수 표기 처리 (예: 1e10, 2.5E-3)
             if (i < s.size() && (s[i] == 'e' || s[i] == 'E')) {
                 ++i;
                 if (i < s.size() && (s[i] == '+' || s[i] == '-')) ++i;
@@ -142,24 +142,24 @@ namespace DPApp {
             return true;
         }
 
-        /// Parse boolean
+        /// 불리언 파싱
         static bool parse_bool(const std::string& s, size_t& i, bool& out) {
             if (s.compare(i, 4, "true") == 0) { i += 4; out = true; return true; }
             if (s.compare(i, 5, "false") == 0) { i += 5; out = false; return true; }
             return false;
         }
 
-        /// Parse null
+        /// null 파싱
         static bool parse_null(const std::string& s, size_t& i) {
             if (s.compare(i, 4, "null") == 0) { i += 4; return true; }
             return false;
         }
 
         /// =========================================
-        /// Extended Parser - supports arrays and nested objects
+        /// 확장 파서 - 배열과 중첩 객체를 지원
         /// =========================================
 
-        /// Parse any JSON value (recursive)
+        /// 임의의 JSON 값 파싱 (재귀)
         static bool parse_value_ex(const std::string& s, size_t& i, JsonValueEx& out, size_t depth = 0) {
             if (depth > MAX_DEPTH) return false;
 
@@ -168,35 +168,35 @@ namespace DPApp {
 
             char c = s[i];
 
-            /// String
+            /// 문자열
             if (c == '"') {
                 std::string str;
                 if (!parse_string(s, i, str)) return false;
                 out = JsonValueEx(std::move(str));
                 return true;
             }
-            /// Number
+            /// 숫자
             else if (std::isdigit(static_cast<unsigned char>(c)) || c == '-' || c == '+') {
                 double d;
                 if (!parse_number(s, i, d)) return false;
                 out = JsonValueEx(d);
                 return true;
             }
-            /// Object
+            /// 객체
             else if (c == '{') {
                 auto obj = std::make_shared<JsonObjectEx>();
                 if (!parse_object_ex_internal(s, i, *obj, depth + 1)) return false;
                 out = JsonValueEx(obj);
                 return true;
             }
-            /// Array
+            /// 배열
             else if (c == '[') {
                 auto arr = std::make_shared<JsonArrayEx>();
                 if (!parse_array_ex_internal(s, i, *arr, depth + 1)) return false;
                 out = JsonValueEx(arr);
                 return true;
             }
-            /// Boolean or null
+            /// 불리언 또는 null
             else if (c == 't' || c == 'f') {
                 bool b;
                 if (!parse_bool(s, i, b)) return false;
@@ -212,32 +212,32 @@ namespace DPApp {
             return false;
         }
 
-        /// Parse object (internal, with index parameter)
+        /// 객체 파싱 (내부용, 인덱스 매개변수 사용)
         static bool parse_object_ex_internal(const std::string& s, size_t& i, JsonObjectEx& obj, size_t depth = 0) {
             if (depth > MAX_DEPTH) return false;
 
             skip_ws(s, i);
             if (i >= s.size() || s[i] != '{') return false;
-            ++i;  /// consume '{'
+            ++i;  /// '{' 소비
 
             for (;;) {
                 skip_ws(s, i);
 
-                /// Empty object or end
+                /// 빈 객체 또는 끝
                 if (i < s.size() && s[i] == '}') {
                     ++i;
                     return true;
                 }
 
-                /// Parse key
+                /// 키 파싱
                 std::string key;
                 if (!parse_string(s, i, key)) return false;
 
                 skip_ws(s, i);
                 if (i >= s.size() || s[i] != ':') return false;
-                ++i;  /// consume ':'
+                ++i;  /// ':' 소비
 
-                /// Parse value
+                /// 값 파싱
                 JsonValueEx value;
                 if (!parse_value_ex(s, i, value, depth)) return false;
 
@@ -250,24 +250,24 @@ namespace DPApp {
             }
         }
 
-        /// Parse array (internal)
+        /// 배열 파싱 (내부용)
         static bool parse_array_ex_internal(const std::string& s, size_t& i, JsonArrayEx& arr, size_t depth = 0) {
             if (depth > MAX_DEPTH) return false;
 
             skip_ws(s, i);
             if (i >= s.size() || s[i] != '[') return false;
-            ++i;  /// consume '['
+            ++i;  /// '[' 소비
 
             for (;;) {
                 skip_ws(s, i);
 
-                /// Empty array or end
+                /// 빈 배열 또는 끝
                 if (i < s.size() && s[i] == ']') {
                     ++i;
                     return true;
                 }
 
-                /// Parse value
+                /// 값 파싱
                 JsonValueEx value;
                 if (!parse_value_ex(s, i, value, depth)) return false;
 
@@ -281,10 +281,10 @@ namespace DPApp {
         }
 
         /// =========================================
-        /// Public Extended API
+        /// 공개 확장 API
         /// =========================================
 
-        /// Parse JSON string to extended object
+        /// JSON 문자열을 확장 객체로 파싱
         static std::optional<JsonObjectEx> parse_object_ex(const std::string& s) {
             size_t i = 0;
             JsonObjectEx obj;
@@ -294,7 +294,7 @@ namespace DPApp {
             return std::nullopt;
         }
 
-        /// Parse JSON string to extended array
+        /// JSON 문자열을 확장 배열로 파싱
         static std::optional<JsonArrayEx> parse_array_ex(const std::string& s) {
             size_t i = 0;
             JsonArrayEx arr;
@@ -304,7 +304,7 @@ namespace DPApp {
             return std::nullopt;
         }
 
-        /// Get value from extended object
+        /// 확장 객체에서 값 조회
         template<typename T>
         static std::optional<T> get_ex(const JsonObjectEx& o, const std::string& k) {
             auto it = o.find(k);
@@ -331,7 +331,7 @@ namespace DPApp {
             return std::nullopt;
         }
 
-        /// Get array from extended object
+        /// 확장 객체에서 배열 조회
         static std::optional<JsonArrayEx> get_array(const JsonObjectEx& o, const std::string& k) {
             auto it = o.find(k);
             if (it == o.end()) return std::nullopt;
@@ -339,7 +339,7 @@ namespace DPApp {
             return std::nullopt;
         }
 
-        /// Get nested object from extended object
+        /// 확장 객체에서 중첩 객체 조회
         static std::optional<JsonObjectEx> get_object(const JsonObjectEx& o, const std::string& k) {
             auto it = o.find(k);
             if (it == o.end()) return std::nullopt;
@@ -348,10 +348,10 @@ namespace DPApp {
         }
 
         /// =========================================
-        /// Legacy API (backward compatible)
+        /// 레거시 API (하위 호환)
         /// =========================================
 
-        /// Parse simple object (no arrays, no nested objects)
+        /// 단순 객체 파싱 (배열 없음, 중첩 객체 없음)
         static std::optional<JsonObject> parse_object(const std::string& s, size_t depth = 0) {
             if (depth > MAX_DEPTH) {
                 return std::nullopt;
@@ -398,11 +398,11 @@ namespace DPApp {
                     obj.emplace(std::move(key), JsonValue{ d });
                 }
                 else if (s[i] == '{') {
-                    /// Skip nested objects in legacy mode
+                    /// 레거시 모드에서는 중첩 객체를 지원하지 않음
                     return std::nullopt;
                 }
                 else if (s[i] == '[') {
-                    /// Skip arrays in legacy mode
+                    /// 레거시 모드에서는 배열을 지원하지 않음
                     return std::nullopt;
                 }
                 else {
@@ -420,7 +420,7 @@ namespace DPApp {
             return obj;
         }
 
-        /// Get value from legacy object
+        /// 레거시 객체에서 값 조회
         template<typename T>
         static std::optional<T> get(const JsonObject& o, const std::string& k) {
             auto it = o.find(k);

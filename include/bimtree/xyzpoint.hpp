@@ -6,6 +6,9 @@
 
 namespace pctree
 {
+	/// 3차원 점/벡터 및 사칙연산·내적·외적·정규화를 지원하는 경량 유틸리티 타입.
+	/// icp::Transform4x4의 double[16] 배열과 달리, 개별 정점 단위 연산(메시 처리,
+	/// barycentric 계산 등)에 쓰인다.
 	struct XYZPoint
 	{
 		double xyz[3];
@@ -14,7 +17,7 @@ namespace pctree
 		inline double y() const { return xyz[1]; }
 		inline double z() const { return xyz[2]; }
 
-		/// Ids of corresponding faces
+		/// 대응하는 face들의 id
 		std::vector<size_t> fIds;
 
 		XYZPoint(const XYZPoint& val) { copy(val); }
@@ -33,9 +36,9 @@ namespace pctree
 		inline XYZPoint& operator-=(const XYZPoint& pt) { for (int i = 0; i < 3; i++) xyz[i] -= pt.xyz[i]; return *this; }
 		inline XYZPoint operator*(const double s) const { return XYZPoint(xyz[0] * s, xyz[1] * s, xyz[2] * s); }
 		inline XYZPoint& operator*=(const double s) { for (int i = 0; i < 3; i++) xyz[i] *= s; return *this; }
-		/// inner product
+		/// 내적(inner product)
 		inline double operator*(const XYZPoint& pt) const { return (this->xyz[0] * pt.xyz[0] + this->xyz[1] * pt.xyz[1] + this->xyz[2] * pt.xyz[2]); }
-		/// cross product
+		/// 외적(cross product)
 		inline XYZPoint operator%(const XYZPoint& pt) const {
 			XYZPoint ret;
 			ret[0] = this->xyz[1] * pt.xyz[2] - this->xyz[2] * pt.xyz[1];

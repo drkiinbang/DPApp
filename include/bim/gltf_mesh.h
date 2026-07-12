@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "gltf.h"
 #include "BimMeshInfo.h"
@@ -6,6 +6,13 @@
 #include "../bimtree/dataStructs.hpp"
 #include "./MeshChunk.h"
 
+/// [주의] 이 파일에는 이름이 같은 "GltfMesh" 클래스가 두 개 존재한다 — 서로 다른
+/// 클래스이니 혼동하지 말 것.
+///   1) 전역 네임스페이스의 ::GltfMesh (바로 아래) — gltf(gltf.h)를 상속하며,
+///      Eigen 기반 Matrix4f로 GLTF를 읽어 BimMeshInfo(Point 기반 Face 목록)를 채운다.
+///   2) chunkbim::GltfMesh (파일 하단) — Eigen을 쓰지 않고 자체 Mat4(column-major
+///      float[16])로 GLTF를 읽어 MeshChunk(FaceVtx 목록, 네트워크 전송용 청크)를 채운다.
+/// 서로 완전히 독립적인 구현이며 재사용 관계가 없다.
 class GltfMesh : public gltf {
 public:
 	GltfMesh() = default;
@@ -31,7 +38,7 @@ public:
 		}
 		else {
 			std::cerr << "Unsupported file format" << std::endl;
-			return false; // Return empty BimMeshInfo if unsupported file format
+			return false; // 지원하지 않는 파일 형식이면 false 반환(BimMeshInfo는 비워둠)
 		}
 
 		if (!warn.empty()) {
@@ -44,10 +51,10 @@ public:
 
 		if (!fileread) {
 			std::cerr << "Failed to parse glTF" << std::endl;
-			return false; // Return empty BimInfo if failed to parse glTF
+			return false; // 파싱 실패 시 false 반환(BimInfo는 비워둠)
 		}
 
-		/// Define a single transformation shared for all meshes
+		/// 모든 메시가 공유하는 단일 변환 행렬을 정의
 		Matrix4f world = Matrix4f::Identity();
 
 		for (size_t s = 0; s < model.scenes.size(); ++s) {
@@ -60,7 +67,7 @@ public:
 			}
 		}
 
-		///  Apply the given offset
+		///  주어진 offset을 적용 (좌표 rebase)
 		if (is_offset_applied) {
 			world(0, 3) -= offset[0];
 			world(1, 3) -= offset[1];
@@ -121,7 +128,7 @@ public:
 				}
 			}
 
-			/// add a new mesh consisting of multiple primitives
+			/// 여러 primitive로 구성된 새 메시를 추가
 			bimInfo.addMesh(mesh.name, normal, v1, v2, v3);
 		}
 
@@ -130,7 +137,7 @@ public:
 };
 
 namespace chunkbim {
-	/// column-major 4x4 matrix
+	/// column-major 4x4 행렬 (Eigen을 쓰지 않는 이 네임스페이스 전용의 경량 표현)
 	struct Mat4 {
 		float m[16];
 	};
@@ -175,7 +182,7 @@ namespace chunkbim {
 		return pctree::XYZPoint(rx, ry, rz);
 	}
 
-	/// quaternion(x,y,z,w) → 4X4 matrix (rotation matrix and zero translatoion)
+	/// quaternion(x,y,z,w) → 4x4 행렬 (회전만 반영, 이동(translation)은 0)
 	Mat4 Mat4FromQuaternion(const std::vector<double>& q) {
 		double x = 0, y = 0, z = 0, w = 1;
 		if (q.size() == 4) {
@@ -212,7 +219,7 @@ namespace chunkbim {
 		const std::vector<double>& r,
 		const std::vector<double>& s)
 	{
-		/// T
+		/// T (이동)
 		Mat4 T = Mat4Identity();
 		if (t.size() == 3) {
 			T.m[12] = float(t[0]);
@@ -220,10 +227,10 @@ namespace chunkbim {
 			T.m[14] = float(t[2]);
 		}
 
-		/// R
+		/// R (회전)
 		Mat4 R = Mat4FromQuaternion(r);
 
-		/// S
+		/// S (스케일)
 		Mat4 S = Mat4Identity();
 		double sx = 1.0, sy = 1.0, sz = 1.0;
 		if (s.size() == 3) {
@@ -233,7 +240,7 @@ namespace chunkbim {
 		S.m[5] = float(sy);
 		S.m[10] = float(sz);
 
-		/// glTF: M = T * R * S
+		/// glTF 규격: M = T * R * S 순서로 합성
 		return Mat4Multiply(Mat4Multiply(T, R), S);
 	}
 
@@ -249,9 +256,12 @@ namespace chunkbim {
 		}
 	}
 
+	/// GLTF/GLB 파일을 읽어 MeshChunk(FaceVtx 목록) 목록으로 변환하는 클래스.
+	/// 전역 네임스페이스의 ::GltfMesh(이 파일 상단)와는 이름만 같을 뿐 별개의 구현이며,
+	/// Eigen 대신 위에서 정의한 자체 Mat4/TransformPoint 등을 사용한다.
 	class GltfMesh {
 	public:
-///[ToDo] Delte following lines
+///[ToDo] 아래 줄 삭제 예정
 #ifdef _DEBUG
 		//std::fstream tempfile;
 #endif
@@ -288,12 +298,12 @@ namespace chunkbim {
 				return false;
 			}
 
-			if (!warn.empty()) 
+			if (!warn.empty())
 				std::cerr << "Warning: " << warn << "\n";
 
-			if (!err.empty())  
+			if (!err.empty())
 				std::cerr << "Err : " << err << "\n";
-			
+
 			if (!ok) {
 				std::cerr << "Error: Failed to load glTF file.\n";
 				return false;
@@ -307,7 +317,7 @@ namespace chunkbim {
 			/// 모든 Mesh 순회 및 ID 추출
 			for (int i = 0; i < total_meshes; ++i) {
 				const auto& mesh = model.meshes[i];
-				int mesh_id = -1; // Default ID
+				int mesh_id = -1; // 기본 ID
 
 				/// Mesh 이름이 있으면 사용, 없으면 'Unnamed'
 				std::string mesh_name = mesh.name.empty() ? "Unnamed" : mesh.name;
@@ -421,7 +431,7 @@ namespace chunkbim {
 
 		bool importMeshData(const std::string& filename, std::vector<MeshChunk>& meshChunks)
 		{
-///[ToDo] Delte following lines
+///[ToDo] 아래 줄 삭제 예정
 #ifdef _DEBUG
 			//this->tempfile.open("F:\\out.tmp", std::ios::out);
 #endif
@@ -475,12 +485,12 @@ namespace chunkbim {
 				}
 			}
 
-			///[ToDo] Delte following lines
+///[ToDo] 아래 줄 삭제 예정
 #ifdef _DEBUG
 			//this->tempfile.close();
 #endif
 
-			/// [ToDo] Not used; Delete later
+			/// [ToDo] 사용되지 않음; 추후 삭제
 			/*
 			switch (extractionOption) {
 			case 0:
@@ -492,7 +502,7 @@ namespace chunkbim {
 					return false;
 				}
 
-				/// Select the default scene, if not exist then, select the first scene
+				/// 기본(default) 씬을 선택, 없으면 첫 번째 씬을 선택
 				int sceneIndex = model.defaultScene;
 				if (sceneIndex < 0 && !model.scenes.empty()) {
 					sceneIndex = 0;
@@ -522,14 +532,14 @@ namespace chunkbim {
 			std::vector<MeshChunk>& meshChunks) {
 			auto worldMatrix = Mat4Identity();
 
-			/// Traverse all meshes in a file
+			/// 파일 내 모든 메시를 순회
 			for (const auto& mesh : model.meshes) {
 				meshChunks.push_back(MeshChunk());
 				MeshChunk& currentChunk = meshChunks.back();
 				currentChunk.name = mesh.name;
 				currentChunk.id = defauMeshID;
 
-				/// Extract id
+				/// id 추출
 				if (mesh.extras.IsObject()) {
 					const auto& extrasMap = mesh.extras.Get<tinygltf::Value::Object>();
 					auto itExtras = extrasMap.find("id");
@@ -548,7 +558,7 @@ namespace chunkbim {
 					if (primitive.mode != TINYGLTF_MODE_TRIANGLES)
 						continue;
 
-					/// Extract primitive data
+					/// primitive 데이터 추출
 					ExtractMeshPrimitive(model, primitive, worldMatrix, currentChunk);
 				}
 			}
@@ -562,7 +572,7 @@ namespace chunkbim {
 			const Mat4& worldMatrix,
 			MeshChunk& currentChunk)
 		{
-			/// --- Find POSITION accessor ---
+			/// --- POSITION accessor 탐색 ---
 			auto itPos = primitive.attributes.find("POSITION");
 			if (itPos == primitive.attributes.end())
 				return;
@@ -579,8 +589,8 @@ namespace chunkbim {
 			const unsigned char* posBase = posBuf.data.data() + posView.byteOffset + posAcc.byteOffset;
 			int posStride = posAcc.ByteStride(posView) ? posAcc.ByteStride(posView) : sizeof(float) * 3;
 
-			/// --- Index Handling ---
-			if (primitive.indices < 0) return;  /// Non-indexed mesh not supported here
+			/// --- 인덱스 처리 ---
+			if (primitive.indices < 0) return;  /// 인덱스가 없는 메시는 여기서 지원하지 않음
 
 			const int idxAccIdx = primitive.indices;
 			if (idxAccIdx < 0 || idxAccIdx >= (int)model.accessors.size()) return;
@@ -606,7 +616,7 @@ namespace chunkbim {
 				else idxStride = 1;
 			}
 
-			/// Lambda: Read index
+			/// 람다: 인덱스 읽기
 			auto readIndex = [&](size_t i) -> size_t {
 				const unsigned char* ptr = idxBase + idxStride * i;
 				if (idxType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT)
@@ -616,14 +626,14 @@ namespace chunkbim {
 				return (size_t)(*reinterpret_cast<const uint8_t*>(ptr));
 				};
 
-			/// Lambda: Read position and transform to world coordinates
+			/// 람다: 위치를 읽어 월드 좌표로 변환
 			auto readPosition = [&](size_t idx) -> pctree::XYZPoint {
 				const float* p = reinterpret_cast<const float*>(posBase + posStride * idx);
 				pctree::XYZPoint p_local(p[0], p[1], p[2]);
 				return TransformPoint(worldMatrix, p_local);
 				};
 
-			/// --- Create triangles directly ---
+			/// --- 삼각형을 바로 생성 ---
 			for (size_t i = 0; i + 2 < indexCount; i += 3) {
 				size_t idx0 = readIndex(i);
 				size_t idx1 = readIndex(i + 1);
@@ -632,12 +642,12 @@ namespace chunkbim {
 				if (idx0 >= posAcc.count || idx1 >= posAcc.count || idx2 >= posAcc.count)
 					continue;
 
-				/// Read vertex positions directly
+				/// 정점 위치를 바로 읽기
 				pctree::XYZPoint vtx0 = readPosition(idx0);
 				pctree::XYZPoint vtx1 = readPosition(idx1);
 				pctree::XYZPoint vtx2 = readPosition(idx2);
 
-///[ToDo] Delte following lines
+///[ToDo] 아래 줄 삭제 예정
 #ifdef _DEBUG
 				//this->tempfile.precision(6);
 				//this->tempfile << vtx0[0] << "\t" << vtx0[1] << "\t" << vtx0[2] << "\n";
@@ -645,29 +655,29 @@ namespace chunkbim {
 				//this->tempfile << vtx2[0] << "\t" << vtx2[1] << "\t" << vtx2[2] << "\n";
 #endif
 
-				/// Compute face normal (cross product)
+				/// face normal 계산 (외적)
 				pctree::XYZPoint u = vtx1 - vtx0;
 				pctree::XYZPoint v = vtx2 - vtx0;
 				pctree::XYZPoint faceNormal = u % v;
 				faceNormal = faceNormal.normalize();
 
-				/// Add face directly (no intermediate vertex storage)
+				/// face를 바로 추가 (정점을 별도로 저장하지 않음)
 				currentChunk.faces.push_back(FaceVtx(vtx0, vtx1, vtx2, faceNormal));
 			}
 		}
 
 		inline pctree::XYZPoint TransformNormal(const Mat4& m, const pctree::XYZPoint& n) {
-			/// Extract 3x3 rotation part and apply
+			/// 3x3 회전 성분만 추출해 적용 (법선 벡터이므로 이동은 반영하지 않음)
 			double nx = m.m[0] * n[0] + m.m[4] * n[1] + m.m[8] * n[2];
 			double ny = m.m[1] * n[0] + m.m[5] * n[1] + m.m[9] * n[2];
 			double nz = m.m[2] * n[0] + m.m[6] * n[1] + m.m[10] * n[2];
 
-			/// Normalize
+			/// 정규화
 			double len = std::sqrt(nx * nx + ny * ny + nz * nz);
 			if (len > 1e-10) {
 				return pctree::XYZPoint(nx / len, ny / len, nz / len);
 			}
-			return pctree::XYZPoint(0, 0, 1);  /// Fallback
+			return pctree::XYZPoint(0, 0, 1);  /// 실패 시 대체값(fallback)
 		}
 
 		void ExtractMeshFromNode(
@@ -678,11 +688,11 @@ namespace chunkbim {
 		{
 			const tinygltf::Node& node = model.nodes[nodeIndex];
 
-			/// ---1. Matrix calculation ---
+			/// ---1. 행렬 계산 ---
 			Mat4 local = LocalMatrixFromNode(node);
 			Mat4 world = Mat4Multiply(parentWorld, local);
 
-			/// if Node has mesh data
+			/// 노드에 메시 데이터가 있으면
 			if (node.mesh >= 0 && node.mesh < (int)model.meshes.size()) {
 				const tinygltf::Mesh& mesh = model.meshes[node.mesh];
 
@@ -691,7 +701,7 @@ namespace chunkbim {
 				currentChunk.name = mesh.name;
 				currentChunk.id = defauMeshID;
 
-				/// Extract id from extras
+				/// extras에서 id 추출
 				if (mesh.extras.IsObject()) {
 					const auto& extrasMap = mesh.extras.Get<tinygltf::Value::Object>();
 					auto itExtras = extrasMap.find("id");
@@ -706,12 +716,12 @@ namespace chunkbim {
 					}
 				}
 
-				/// Process each primitive
+				/// 각 primitive 처리
 				for (const auto& primitive : mesh.primitives) {
 					if (primitive.mode != TINYGLTF_MODE_TRIANGLES)
 						continue;
 
-					/// --- Find POSITION accessor ---
+					/// --- POSITION accessor 탐색 ---
 					auto itPos = primitive.attributes.find("POSITION");
 					if (itPos == primitive.attributes.end())
 						continue;
@@ -734,7 +744,7 @@ namespace chunkbim {
 					const unsigned char* posBase = posBuf.data.data() + posView.byteOffset + posAcc.byteOffset;
 					int posStride = posAcc.ByteStride(posView) ? posAcc.ByteStride(posView) : sizeof(float) * 3;
 
-					/// --- Find NORMAL accessor (optional) ---
+					/// --- NORMAL accessor 탐색 (선택적) ---
 					const unsigned char* normalBase = nullptr;
 					int normalStride = 0;
 					bool hasNormals = false;
@@ -762,7 +772,7 @@ namespace chunkbim {
 						}
 					}
 
-					/// --- Index Handling ---
+					/// --- 인덱스 처리 ---
 					if (primitive.indices < 0)
 						continue;
 
@@ -795,7 +805,7 @@ namespace chunkbim {
 						else idxStride = 1;
 					}
 
-					/// Lambda: Read index
+					/// 람다: 인덱스 읽기
 					auto readIndex = [&](size_t i) -> size_t {
 						const unsigned char* ptr = idxBase + idxStride * i;
 						if (idxType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT)
@@ -805,22 +815,22 @@ namespace chunkbim {
 						return (size_t)(*reinterpret_cast<const uint8_t*>(ptr));
 						};
 
-					/// Lambda: Read position and transform to world coordinates
+					/// 람다: 위치를 읽어 월드 좌표로 변환
 					auto readPosition = [&](size_t idx) -> pctree::XYZPoint {
 						const float* p = reinterpret_cast<const float*>(posBase + posStride * idx);
 						pctree::XYZPoint p_local(p[0], p[1], p[2]);
 						return TransformPoint(world, p_local);
 						};
 
-					/// Lambda: Read normal and transform to world coordinates (rotation only)
+					/// 람다: 법선을 읽어 월드 좌표로 변환 (회전만 적용)
 					auto readNormal = [&](size_t idx) -> pctree::XYZPoint {
 						const float* n = reinterpret_cast<const float*>(normalBase + normalStride * idx);
 						pctree::XYZPoint n_local(n[0], n[1], n[2]);
-						/// Transform normal (rotation only, no translation)
+						/// 법선 변환 (회전만 적용, 이동은 반영하지 않음)
 						return TransformNormal(world, n_local);
 						};
 
-					/// --- Create triangles directly ---
+					/// --- 삼각형을 바로 생성 ---
 					for (size_t i = 0; i + 2 < indexCount; i += 3) {
 						size_t idx0 = readIndex(i);
 						size_t idx1 = readIndex(i + 1);
@@ -829,7 +839,7 @@ namespace chunkbim {
 						if (idx0 >= posAcc.count || idx1 >= posAcc.count || idx2 >= posAcc.count)
 							continue;
 
-						/// Read vertex positions directly
+						/// 정점 위치를 바로 읽기
 						pctree::XYZPoint vtx0 = readPosition(idx0);
 						pctree::XYZPoint vtx1 = readPosition(idx1);
 						pctree::XYZPoint vtx2 = readPosition(idx2);
@@ -854,11 +864,11 @@ namespace chunkbim {
 						double nz = ux * vy - uy * vx;
 
 						double lengthSq = nx * nx + ny * ny + nz * nz;
-						
+
 						pctree::XYZPoint faceNormal;
 						constexpr double EPSILON_SQ = 1e-12;
 						if (lengthSq > EPSILON_SQ) {
-							/// Normalize and convert to float
+							/// 정규화 후 float로 변환
 							double invLen = 1.0 / std::sqrt(lengthSq);
 							faceNormal = pctree::XYZPoint(
 								static_cast<float>(nx * invLen),
@@ -868,12 +878,16 @@ namespace chunkbim {
 						}
 						else if (false) {
 						//else if (hasNormals) {
-							/// Degenerate triangle - fallback to mesh vertex normals
+							/// 퇴화 삼각형(면적이 0에 가까움) - 메시에 저장된 정점 법선으로 대체
+							/// [참고] 위 조건이 `if (false)`로 비활성화되어 있어, 이 블록은 현재
+							/// 절대 실행되지 않는다. 원래는 `hasNormals`였을 것으로 보이며(바로
+							/// 아래 주석 처리된 줄), 의도적으로 막아둔 것인지 실수인지는 불명확
+							/// 하다 — 현재 동작(퇴화 삼각형은 무조건 스킵)은 유지한다.
 							pctree::XYZPoint n0 = readNormal(idx0);
 							pctree::XYZPoint n1 = readNormal(idx1);
 							pctree::XYZPoint n2 = readNormal(idx2);
 
-							/// Average of vertex normals (double precision)
+							/// 정점 법선들의 평균 (double 정밀도)
 							double avgX = (static_cast<double>(n0[0]) + n1[0] + n2[0]) / 3.0;
 							double avgY = (static_cast<double>(n0[1]) + n1[1] + n2[1]) / 3.0;
 							double avgZ = (static_cast<double>(n0[2]) + n1[2] + n2[2]) / 3.0;
@@ -888,28 +902,28 @@ namespace chunkbim {
 								);
 							}
 							else {
-								/// Both methods failed - skip this face
+								/// 두 방법 모두 실패 - 이 face는 건너뜀
 								continue;
 							}
 						}
 						else {
-							/// No mesh normals available - skip degenerate face
+							/// 사용 가능한 메시 법선이 없음 - 퇴화 face는 건너뜀
 							continue;
 						}
 
-						/// Add face directly (no intermediate vertex storage)
+						/// face를 바로 추가 (정점을 별도로 저장하지 않음)
 						currentChunk.faces.push_back(FaceVtx(vtx0, vtx1, vtx2, faceNormal));
 					}
 				}
 			}
 
-			/// Process child node recursively
+			/// 자식 노드도 재귀적으로 처리
 			for (int child : node.children) {
 				if (child >= 0 && child < (int)model.nodes.size()) {
 					ExtractMeshFromNode(model, child, world, meshChunks);
 				}
 			}
-		}		
+		}
 	};
-	
+
 }

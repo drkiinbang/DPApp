@@ -30,7 +30,7 @@
 namespace DPApp {
 
     /**
-     * @brief Task execution status enumeration
+     * @brief 태스크 실행 상태 열거형
      */
     enum class TaskStatus {
         PENDING,
@@ -42,7 +42,7 @@ namespace DPApp {
     };
 
     /**
-     * @brief Task priority levels
+     * @brief 태스크 우선순위 레벨
      */
     enum class TaskPriority {
         LOW = 0,
@@ -51,7 +51,7 @@ namespace DPApp {
     };
 
     /**
-     * @brief General task information structure
+     * @brief 범용 태스크 정보 구조체
      */
     struct TaskInfo {
         uint32_t task_id;
@@ -84,7 +84,7 @@ namespace DPApp {
     };
 
     /**
-     * @brief Slave worker information and statistics
+     * @brief Slave 워커 정보 및 통계
      */
     struct SlaveWorkerInfo {
         std::string slave_id;
@@ -122,7 +122,7 @@ namespace DPApp {
             std::string error_message;
         };
 
-        // Member variables
+        // 멤버 변수
         std::map<uint32_t, TaskInfo> tasks_;
         std::map<std::string, SlaveWorkerInfo> slaves_;
         std::vector<ProcessingResult> completed_results_;
@@ -705,7 +705,7 @@ namespace DPApp {
     };
 
     /**
-     * @brief Thread-safe statistics tracker
+     * @brief 스레드 안전(thread-safe) 통계 추적기
      */
     class ProcessingStats {
     public:
