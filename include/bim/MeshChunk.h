@@ -2,6 +2,7 @@
 
 #include "../bimtree/xyzpoint.hpp"
 
+#include <array>
 #include <vector>
 #include <string>
 #include <algorithm> // for std::min, std::max
@@ -37,6 +38,19 @@ namespace chunkbim {
         /// 바운딩 박스
         double min_x, min_y, min_z;
         double max_x, max_y, max_z;
+
+        /// [향후 확장용] BIM/Revit에서 제공하는 이 부재의 중심축(centerline) 정보.
+        /// 배관처럼 길쭉한 부재가 시공 중 축을 기준으로 얼마나 비틀렸는지(twist) /
+        /// 옆으로 밀렸는지(lateral shift)를 판단하려면 그 부재 고유의 중심축 방향이
+        /// 필요한데, Revit이 이 값을 직접 알고 있다면(예: 배관의 시작점-끝점) 그게
+        /// 가장 정확하다. 현재 GLTF export 파이프라인은 이 값을 채워 보내지 않으므로
+        /// hasCenterline은 항상 false이고, 실제로는 항상 PCA(주성분분석) 기반 축
+        /// 추정으로 폴백한다(MasterApplication.cpp의 loadIcpElementChunks 참고).
+        /// 나중에 Revit export가 이 정보를 함께 내보내게 되면, gltf_mesh.h의 extras
+        /// 파싱 코드에서 이 필드들을 채우도록 확장하면 된다.
+        bool hasCenterline = false;
+        std::array<double, 3> centerlineStart{ 0.0, 0.0, 0.0 };
+        std::array<double, 3> centerlineEnd{ 0.0, 0.0, 0.0 };
 
         void calculateBounds() {
             if (faces.empty()) {

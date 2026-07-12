@@ -451,6 +451,30 @@ namespace icp {
         std::string errorMessage;
         Transform4x4 transform;
 
+        /// 이 부재의 중심축(BIM/Revit centerline이 있으면 그 값, 없으면 부재 자신의
+        /// 메시 정점에 대한 PCA 추정치 -- MasterApplication.cpp의 determineElementAxis
+        /// 참고)과, axisSource("centerline" 또는 "pca")/axisConfidence(PCA일 때만
+        /// 의미 있음, 1/3~1 범위로 축이 얼마나 뚜렷한지를 나타냄).
+        std::array<double, 3> axisDirection{ 0.0, 0.0, 1.0 };
+        std::string axisSource = "pca";
+        double axisConfidence = 0.0;
+
+        /// transform의 회전 성분을 axisDirection 기준으로 분해한 값(도(degree) 단위).
+        /// twistAngleDeg: 축을 중심으로 얼마나 회전(비틀림)했는지(부호 있음, 축의 방향
+        /// 기준 오른손 법칙). swingAngleDeg: 축 자체가 얼마나 기울었는지(비틀림을 제외한
+        /// 나머지 회전, 크기만 있고 항상 0 이상) -- 쿼터니언 swing-twist 분해로 계산한다
+        /// (MasterApplication_ICP.cpp의 decomposeSwingTwist 참고).
+        double twistAngleDeg = 0.0;
+        double swingAngleDeg = 0.0;
+
+        /// transform의 이동 성분을 axisDirection 기준으로 분해한 값(미터 단위).
+        /// axialShift: 축 방향 성분(부호 있음, 축 방향으로 +, 반대 방향으로 -).
+        /// lateralShift: 축에 수직인 성분의 크기(항상 0 이상) -- 배관이 축 방향으로
+        /// 얼마나 밀렸는지(axialShift)와, 옆으로 얼마나 벗어났는지(lateralShift)를
+        /// 구분해서 볼 수 있다.
+        double axialShift = 0.0;
+        double lateralShift = 0.0;
+
         IcpElementAlignment() : transform(Transform4x4::identity()) {}
     };
 

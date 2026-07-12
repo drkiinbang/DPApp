@@ -21,6 +21,7 @@
 #include <memory>
 #include <map>
 #include <unordered_map>
+#include <array>
 
 #include "../include/PointCloudTypes.h"
 #include "../include/NetworkManager.h"
@@ -40,9 +41,21 @@ using namespace DPApp;
 /// 주어진 IcpChunk::chunk_id가 어느 BIM 부재(element)에 해당하는지 식별한다.
 /// 이를 통해 청크별 ICP 결과를 부재 단위로 이름 붙여 저장할 수 있다
 /// (IcpTypes.h의 IcpJob::elementResults 참고).
+///
+/// axisDirection/axisSource/axisConfidence는 부재의 "중심축"을 나타낸다 -- 시공 후
+/// 이 부재가 축을 기준으로 비틀렸는지(twist)/옆으로 밀렸는지(lateral shift)를
+/// 판단하려면 그 부재 고유의 축 방향이 필요하다. Revit이 centerline을 제공하면
+/// 그 값을 그대로 쓰고(axisSource="centerline", axisConfidence=1.0), 없으면 그
+/// 부재 자신의 메시 정점에 대한 PCA(주성분분석)로 추정한다(axisSource="pca",
+/// axisConfidence는 가장 큰 고유값의 비중 -- 0.33~1.0, 값이 낮을수록 축이
+/// 뚜렷하지 않다는 뜻이며 밸브처럼 대칭적인 부재에서 흔하다).
 struct IcpElementInfo {
     std::string name;
     int revitId = 0;
+
+    std::array<double, 3> axisDirection{ 0.0, 0.0, 1.0 };
+    std::string axisSource = "pca";
+    double axisConfidence = 0.0;
 };
 
 namespace DPApp {

@@ -488,6 +488,87 @@ namespace DPApp {
             return chunks;
         }
 
+        /// 부재 자신의 메시 정점들에 대해 PCA(주성분분석)를 수행해, 분산이 가장 큰
+        /// 방향(3x3 공분산 행렬의 최대 고유값에 대응하는 고유벡터)을 그 부재의 중심축으로
+        /// 추정한다. 배관/덕트처럼 한쪽으로 길쭉한 형상에는 잘 맞지만, 밸브처럼 짧고
+        /// 대칭적인 형상은 어느 축도 뚜렷하게 두드러지지 않을 수 있다 -- 이 경우
+        /// confidence(가장 큰 고유값이 전체 분산에서 차지하는 비중, 1/3~1 범위)가
+        /// 낮게 나오므로, 이 값을 보고 축 추정 신뢰도를 판단할 수 있다.
+        struct ElementAxisEstimate {
+            std::array<double, 3> direction{ 0.0, 0.0, 1.0 };
+            double confidence = 0.0;
+        };
+
+        static ElementAxisEstimate estimateAxisByPCA(const chunkbim::MeshChunk& element) {
+            ElementAxisEstimate result;
+
+            Eigen::Vector3d centroid = Eigen::Vector3d::Zero();
+            size_t numPoints = 0;
+            for (const auto& face : element.faces) {
+                for (int v = 0; v < 3; ++v) {
+                    centroid += Eigen::Vector3d(face.vertices[v][0], face.vertices[v][1], face.vertices[v][2]);
+                    ++numPoints;
+                }
+            }
+            if (numPoints < 3) {
+                return result; /// 점이 너무 적어 축을 추정할 수 없음 -- 기본값(z축, confidence 0) 반환
+            }
+            centroid /= static_cast<double>(numPoints);
+
+            Eigen::Matrix3d covariance = Eigen::Matrix3d::Zero();
+            for (const auto& face : element.faces) {
+                for (int v = 0; v < 3; ++v) {
+                    Eigen::Vector3d p(face.vertices[v][0], face.vertices[v][1], face.vertices[v][2]);
+                    Eigen::Vector3d d = p - centroid;
+                    covariance += d * d.transpose();
+                }
+            }
+            covariance /= static_cast<double>(numPoints);
+
+            Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(covariance);
+            if (solver.info() != Eigen::Success) {
+                return result;
+            }
+
+            /// SelfAdjointEigenSolver는 고유값을 오름차순으로 반환하므로, 마지막(인덱스 2)이
+            /// 가장 큰 고유값 -- 즉 분산이 가장 큰(가장 "긴") 방향이다.
+            const Eigen::Vector3d& eigenvalues = solver.eigenvalues();
+            Eigen::Vector3d principalAxis = solver.eigenvectors().col(2);
+
+            double totalVariance = eigenvalues.sum();
+            if (totalVariance > 1e-12) {
+                result.confidence = eigenvalues(2) / totalVariance;
+            }
+            result.direction = { principalAxis.x(), principalAxis.y(), principalAxis.z() };
+            return result;
+        }
+
+        /// 부재의 중심축을 결정한다: BIM/Revit이 centerline을 제공했다면(element.hasCenterline)
+        /// 그 값을 그대로 쓰고(가장 신뢰할 수 있는 정답이므로 confidence=1.0), 그렇지 않거나
+        /// centerline이 퇴화된 경우(시작점==끝점)에는 위 PCA 추정으로 폴백한다.
+        static void determineElementAxis(const chunkbim::MeshChunk& element, IcpElementInfo& info) {
+            if (element.hasCenterline) {
+                Eigen::Vector3d start(element.centerlineStart[0], element.centerlineStart[1], element.centerlineStart[2]);
+                Eigen::Vector3d end(element.centerlineEnd[0], element.centerlineEnd[1], element.centerlineEnd[2]);
+                Eigen::Vector3d dir = end - start;
+                double len = dir.norm();
+                if (len > 1e-9) {
+                    dir /= len;
+                    info.axisDirection = { dir.x(), dir.y(), dir.z() };
+                    info.axisSource = "centerline";
+                    info.axisConfidence = 1.0;
+                    return;
+                }
+                std::cerr << "Element '" << element.name << "' has a degenerate centerline (start == end); "
+                    << "falling back to PCA axis estimation" << std::endl;
+            }
+
+            ElementAxisEstimate pca = estimateAxisByPCA(element);
+            info.axisDirection = pca.direction;
+            info.axisSource = "pca";
+            info.axisConfidence = pca.confidence;
+        }
+
         /// BIM 부재(Revit Element ID -- loadGltf()가 로딩하는 GLTF 노드/메시 하나하나가
         /// 플랜트/구조물의 구조적 구성요소 하나에 대응)마다 IcpChunk를 하나씩 만들어,
         /// Master가 전체 포인트클라우드를 한 번에 처리하는 대신 fine alignment를 부재
@@ -586,7 +667,11 @@ namespace DPApp {
 
                     chunks.push_back(chunk);
                     if (outElementInfo) {
-                        outElementInfo->push_back({ boundedElements[i].name, boundedElements[i].id });
+                        IcpElementInfo info;
+                        info.name = boundedElements[i].name;
+                        info.revitId = boundedElements[i].id;
+                        determineElementAxis(boundedElements[i], info);
+                        outElementInfo->push_back(std::move(info));
                     }
                 }
 

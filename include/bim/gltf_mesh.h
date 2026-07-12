@@ -528,6 +528,50 @@ namespace chunkbim {
 		}
 
 	private:
+		/// mesh.extras에서 "centerline" 키(로컬 mesh 좌표계 기준 [x1,y1,z1,x2,y2,z2]
+		/// 6개 숫자 배열)를 읽어, 이 mesh가 속한 노드의 world 변환을 동일하게 적용한 뒤
+		/// chunk.centerlineStart/End에 채운다. 성공하면 chunk.hasCenterline을 true로
+		/// 설정하고 true를 반환한다. 키가 없거나 형식이 올바르지 않으면 아무것도
+		/// 바꾸지 않고 false를 반환한다 -- 호출부는 이 경우 PCA 축 추정으로 폴백해야 한다.
+		/// [참고] 이 스키마는 아직 어떤 Revit/GLTF export 파이프라인도 채워 보내지
+		/// 않는, 이번에 새로 정의한 잠정적인 규격이다. 실제 export 쪽 구현이 준비되면
+		/// 키 이름/형식을 그에 맞게 조정해야 할 수 있다.
+		static bool tryReadCenterlineFromExtras(const tinygltf::Value& extras, const Mat4& world, MeshChunk& chunk)
+		{
+			if (!extras.IsObject()) return false;
+			const auto& extrasMap = extras.Get<tinygltf::Value::Object>();
+			auto it = extrasMap.find("centerline");
+			if (it == extrasMap.end()) return false;
+
+			const auto& v = it->second;
+			if (!v.IsArray() || v.ArrayLen() != 6) {
+				std::cerr << "Mesh centerline extras is present but is not a 6-element array\n";
+				return false;
+			}
+
+			double raw[6];
+			for (size_t i = 0; i < 6; ++i) {
+				const auto& elem = v.Get(i);
+				if (!elem.IsNumber()) {
+					std::cerr << "Mesh centerline extras contains a non-numeric element\n";
+					return false;
+				}
+				raw[i] = elem.GetNumberAsDouble();
+			}
+
+			/// 정점과 동일하게, 로컬 좌표를 world 변환에 통과시켜 MeshChunk::faces와
+			/// 같은(월드/절대) 좌표계로 맞춘다.
+			pctree::XYZPoint p0Local(static_cast<float>(raw[0]), static_cast<float>(raw[1]), static_cast<float>(raw[2]));
+			pctree::XYZPoint p1Local(static_cast<float>(raw[3]), static_cast<float>(raw[4]), static_cast<float>(raw[5]));
+			pctree::XYZPoint p0World = TransformPoint(world, p0Local);
+			pctree::XYZPoint p1World = TransformPoint(world, p1Local);
+
+			chunk.centerlineStart = { p0World.x(), p0World.y(), p0World.z() };
+			chunk.centerlineEnd = { p1World.x(), p1World.y(), p1World.z() };
+			chunk.hasCenterline = true;
+			return true;
+		}
+
 		bool ExtractAllMeshes(tinygltf::Model& model,
 			std::vector<MeshChunk>& meshChunks) {
 			auto worldMatrix = Mat4Identity();
@@ -553,6 +597,9 @@ namespace chunkbim {
 						}
 					}
 				}
+
+				/// centerline 추출 (제공되는 경우) -- 없으면 나중에 PCA로 축을 추정한다
+				tryReadCenterlineFromExtras(mesh.extras, worldMatrix, currentChunk);
 
 				for (const auto& primitive : mesh.primitives) {
 					if (primitive.mode != TINYGLTF_MODE_TRIANGLES)
@@ -715,6 +762,9 @@ namespace chunkbim {
 						}
 					}
 				}
+
+				/// centerline 추출 (제공되는 경우) -- 없으면 나중에 PCA로 축을 추정한다
+				tryReadCenterlineFromExtras(mesh.extras, world, currentChunk);
 
 				/// 각 primitive 처리
 				for (const auto& primitive : mesh.primitives) {

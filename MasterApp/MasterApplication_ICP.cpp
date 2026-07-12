@@ -536,6 +536,91 @@ static icp::Transform4x4 aggregateWeightedTransforms(const std::vector<icp::IcpR
     return icp::Transform4x4::fromRotationTranslation(Rout, Tsum.x(), Tsum.y(), Tsum.z());
 }
 
+/// decomposeSwingTwist()가 반환하는, 부재 중심축 기준으로 분해한 회전/이동 성분.
+struct SwingTwistDecomposition {
+    double twistAngleDeg = 0.0;   /// 축을 중심으로 한 회전(비틀림), 부호 있음
+    double swingAngleDeg = 0.0;   /// 축 자체의 기울어짐(비틀림 제외 나머지 회전), 크기만(0 이상)
+    double axialShift = 0.0;      /// 축 방향 이동 성분(미터), 부호 있음
+    double lateralShift = 0.0;    /// 축에 수직인 이동 성분의 크기(미터), 0 이상
+};
+
+/// 부재의 정합 결과 transform(회전 R + 이동 T)을, 그 부재 고유의 중심축(axis, 단위벡터가
+/// 아니어도 됨 -- 내부에서 정규화한다) 기준으로 "축 둘레 비틀림(twist)"과 "축이 기울어진
+/// 정도(swing)", "축 방향 밀림(axial shift)"과 "축에서 벗어난 옆방향 밀림(lateral shift)"
+/// 으로 분해한다. 시공 QA 관점에서는 전체 정합 결과보다 이 값들이 훨씬 직관적이다 --
+/// 예를 들어 twistAngleDeg가 크면 배관이 제 위치에서 축을 기준으로 돌아간 것이고,
+/// lateralShift가 크면 배관 자체가 설계 위치에서 옆으로 밀려나 시공된 것이다.
+///
+/// [수학적 근거] 회전 R을 쿼터니언 q로 변환한 뒤, q의 벡터부(v)를 axis 방향으로 투영해
+/// twist 쿼터니언을 뽑아내는 표준적인 swing-twist 분해(swing-twist decomposition)를
+/// 사용한다: q = swing * twist, twist는 axis를 회전축으로 하는 순수 회전, swing은 그
+/// 나머지(축 자체의 기울임)를 담당한다. 이동 T는 벡터 투영으로 축 방향/수직 방향
+/// 성분으로 직접 분해한다(회전과 달리 선형이라 별도 분해 기법이 필요 없다).
+static SwingTwistDecomposition decomposeSwingTwist(const icp::Transform4x4& transform,
+    const std::array<double, 3>& axis) {
+    SwingTwistDecomposition result;
+
+    Eigen::Vector3d axisVec(axis[0], axis[1], axis[2]);
+    double axisNorm = axisVec.norm();
+    if (axisNorm < 1e-9) {
+        /// 축이 정의되지 않음(예: PCA가 점 부족으로 실패한 경우) -- 분해할 수 없으므로
+        /// 기본값(전부 0)을 반환한다.
+        return result;
+    }
+    axisVec /= axisNorm;
+
+    double R[9];
+    transform.getRotation(R);
+    Eigen::Matrix3d Rm;
+    Rm << R[0], R[1], R[2],
+          R[3], R[4], R[5],
+          R[6], R[7], R[8];
+
+    Eigen::Quaterniond q(Rm);
+    q.normalize();
+
+    /// twist 성분 추출: q의 벡터부를 axis 방향으로 투영
+    Eigen::Vector3d vParallel = q.vec().dot(axisVec) * axisVec;
+    Eigen::Quaterniond twist(q.w(), vParallel.x(), vParallel.y(), vParallel.z());
+    double twistNorm = twist.norm();
+
+    const double radToDeg = 180.0 / std::acos(-1.0);
+
+    if (twistNorm < 1e-9) {
+        /// 축과 정확히 수직인 방향으로 180도 회전한 극히 드문 퇴화 케이스 -- twist를
+        /// 정의할 수 없으므로 전체 회전을 swing으로 취급한다.
+        double w = (std::min)(1.0, (std::max)(-1.0, q.w()));
+        result.swingAngleDeg = 2.0 * std::acos(std::fabs(w)) * radToDeg;
+    }
+    else {
+        twist.normalize();
+
+        /// twist.w() = cos(theta/2), twist.vec()·axis = sin(theta/2) (부호 포함) --
+        /// atan2로 안전하게 각도를 복원한다.
+        double sinHalf = twist.vec().dot(axisVec);
+        result.twistAngleDeg = 2.0 * std::atan2(sinHalf, twist.w()) * radToDeg;
+
+        /// swing = q * twist^-1: twist를 먼저 적용한 뒤 나머지(swing)가 축의 기울임을 담당.
+        Eigen::Quaterniond swing = q * twist.conjugate();
+        double swingW = (std::min)(1.0, (std::max)(-1.0, swing.w()));
+        /// 쿼터니언의 이중 덮개(double cover, q와 -q가 같은 회전) 때문에 부호가 뒤집혀도
+        /// swing 각도는 항상 0~180도 범위의 "얼마나 기울었는가"만 의미가 있으므로 절대값을 쓴다.
+        result.swingAngleDeg = 2.0 * std::acos(std::fabs(swingW)) * radToDeg;
+    }
+
+    /// 이동 성분을 axis 기준으로 분해 (선형 투영이라 회전처럼 별도 분해 기법이 필요 없음)
+    double tx, ty, tz;
+    transform.getTranslation(tx, ty, tz);
+    Eigen::Vector3d t(tx, ty, tz);
+    double axial = t.dot(axisVec);
+    Eigen::Vector3d lateralVec = t - axial * axisVec;
+
+    result.axialShift = axial;
+    result.lateralShift = lateralVec.norm();
+
+    return result;
+}
+
 /// Transform4x4을 16개 숫자로 이루어진 JSON 배열로 덧붙여 쓰는 작은 헬퍼.
 static void writeTransformJson(std::ostringstream& oss, const icp::Transform4x4& t) {
     oss << "[";
@@ -590,7 +675,15 @@ static std::string saveAlignmentResults(const std::shared_ptr<icp::IcpJob>& job)
         oss << "      \"error_message\": \"" << jsonEscape(e.errorMessage) << "\",\n";
         oss << "      \"transform\": ";
         writeTransformJson(oss, e.transform);
-        oss << "\n    }";
+        oss << ",\n";
+        oss << "      \"axis_direction\": [" << e.axisDirection[0] << ", " << e.axisDirection[1] << ", " << e.axisDirection[2] << "],\n";
+        oss << "      \"axis_source\": \"" << jsonEscape(e.axisSource) << "\",\n";
+        oss << "      \"axis_confidence\": " << e.axisConfidence << ",\n";
+        oss << "      \"twist_angle_deg\": " << e.twistAngleDeg << ",\n";
+        oss << "      \"swing_angle_deg\": " << e.swingAngleDeg << ",\n";
+        oss << "      \"axial_shift\": " << e.axialShift << ",\n";
+        oss << "      \"lateral_shift\": " << e.lateralShift << "\n";
+        oss << "    }";
         if (i + 1 < job->elementResults.size()) oss << ",";
         oss << "\n";
     }
@@ -605,7 +698,8 @@ static std::string saveAlignmentResults(const std::shared_ptr<icp::IcpJob>& job)
     writeTransformJson(oss, job->finalTransform);
     oss << ",\n";
     oss << "  \"combined_rmse\": " << job->finalRMSE << ",\n";
-    oss << "  \"combination_method\": \"weighted rotation average (SVD re-orthogonalized, chordal L2 mean) + weighted translation average, weighted by each element's source point count; see aggregateWeightedTransforms() in MasterApplication_ICP.cpp and doc/handover for derivation\"\n";
+    oss << "  \"combination_method\": \"weighted rotation average (SVD re-orthogonalized, chordal L2 mean) + weighted translation average, weighted by each element's source point count; see aggregateWeightedTransforms() in MasterApplication_ICP.cpp and doc/handover for derivation\",\n";
+    oss << "  \"axis_decomposition_method\": \"each element's transform is decomposed relative to its own central axis (axis_direction, from BIM centerline if axis_source=='centerline', else PCA on the element's own mesh vertices, axis_source=='pca'); twist_angle_deg is rotation about that axis (signed), swing_angle_deg is the remaining tilt of the axis itself (unsigned), axial_shift is translation along the axis (signed, meters), lateral_shift is translation perpendicular to the axis (unsigned, meters); see decomposeSwingTwist() in MasterApplication_ICP.cpp\"\n";
     oss << "}\n";
 
     std::ofstream file(path);
@@ -972,8 +1066,12 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
             icp::IcpElementAlignment elem;
             elem.chunk_id = r.chunk_id;
             if (r.chunk_id < elementInfoByChunkId.size()) {
-                elem.elementName = elementInfoByChunkId[r.chunk_id].name;
-                elem.elementRevitId = elementInfoByChunkId[r.chunk_id].revitId;
+                const auto& info = elementInfoByChunkId[r.chunk_id];
+                elem.elementName = info.name;
+                elem.elementRevitId = info.revitId;
+                elem.axisDirection = info.axisDirection;
+                elem.axisSource = info.axisSource;
+                elem.axisConfidence = info.axisConfidence;
             }
             elem.sourcePointCount = r.sourcePointCount;
             elem.targetPointCount = r.targetPointCount;
@@ -982,6 +1080,15 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
             elem.success = r.success;
             elem.errorMessage = r.errorMessage;
             elem.transform = r.transform * job->coarseTransform;
+
+            /// 이 부재의 축을 기준으로 twist/swing/axial/lateral 분해 -- 시공 QA에서는
+            /// 통합된 4x4 행렬 자체보다 이 값들이 훨씬 직관적이다.
+            SwingTwistDecomposition decomposed = decomposeSwingTwist(elem.transform, elem.axisDirection);
+            elem.twistAngleDeg = decomposed.twistAngleDeg;
+            elem.swingAngleDeg = decomposed.swingAngleDeg;
+            elem.axialShift = decomposed.axialShift;
+            elem.lateralShift = decomposed.lateralShift;
+
             job->elementResults.push_back(elem);
         }
 
