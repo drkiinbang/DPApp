@@ -528,6 +528,19 @@ namespace icp {
         int completedChunks = 0;
         int failedChunks = 0;
 
+        /// chunkResults/completedChunks/failedChunks에 대한 쓰기 권한 플래그. icp_jobs_mutex_로
+        /// 보호되며, MasterApplication_ICP.cpp의 분산 fine 정합 대기 루프가 (정상 완료든
+        /// 타임아웃이든) 대기를 끝내는 순간 false로 내린다. handleIcpResult()는 이 플래그가
+        /// false면 결과를 무시하고 버린다 -- 대기가 이미 끝난 뒤 뒤늦게 도착한 Slave 응답이
+        /// 이미 집계/저장이 끝난 job 상태를 건드리는 것을 막기 위함이다.
+        bool acceptingResults = true;
+
+        /// 분산 fine 정합이 (타임아웃 등으로) 일부 청크의 응답을 받지 못한 채 종료됐는지
+        /// 여부. true면 chunkResults/elementResults가 dispatched된 전체 청크 중 일부만
+        /// 담고 있다는 뜻이며, combined_transform/최종 정합 결과는 그 일부만으로 계산된
+        /// 근사치임을 의미한다 (saveAlignmentResults()가 JSON에 이 값을 그대로 노출한다).
+        bool partialResult = false;
+
         /// 최종 통합 결과 (3단계)
         Transform4x4 finalTransform;
         double finalRMSE = 0.0;
@@ -582,6 +595,8 @@ namespace icp {
             , totalChunks(other.totalChunks)
             , completedChunks(other.completedChunks)
             , failedChunks(other.failedChunks)
+            , acceptingResults(other.acceptingResults)
+            , partialResult(other.partialResult)
             , finalTransform(other.finalTransform)
             , finalRMSE(other.finalRMSE)
             , elementResults(other.elementResults)

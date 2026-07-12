@@ -280,7 +280,8 @@ HttpResponse MasterApplication::handleIcpJobStatus(const HttpRequest& req) {
         oss << "  \"output_path\": \"" << job->outputPath << "\",\n";
         oss << "  \"total_chunks\": " << job->totalChunks << ",\n";
         oss << "  \"completed_chunks\": " << job->completedChunks << ",\n";
-        oss << "  \"failed_chunks\": " << job->failedChunks;
+        oss << "  \"failed_chunks\": " << job->failedChunks << ",\n";
+        oss << "  \"partial_result\": " << (job->partialResult ? "true" : "false");
 
         if (job->status == icp::IcpJobStatus::FAILED) {
             oss << ",\n  \"error_message\": \"" << job->errorMessage << "\"";
@@ -659,6 +660,10 @@ static std::string saveAlignmentResults(const std::shared_ptr<icp::IcpJob>& job)
     oss << "{\n";
     oss << "  \"job_id\": \"" << job->jobId << "\",\n";
     oss << "  \"rebase_offset\": [" << job->rebaseOffsetX << ", " << job->rebaseOffsetY << ", " << job->rebaseOffsetZ << "],\n";
+    oss << "  \"partial_result\": " << (job->partialResult ? "true" : "false") << ",\n";
+    oss << "  \"chunks_total\": " << job->totalChunks << ",\n";
+    oss << "  \"chunks_completed\": " << job->completedChunks << ",\n";
+    oss << "  \"chunks_failed\": " << job->failedChunks << ",\n";
 
     oss << "  \"elements\": [\n";
     for (size_t i = 0; i < job->elementResults.size(); ++i) {
@@ -698,6 +703,13 @@ static std::string saveAlignmentResults(const std::shared_ptr<icp::IcpJob>& job)
     writeTransformJson(oss, job->finalTransform);
     oss << ",\n";
     oss << "  \"combined_rmse\": " << job->finalRMSE << ",\n";
+    oss << "  \"combined_transform_scope\": \"combined_transform is a single global APPROXIMATE transform "
+        << "obtained by weight-averaging every element's own fine-alignment transform; it is a practical "
+        << "convenience for applying one matrix to the whole point cloud, not an authoritative correction for "
+        << "any individual element -- where per-element corrections differ significantly, prefer each "
+        << "element's own transform/twist/shift fields in elements[] over this combined value. "
+        << "If partial_result is true, this transform (and the aligned output LAS) reflects only "
+        << "chunks_completed of chunks_total chunks -- treat it as incomplete, not as a full-plant result.\",\n";
     oss << "  \"combination_method\": \"weighted rotation average (SVD re-orthogonalized, chordal L2 mean) + weighted translation average, weighted by each element's source point count; see aggregateWeightedTransforms() in MasterApplication_ICP.cpp and doc/handover for derivation\",\n";
     oss << "  \"axis_decomposition_method\": \"each element's transform is decomposed relative to its own central axis (axis_direction, from BIM centerline if axis_source=='centerline', else PCA on the element's own mesh vertices, axis_source=='pca'); twist_angle_deg is rotation about that axis (signed), swing_angle_deg is the remaining tilt of the axis itself (unsigned), axial_shift is translation along the axis (signed, meters), lateral_shift is translation perpendicular to the axis (unsigned, meters); see decomposeSwingTwist() in MasterApplication_ICP.cpp\"\n";
     oss << "}\n";
@@ -935,12 +947,20 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
                     job->totalChunks = static_cast<int>(elementChunks.size());
                     job->completedChunks = 0;
                     job->failedChunks = 0;
+                    job->acceptingResults = true;
+                    job->partialResult = false;
+
+                    /// 이 job이 분배한 task_id 목록. 대기가 타임아웃으로 끝났을 때, 아직
+                    /// 응답이 오지 않은 task들의 icp_task_to_job_ 매핑을 정리하는 데 쓰인다.
+                    std::vector<uint32_t> dispatchedTaskIds;
+                    dispatchedTaskIds.reserve(elementChunks.size());
 
                     {
                         std::lock_guard<std::mutex> lock(icp_jobs_mutex_);
                         for (const auto& chunk : elementChunks) {
                             uint32_t task_id = task_manager_->addTask(chunk);
                             icp_task_to_job_[task_id] = job->jobId;
+                            dispatchedTaskIds.push_back(task_id);
                         }
                     }
 
@@ -955,6 +975,7 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
                     const auto maxWait = std::chrono::seconds(
                         (std::max)(cfg_.task_timeout_seconds, 300));
 
+                    bool timedOut = false;
                     while (true) {
                         int done;
                         {
@@ -967,12 +988,37 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
                             WLOG << "[ICP] Distributed fine alignment timed out for job "
                                 << job->jobId << " (" << done << "/" << job->totalChunks
                                 << " chunks finished)";
+                            timedOut = true;
                             break;
                         }
                         std::this_thread::sleep_for(std::chrono::milliseconds(200));
                     }
 
-                    distributed = !job->chunkResults.empty();
+                    /// [수정] 대기가 끝나는 즉시(정상 완료/취소/타임아웃 어느 경우든), 이후
+                    /// handleIcpResult()가 이 job의 chunkResults/completedChunks/failedChunks를
+                    /// 더 이상 건드리지 못하게 acceptingResults를 내린다 -- 이 지점 아래에서는
+                    /// 락 없이 job->chunkResults를 읽어도 안전해야 하므로 필수적이다. 타임아웃
+                    /// 이었다면(=아직 응답 안 온 청크가 있다면) partialResult를 표시하고, 그
+                    /// 응답 없는 task들의 매핑을 정리해 늦게 도착하는 응답을 아예 드롭시키고
+                    /// icp_task_to_job_이 무한정 커지는 것도 막는다.
+                    {
+                        std::lock_guard<std::mutex> lock(icp_jobs_mutex_);
+                        job->acceptingResults = false;
+                        int done = job->completedChunks + job->failedChunks;
+                        job->partialResult = (done < job->totalChunks);
+
+                        if (job->partialResult) {
+                            for (uint32_t task_id : dispatchedTaskIds) {
+                                icp_task_to_job_.erase(task_id);
+                            }
+                            WLOG << "[ICP] Job " << job->jobId << " finishing with partial results: "
+                                << done << "/" << job->totalChunks << " chunks accounted for"
+                                << (timedOut ? " (timed out)" : " (cancelled)")
+                                << " -- remaining task mappings cleared, late responses will be dropped.";
+                        }
+
+                        distributed = !job->chunkResults.empty();
+                    }
                 }
                 else {
                     WLOG << "[ICP] loadIcpElementChunks produced no usable chunks for job "
@@ -1032,6 +1078,18 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
 
         if (job->chunkResults.empty()) {
             throw std::runtime_error("Fine alignment produced no successful chunk results");
+        }
+
+        /// [수정] 일부 청크만 응답을 받은 채(타임아웃 등으로) 대기가 끝난 경우, 아래 통합은
+        /// 그 일부 결과만으로 진행된다 -- 실제 완전한 결과보다 나을 게 없을 수 있음을
+        /// 명확히 로그로 남긴다. job->partialResult는 saveAlignmentResults()가 JSON에도
+        /// 그대로 노출하므로, 이 job의 결과를 소비하는 쪽에서 "완전한 결과"와 혼동할 일이
+        /// 없다.
+        if (job->partialResult) {
+            WLOG << "[ICP] Job " << job->jobId << " is aggregating a PARTIAL result: "
+                << job->chunkResults.size() << "/" << job->totalChunks
+                << " chunk(s) succeeded before the wait ended; combined_transform/final LAS "
+                << "will only reflect these chunks.";
         }
 
         /// 청크별 변환들의 가중 평균(각 청크의 source 점 개수로 가중치를 줌)을 구하되,
@@ -1288,9 +1346,16 @@ void MasterApplication::handleIcpResult(const icp::IcpResult& result, uint32_t t
     /// 스캐폴딩이 아니라 그 분산 fine 정합 결과가 실제로 들어오는 경로다(연결된
     /// Slave가 없으면 processIcpJob()이 Master 단독 처리로 대체하므로 이 함수는
     /// 호출되지 않는다).
+    ///
+    /// [수정] chunkResults/completedChunks/failedChunks에 대한 쓰기를 이 함수의 락 안으로
+    /// 옮겼다 -- 예전에는 락을 놓은 뒤에 이 필드들을 수정해서, 여러 Slave가 동시에
+    /// 응답하면 processIcpJob()의 대기 루프가 (읽는) chunkResults 벡터와 여기서의
+    /// push_back(재할당 가능)이 겹쳐 데이터 경쟁(정의되지 않은 동작)이 날 수 있었다.
+    /// 또한 job->acceptingResults를 확인해서, 대기 루프가 이미 끝난(정상 완료든 타임아웃
+    /// 이든) job에 뒤늦게 도착한 응답이 손대지 못하도록 막는다.
+    std::lock_guard<std::mutex> lock(icp_jobs_mutex_);
     std::shared_ptr<icp::IcpJob> job;
     {
-        std::lock_guard<std::mutex> lock(icp_jobs_mutex_);
         auto task_it = icp_task_to_job_.find(task_id);
         if (task_it == icp_task_to_job_.end()) {
             WLOG << "[ICP] No job mapping found for task " << task_id << ", dropping result";
@@ -1307,6 +1372,13 @@ void MasterApplication::handleIcpResult(const icp::IcpResult& result, uint32_t t
 
         job = job_it->second;
         icp_task_to_job_.erase(task_it);
+    }
+
+    if (!job->acceptingResults) {
+        WLOG << "[ICP] Job " << job->jobId << " is no longer accepting chunk results "
+            << "(fine-alignment wait already finished, likely due to timeout); "
+            << "dropping late result for task " << task_id;
+        return;
     }
 
     if (result.success) {
