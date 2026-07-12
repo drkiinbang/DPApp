@@ -145,11 +145,25 @@ namespace DPApp {
         TaskFailedCallback task_failed_callback_;
 
     public:
-        explicit TaskManager(const uint32_t timeout_seconds, TaskType task_type, const std::vector<uint8_t>& parameters)
-            : next_task_id_(1), task_timeout_seconds_(timeout_seconds), current_slave_index_(0),
+        /// [수정] starting_task_id 매개변수 추가 -- MasterApplication::initializeTaskManager()가
+        /// 매 작업(job)마다 새 TaskManager를 만들 때, task_id가 항상 1부터 다시 시작하지
+        /// 않고 이전 TaskManager(이전 세대)가 마지막으로 쓴 값 다음부터 이어지도록 한다.
+        /// task_id가 세대마다 재사용되면, 타임아웃되어 방치된 이전 세대의 task에 대한
+        /// 늦은 Slave 응답이 새 세대의 진짜 task_id와 우연히 같아져서 completeTask()/
+        /// icp_task_to_job_ 매핑을 조용히 오염시킬 수 있다(예전에 실제로 있었던 버그).
+        explicit TaskManager(const uint32_t timeout_seconds, TaskType task_type, const std::vector<uint8_t>& parameters,
+            uint32_t starting_task_id = 1)
+            : next_task_id_(starting_task_id), task_timeout_seconds_(timeout_seconds), current_slave_index_(0),
             current_task_type_(task_type), task_parameters_(parameters) {
             std::cout << "TaskManager initialized for task type: " << taskStr(task_type)
-                << " with " << timeout_seconds << "s timeout" << std::endl;
+                << " with " << timeout_seconds << "s timeout (starting task_id: " << starting_task_id << ")" << std::endl;
+        }
+
+        /// 다음에 발급될 task_id를 미리 확인한다(발급하지 않음). MasterApplication이 이
+        /// TaskManager를 새 것으로 교체하기 직전에 호출해서, 다음 세대의 시작 task_id로
+        /// 이어받는 데 쓴다.
+        uint32_t peekNextTaskId() const {
+            return next_task_id_.load();
         }
 
         ~TaskManager() {
@@ -538,6 +552,36 @@ namespace DPApp {
             }
 
             return static_cast<double>(completed) / tasks_.size();
+        }
+
+        /// 특정 task_id의 현재 상태를 조회한다. 이 TaskManager가 그 task_id를 전혀 모르면
+        /// (다른 세대의 task이거나 잘못된 id) std::nullopt를 반환한다. 호출부(예:
+        /// processIcpJob의 분산 fine 정합 대기 루프)가 "이 task가 재시도까지 다 소진하고
+        /// 완전히 끝났는지" 실제 상태를 근거로 판단할 수 있게 한다 -- 고정된 배수로 시간을
+        /// 추측하는 대신 FAILED/TIMEOUT(재시도 소진, failTaskInternalNoCallback 참고)에
+        /// 도달했는지를 직접 확인할 수 있다.
+        std::optional<TaskStatus> getTaskStatus(uint32_t task_id) {
+            std::lock_guard<std::mutex> lock(tasks_mutex_);
+            auto it = tasks_.find(task_id);
+            if (it == tasks_.end()) {
+                return std::nullopt;
+            }
+            return it->second.status;
+        }
+
+        /// task_id가 더 이상 진행될 여지가 없는 "종료 상태"(재시도까지 모두 소진한
+        /// FAILED/TIMEOUT, 또는 이미 성공한 COMPLETED)에 도달했는지를 확인한다.
+        /// PENDING/ASSIGNED/IN_PROGRESS는 아직 재시도 여지가 있으므로 false. 이 TaskManager가
+        /// 그 task_id를 모르면(다른 세대의 task) true를 반환한다 -- 더 기다려 봐야 아무
+        /// 의미가 없기 때문이다.
+        bool isTaskTerminal(uint32_t task_id) {
+            auto status = getTaskStatus(task_id);
+            if (!status.has_value()) {
+                return true;
+            }
+            return *status == TaskStatus::COMPLETED ||
+                *status == TaskStatus::FAILED ||
+                *status == TaskStatus::TIMEOUT;
         }
 
         void setTaskTimeout(uint32_t timeout_seconds) {

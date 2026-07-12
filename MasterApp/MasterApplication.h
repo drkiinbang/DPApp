@@ -146,7 +146,13 @@ private:
     /// icp 관련 멤버 변수
     std::map<std::string, std::shared_ptr<icp::IcpJob>> icp_jobs_;
     std::mutex icp_jobs_mutex_;
-    uint32_t next_icp_task_id_ = 10000;
+    /// [수정] 예전에는 선언만 되어 있고 실제로는 어디서도 쓰이지 않던 죽은 필드였다.
+    /// initializeTaskManager()가 매번 새 TaskManager를 만들 때 task_id가 1부터 다시
+    /// 시작하지 않도록, 이전 TaskManager(이전 세대)가 어디까지 발급했는지를 여기 이어받아
+    /// 다음 TaskManager의 시작 task_id로 넘겨준다 -- task_id가 프로세스 수명 동안 절대
+    /// 재사용되지 않게 해서, 타임아웃되어 방치된 이전 세대 task의 늦은 응답이 새 세대의
+    /// 같은 번호 task와 우연히 충돌해 완료 처리를 오염시키는 것을 막는다.
+    uint32_t next_global_task_id_ = 1;
     /// 네트워크로 분배된 ICP task_id를 그 task가 속한 job으로 역매핑한다.
     /// 이를 통해 handleIcpResult()가 올바른 IcpJob을 찾아 갱신할 수 있다.
     /// icp_jobs_mutex_로 보호된다. processIcpJob()이 fine alignment를 여러

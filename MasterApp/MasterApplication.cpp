@@ -759,10 +759,20 @@ bool MasterApplication::initializeTaskManager(TaskType task_type) {
         std::memcpy(current_parameters_.data(), offset, sizeof(double) * 3);
     }
 
+    /// [수정] 이전 TaskManager(있다면)가 다음에 발급했을 task_id를 이어받아, 새
+    /// TaskManager가 그 지점부터 task_id를 발급하게 한다 -- task_id가 세대마다 1부터
+    /// 재사용되지 않도록 해서, 타임아웃되어 방치된 이전 세대 task의 늦은 응답이 새
+    /// 세대의 같은 번호 task와 충돌하는 것을 막는다 (자세한 설명은 MasterApplication.h의
+    /// next_global_task_id_ 참고).
+    if (task_manager_) {
+        next_global_task_id_ = task_manager_->peekNextTaskId();
+    }
+
     task_manager_ = std::make_unique<TaskManager>(
         cfg_.task_timeout_seconds,
         current_task_type_,
-        current_parameters_
+        current_parameters_,
+        next_global_task_id_
     );
 
     task_manager_->setTaskCompletedCallback([this](const TaskInfo& task, const ProcessingResult& result) {

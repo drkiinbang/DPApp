@@ -984,20 +984,21 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
                     /// [수정] task_manager_(TaskManagerTypes.h)는 이미 자체적으로 타임아웃
                     /// -> 재시도 -> 재할당 메커니즘을 가지고 있다 (checkTimeouts()가 task를
                     /// task_timeout_seconds_ 안에 응답 없으면 실패 처리하고, retry_count가
-                    /// max_retries 미만이면 PENDING으로 되돌려 다른 Slave에 재할당한다 --
-                    /// task_manager_는 이 job과 동일한 cfg_.task_timeout_seconds로 생성된다,
-                    /// initializeTaskManager() 참고). 그런데 이 job의 maxWait이 그 task 자체의
-                    /// 타임아웃과 정확히 같은 값이면, 어느 한 청크가 처음 타임아웃되는 바로 그
-                    /// 순간 job도 같이 포기해버려서, TaskManager가 다른 Slave에 재할당해 성공
-                    /// 시켜도 그 결과를 받아줄 수 없다(acceptingResults가 이미 false가 됨).
-                    /// 일시적인 네트워크 지연이나 Slave 하나가 잠깐 죽은 경우처럼 흔한 상황에서
-                    /// 최소 한 번의 재시도가 완주할 여유를 주기 위해, task 자체의 타임아웃의
-                    /// 2배(최초 시도 + 재시도 1회분)를 이 job의 인내심으로 준다.
+                    /// max_retries 미만이면 PENDING으로 되돌려 다른 Slave에 재할당한다). 예전에는
+                    /// 이 job이 고정된 시간 배수(예: task 타임아웃의 2배)만으로 "그만 기다릴
+                    /// 때"를 추측했는데, max_retries가 여러 번이면 그 배수로는 모든 재시도가
+                    /// 끝나기 전에 job이 먼저 포기할 수 있었다. 이제는 실제로 TaskManager에
+                    /// 물어봐서(task_manager_->isTaskTerminal) 아직 응답 없는 task들이 전부
+                    /// 재시도까지 소진하고 종료 상태(FAILED/TIMEOUT)에 도달했는지 확인하고, 그런
+                    /// 경우에만(=더 기다려도 결과가 올 수 없다고 확신할 때) 즉시 대기를 끝낸다.
+                    /// hardCeiling은 순전히 안전장치(무한 대기 방지)이고, 실제 종료 판단의
+                    /// 기준은 아니다.
                     auto waitStart = std::chrono::steady_clock::now();
-                    const auto maxWait = std::chrono::seconds(
-                        (std::max)(cfg_.task_timeout_seconds * 2, 300));
+                    const auto hardCeiling = std::chrono::seconds(
+                        (std::max)(cfg_.task_timeout_seconds * 6, 600));
 
                     bool timedOut = false;
+                    int waitIteration = 0;
                     while (true) {
                         int done;
                         {
@@ -1006,10 +1007,39 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
                         }
                         if (done >= job->totalChunks) break;
                         if (job->cancelRequested.load()) break;
-                        if (std::chrono::steady_clock::now() - waitStart > maxWait) {
-                            WLOG << "[ICP] Distributed fine alignment timed out for job "
+
+                        /// TaskManager 상태 조회는 task마다 락을 잡으므로, 매 200ms마다가
+                        /// 아니라 대략 2초(10회)에 한 번씩만 확인해 오버헤드를 줄인다.
+                        ++waitIteration;
+                        if (waitIteration % 10 == 0) {
+                            bool allOutstandingTerminal = true;
+                            for (uint32_t task_id : dispatchedTaskIds) {
+                                {
+                                    std::lock_guard<std::mutex> lock(icp_jobs_mutex_);
+                                    /// 이미 응답을 받아 매핑이 지워진 task는 확인할 필요 없음
+                                    if (icp_task_to_job_.find(task_id) == icp_task_to_job_.end()) {
+                                        continue;
+                                    }
+                                }
+                                if (!task_manager_->isTaskTerminal(task_id)) {
+                                    allOutstandingTerminal = false;
+                                    break;
+                                }
+                            }
+                            if (allOutstandingTerminal) {
+                                WLOG << "[ICP] All outstanding tasks for job " << job->jobId
+                                    << " have reached a terminal state (retries exhausted) with "
+                                    << done << "/" << job->totalChunks
+                                    << " chunks finished -- stopping wait.";
+                                timedOut = true;
+                                break;
+                            }
+                        }
+
+                        if (std::chrono::steady_clock::now() - waitStart > hardCeiling) {
+                            WLOG << "[ICP] Distributed fine alignment hit the hard wait ceiling for job "
                                 << job->jobId << " (" << done << "/" << job->totalChunks
-                                << " chunks finished)";
+                                << " chunks finished) even though some tasks may still be retrying";
                             timedOut = true;
                             break;
                         }
