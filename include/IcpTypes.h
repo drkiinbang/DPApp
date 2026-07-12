@@ -432,6 +432,15 @@ namespace icp {
     // IcpElementAlignment - BIM 부재(element) 단위 정합 결과
     //=========================================================================
 
+    /// PCA로 추정한 축의 axisConfidence(최대 고유값이 전체 분산에서 차지하는 비중,
+    /// 1/3~1 범위)가 이 값 미만이면 축이 신뢰할 수 없다고 본다 -- 밸브나 정육면체처럼
+    /// 대칭적인 부재는 정점 분포에 뚜렷한 "긴 방향"이 없어서 PCA가 사실상 임의의 축을
+    /// 잡을 수 있다. BIM centerline이 제공된 경우(axisSource=="centerline")는 항상
+    /// 신뢰할 수 있다고 본다 -- 이 임계값은 PCA 추정에만 적용된다.
+    /// MasterApplication.cpp의 determineElementAxis()에서 이 값과 비교해
+    /// IcpElementInfo::axisReliable을 설정한다.
+    constexpr double kAxisConfidenceReliableThreshold = 0.5;
+
     /// BIM 부재 하나에 대해 개별적으로 추정된 정합 결과. 작업 전체의 통합 결과와
     /// 함께 보관되어, 호출자가 부재별 품질을 따로 확인할 수 있게 한다(예: 특정
     /// 부재의 fine 정합이 잘 안 됐을 때, 통합 RMSE 하나만 보고 추측할 필요 없이
@@ -458,6 +467,13 @@ namespace icp {
         std::array<double, 3> axisDirection{ 0.0, 0.0, 1.0 };
         std::string axisSource = "pca";
         double axisConfidence = 0.0;
+
+        /// axisConfidence가 kAxisConfidenceReliableThreshold 이상인지(또는 centerline이라
+        /// 항상 신뢰 가능한지)를 미리 계산해 둔 값. false면 아래 twist/swing/axial/lateral
+        /// 값은 여전히 계산되어 있지만, 축 자체가 불확실하므로(밸브/정육면체처럼 대칭적인
+        /// 부재) 그 값의 의미를 신뢰하기 어렵다는 뜻이다 -- saveAlignmentResults()가
+        /// "axis_reliable": false로 JSON에 그대로 노출한다.
+        bool axisReliable = true;
 
         /// transform의 회전 성분을 axisDirection 기준으로 분해한 값(도(degree) 단위).
         /// twistAngleDeg: 축을 중심으로 얼마나 회전(비틀림)했는지(부호 있음, 축의 방향

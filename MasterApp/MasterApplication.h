@@ -56,6 +56,10 @@ struct IcpElementInfo {
     std::array<double, 3> axisDirection{ 0.0, 0.0, 1.0 };
     std::string axisSource = "pca";
     double axisConfidence = 0.0;
+
+    /// axisConfidence가 icp::kAxisConfidenceReliableThreshold 미만인 PCA 추정 축(밸브/
+    /// 정육면체처럼 대칭적인 부재에서 흔함)을 표시한다. centerline 출처는 항상 true.
+    bool axisReliable = true;
 };
 
 namespace DPApp {

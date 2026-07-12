@@ -557,6 +557,7 @@ namespace DPApp {
                     info.axisDirection = { dir.x(), dir.y(), dir.z() };
                     info.axisSource = "centerline";
                     info.axisConfidence = 1.0;
+                    info.axisReliable = true;
                     return;
                 }
                 std::cerr << "Element '" << element.name << "' has a degenerate centerline (start == end); "
@@ -567,6 +568,21 @@ namespace DPApp {
             info.axisDirection = pca.direction;
             info.axisSource = "pca";
             info.axisConfidence = pca.confidence;
+
+            /// 대칭적인 부재(밸브, 정육면체형 장비 등)는 PCA가 뚜렷한 긴 방향을 찾지
+            /// 못해 사실상 임의의 축을 골라낼 수 있다 -- axisConfidence가 낮으면(1/3에
+            /// 가까울수록 더 대칭적) 이 축을 신뢰할 수 없다고 표시해서, 이 축을 근거로
+            /// 계산되는 twist/swing 값이 무의미할 수 있음을 나중에 JSON 소비자가 알 수
+            /// 있게 한다(값 자체는 계속 계산/노출한다 -- 완전히 틀린 값은 아니고, 다만
+            /// 어느 방향을 "축"으로 볼지가 불확실하다는 뜻이기 때문).
+            info.axisReliable = pca.confidence >= icp::kAxisConfidenceReliableThreshold;
+            if (!info.axisReliable) {
+                std::cerr << "Element '" << element.name << "' has a low-confidence PCA axis "
+                    << "(confidence=" << pca.confidence << ", threshold="
+                    << icp::kAxisConfidenceReliableThreshold << ") -- likely a symmetric shape "
+                    << "(valve, cube-like equipment, etc.); twist/swing values for this element "
+                    << "may not be meaningful." << std::endl;
+            }
         }
 
         /// BIM 부재(Revit Element ID -- loadGltf()가 로딩하는 GLTF 노드/메시 하나하나가

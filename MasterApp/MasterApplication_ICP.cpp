@@ -684,6 +684,7 @@ static std::string saveAlignmentResults(const std::shared_ptr<icp::IcpJob>& job)
         oss << "      \"axis_direction\": [" << e.axisDirection[0] << ", " << e.axisDirection[1] << ", " << e.axisDirection[2] << "],\n";
         oss << "      \"axis_source\": \"" << jsonEscape(e.axisSource) << "\",\n";
         oss << "      \"axis_confidence\": " << e.axisConfidence << ",\n";
+        oss << "      \"axis_reliable\": " << (e.axisReliable ? "true" : "false") << ",\n";
         oss << "      \"twist_angle_deg\": " << e.twistAngleDeg << ",\n";
         oss << "      \"swing_angle_deg\": " << e.swingAngleDeg << ",\n";
         oss << "      \"axial_shift\": " << e.axialShift << ",\n";
@@ -711,7 +712,15 @@ static std::string saveAlignmentResults(const std::shared_ptr<icp::IcpJob>& job)
         << "If partial_result is true, this transform (and the aligned output LAS) reflects only "
         << "chunks_completed of chunks_total chunks -- treat it as incomplete, not as a full-plant result.\",\n";
     oss << "  \"combination_method\": \"weighted rotation average (SVD re-orthogonalized, chordal L2 mean) + weighted translation average, weighted by each element's source point count; see aggregateWeightedTransforms() in MasterApplication_ICP.cpp and doc/handover for derivation\",\n";
-    oss << "  \"axis_decomposition_method\": \"each element's transform is decomposed relative to its own central axis (axis_direction, from BIM centerline if axis_source=='centerline', else PCA on the element's own mesh vertices, axis_source=='pca'); twist_angle_deg is rotation about that axis (signed), swing_angle_deg is the remaining tilt of the axis itself (unsigned), axial_shift is translation along the axis (signed, meters), lateral_shift is translation perpendicular to the axis (unsigned, meters); see decomposeSwingTwist() in MasterApplication_ICP.cpp\"\n";
+    oss << "  \"axis_decomposition_method\": \"each element's transform is decomposed relative to its own central axis (axis_direction, from BIM centerline if axis_source=='centerline', else PCA on the element's own mesh vertices, axis_source=='pca'); twist_angle_deg is rotation about that axis (signed), swing_angle_deg is the remaining tilt of the axis itself (unsigned), axial_shift is translation along the axis (signed, meters), lateral_shift is translation perpendicular to the axis (unsigned, meters); see decomposeSwingTwist() in MasterApplication_ICP.cpp. "
+        << "axis_reliable is false when a PCA-estimated axis has confidence below "
+        << icp::kAxisConfidenceReliableThreshold << " (axis_confidence, the fraction of the "
+        << "element's vertex-position variance explained by its longest principal direction, "
+        << "ranges 1/3 for a perfectly symmetric shape like a cube/valve to 1.0 for a long thin "
+        << "pipe) -- twist_angle_deg/swing_angle_deg/axial_shift/lateral_shift are still computed "
+        << "for such elements, but since PCA could not find a clearly dominant direction, which "
+        << "direction counts as \\\"the axis\\\" is itself ambiguous, so treat those four values "
+        << "with caution when axis_reliable is false\"\n";
     oss << "}\n";
 
     std::ofstream file(path);
@@ -971,9 +980,22 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
                     /// 로컬 수렴까지 완전히 실행한 뒤 청크당 IcpResult 하나를 보고하므로,
                     /// 반복(iteration)마다 네트워크 왕복이 필요하지 않다 -- 그저 큐가
                     /// 비워지기를 폴링(polling)하면 된다.
+                    ///
+                    /// [수정] task_manager_(TaskManagerTypes.h)는 이미 자체적으로 타임아웃
+                    /// -> 재시도 -> 재할당 메커니즘을 가지고 있다 (checkTimeouts()가 task를
+                    /// task_timeout_seconds_ 안에 응답 없으면 실패 처리하고, retry_count가
+                    /// max_retries 미만이면 PENDING으로 되돌려 다른 Slave에 재할당한다 --
+                    /// task_manager_는 이 job과 동일한 cfg_.task_timeout_seconds로 생성된다,
+                    /// initializeTaskManager() 참고). 그런데 이 job의 maxWait이 그 task 자체의
+                    /// 타임아웃과 정확히 같은 값이면, 어느 한 청크가 처음 타임아웃되는 바로 그
+                    /// 순간 job도 같이 포기해버려서, TaskManager가 다른 Slave에 재할당해 성공
+                    /// 시켜도 그 결과를 받아줄 수 없다(acceptingResults가 이미 false가 됨).
+                    /// 일시적인 네트워크 지연이나 Slave 하나가 잠깐 죽은 경우처럼 흔한 상황에서
+                    /// 최소 한 번의 재시도가 완주할 여유를 주기 위해, task 자체의 타임아웃의
+                    /// 2배(최초 시도 + 재시도 1회분)를 이 job의 인내심으로 준다.
                     auto waitStart = std::chrono::steady_clock::now();
                     const auto maxWait = std::chrono::seconds(
-                        (std::max)(cfg_.task_timeout_seconds, 300));
+                        (std::max)(cfg_.task_timeout_seconds * 2, 300));
 
                     bool timedOut = false;
                     while (true) {
@@ -1130,6 +1152,7 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
                 elem.axisDirection = info.axisDirection;
                 elem.axisSource = info.axisSource;
                 elem.axisConfidence = info.axisConfidence;
+                elem.axisReliable = info.axisReliable;
             }
             elem.sourcePointCount = r.sourcePointCount;
             elem.targetPointCount = r.targetPointCount;
@@ -1146,6 +1169,12 @@ void MasterApplication::processIcpJob(std::shared_ptr<icp::IcpJob> job) {
             elem.swingAngleDeg = decomposed.swingAngleDeg;
             elem.axialShift = decomposed.axialShift;
             elem.lateralShift = decomposed.lateralShift;
+
+            if (!elem.axisReliable) {
+                WLOG << "[ICP] Element '" << elem.elementName << "' (chunk " << elem.chunk_id
+                    << ") has a low-confidence PCA axis (confidence=" << elem.axisConfidence
+                    << "); its twist/swing/axial/lateral values may not be meaningful.";
+            }
 
             job->elementResults.push_back(elem);
         }
