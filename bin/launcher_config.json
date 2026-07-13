@@ -1,0 +1,6 @@
+{
+  "launcher_port": 8090,
+  "master_executable": "MasterApp.exe",
+  "master_server_port": 8080,
+  "master_api_port": 8081
+}

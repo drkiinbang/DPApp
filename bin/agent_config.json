@@ -1,0 +1,6 @@
+{
+    "agent_port": 8092,
+    "slave_executable": "SlaveApp.exe",
+    "max_slaves": 8,
+    "working_directory": ""
+}
