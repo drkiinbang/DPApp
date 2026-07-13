@@ -9,7 +9,11 @@ namespace fs = std::filesystem;
 // GLTF/GLB 파일에 저장된 extras("id" 등) 메타데이터가 정상적으로 읽히는지 검증한다
 // (BimImport::testGltfExtraId -> chunkbim::GltfMesh::verifyMeshIdsInFile 경로).
 TEST(TestCaseName, VerifyExtId) {
-	std::string glbPath = "../data/test/extension_test/ext_sample2/test_extension1.glb";
+	// [테스트 데이터] 저장소에 커밋된 소형 fixture(data/test_fixtures/)를 사용한다.
+	// 예전에는 165MB짜리 실측 glb(ext_sample2)를 참조해서 clone만으로는 테스트를
+	// 돌릴 수 없었다 -- 이 테스트는 glb 로딩 성공 여부만 확인하므로 355KB짜리 소형
+	// glb로 충분하다. 대용량 실측 데이터로 돌리고 싶으면 이 경로만 바꾸면 된다.
+	std::string glbPath = "../data/test_fixtures/glb/small.glb";
 	fs::path relativePath = glbPath;
 
 	/// 실행 파일의 전체 경로
@@ -43,7 +47,9 @@ TEST(TestCaseName, VerifyExtId) {
 // 폴더 안의 모든 GLTF/GLB 파일을 읽어 MeshChunk 목록으로 변환하는 loadGltf()가
 // 정상적으로 동작하는지(오류 없이 true를 반환하는지) 검증한다.
 TEST(TestCaseName, TestName) {
-	std::string bimFolder = "../data/test/extension_test/ext_sample2";
+	// [테스트 데이터] 소형 fixture 폴더(glb 1개) -- loadGltf가 폴더 내 모든 glb를
+	// 읽으므로 소형 glb 하나만 있어도 로딩 성공을 검증할 수 있다.
+	std::string bimFolder = "../data/test_fixtures/glb";
 	fs::path relativePath = bimFolder;
 
 	/// 실행 파일의 전체 경로

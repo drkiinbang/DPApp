@@ -125,7 +125,13 @@ TEST(TaskManagerTest, ImportPointclouds2)
     std::vector<BimMeshInfo> bimData;
 
     if (true) {
-        std::string pc2_path = dataFolder + std::string("\\pointclouds2\\samsung_test.pointclouds2");
+        // [테스트 데이터] 저장소에 커밋된 소형 fixture(data/test_fixtures/small.pointclouds2,
+        // 약 1.15MB / 100,200점)를 사용한다. 예전에는 1.6GB짜리 실측 pointclouds2를
+        // 참조해서 clone만으로는 돌릴 수 없었다 -- 이 테스트는 전체 로드와 부분 로드
+        // (beginPtsIdx=100000, numPtsToRead=100)의 결과가 일치하는지만 확인하므로,
+        // 10만100점을 초과하는 소형 파일이면 충분하다. 대용량 실측 데이터로 돌리려면
+        // 이 경로만 바꾸면 된다.
+        std::string pc2_path = dataFolder + std::string("\\test_fixtures\\small.pointclouds2");
 
         std::vector<float> pointbuffer;
         auto retval = pointclouds2::loadPointclouds2(pc2_path, pointbuffer);

@@ -9,7 +9,11 @@ namespace fs = std::filesystem;
 // LAS 포인트클라우드 파일을 청크 단위로 스트리밍 로드하는 loadLasFile()이 정상
 // 동작하는지(오류 없이 true를 반환하고, 각 청크의 바운딩 박스/포인트 수가 채워지는지) 검증한다.
 TEST(TestCaseName, LasLoadTest) {
-	std::string lasPath = "../data/test/las_test/test.las";
+	// [테스트 데이터] 저장소에 커밋된 소형 fixture(data/test_fixtures/small.las,
+	// 약 400KB)를 사용한다. 예전에는 151MB짜리 실측 las를 참조해서 clone만으로는
+	// 돌릴 수 없었다 -- 이 테스트는 las 스트리밍 로딩 성공 여부만 확인하므로 소형
+	// las로 충분하다. 대용량 실측 데이터로 돌리려면 이 경로만 바꾸면 된다.
+	std::string lasPath = "../data/test_fixtures/small.las";
 	fs::path relativePath = lasPath;
 
 	/// 실행 파일의 전체 경로
