@@ -57,5 +57,5 @@ Master 콘솔에서 `help`를 입력하면 사용 가능한 명령어 목록을 
 ## 더 알아보기
 
 - [doc/handover/00_인수인계_시작하기.md](doc/handover/00_인수인계_시작하기.md) — 전체 문서 목록 및 읽는 순서
-- [doc/handover/07_상세_테스트_절차서_비전문가용.md](doc/handover/07_상세_테스트_절차서_비전문가용.md) — 그대로 따라 할 수 있는 테스트 절차
+- [doc/handover/06_상세_테스트_절차서_비전문가용.md](doc/handover/06_상세_테스트_절차서_비전문가용.md) — 그대로 따라 할 수 있는 테스트 절차
 - [CHANGELOG_2026-07-10.md](CHANGELOG_2026-07-10.md), [CHANGELOG_2026-07-11.md](CHANGELOG_2026-07-11.md) — 최근 변경 이력
