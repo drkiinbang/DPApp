@@ -97,7 +97,7 @@
 
 ## 부록 B. 문서 추가 정정 사항
 
-- `doc/handover/06_향후_개선_방향.md` §2.1 "KD-Tree 재사용" 항목: 코드 확인 결과 `IcpCore.hpp::runIcp()`에서 이미 반복문 바깥에서 KD-Tree를 1회만 생성하고 있음을 확인, "완료" 상태로 정정.
+- `doc/handover/08_다음_릴리즈_Future_Works.md` §2.1 "KD-Tree 재사용" 항목: 코드 확인 결과 `IcpCore.hpp::runIcp()`에서 이미 반복문 바깥에서 KD-Tree를 1회만 생성하고 있음을 확인, "완료" 상태로 정정.
 
 ## 부록 C. 변경된 파일 목록
 
@@ -111,7 +111,7 @@
 | `Test/TestTaskManager/test.cpp` | 하드코딩된 절대경로 → 상대경로 (4) |
 | `doc/handover/05_사용자_매뉴얼.md` | bimpc/REST ICP 구분 정정, .ini 미사용 경고, 신규 env var 문서화, 트러블슈팅 표 갱신 (3) |
 | `doc/handover/02_핵심기능_명세.md` | `bimpc` 명령 설명 정정 (3) |
-| `doc/handover/06_향후_개선_방향.md` | KD-Tree 재사용 항목 "완료"로 갱신 (부록 B) |
+| `doc/handover/08_다음_릴리즈_Future_Works.md` | KD-Tree 재사용 항목 "완료"로 갱신 (부록 B) |
 
 ## 부록 D. 빌드 검증 환경 참고
 
