@@ -1,0 +1,1548 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>시뮬레이션 포인트클라우드 뷰어</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:100%; height:100%; overflow:hidden; background:#14171c;
+    font-family:'Segoe UI', 'Malgun Gothic', sans-serif; color:#d5dae2; font-size:13px; }
+  #gl { position:absolute; inset:0; width:100%; height:100%; display:block; }
+
+  #panel {
+    position:absolute; top:12px; left:12px; width:270px;
+    background:rgba(22,26,33,.92); border:1px solid #2c333f; border-radius:10px;
+    padding:14px; backdrop-filter:blur(6px); user-select:none;
+    max-height:calc(100vh - 24px); overflow-y:auto;
+  }
+  #panel h1 { font-size:14px; font-weight:600; color:#fff; margin-bottom:2px; }
+  #panel .sub { font-size:11px; color:#7d8694; margin-bottom:12px; }
+  .sec { border-top:1px solid #2c333f; margin-top:10px; padding-top:10px; }
+  .sec-title { font-size:11px; font-weight:600; color:#8fa1b8; text-transform:uppercase;
+    letter-spacing:.5px; margin-bottom:8px; }
+  .row { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; gap:8px; }
+  .row label { color:#aeb7c2; flex-shrink:0; }
+  button {
+    background:#2b6cb0; color:#fff; border:none; border-radius:6px; padding:7px 10px;
+    font-size:13px; cursor:pointer; width:100%; font-family:inherit;
+  }
+  button:hover { background:#3182ce; }
+  button:disabled { background:#2a3038; color:#5d6672; cursor:not-allowed; }
+  button.secondary { background:#39414e; }
+  button.secondary:hover { background:#485261; }
+  button.half { width:calc(50% - 3px); }
+  select, input[type=range], input[type=number] {
+    background:#1d232c; color:#d5dae2; border:1px solid #39414e; border-radius:5px;
+    padding:4px 6px; font-size:12px; font-family:inherit; flex:1; min-width:0;
+  }
+  input[type=range] { padding:0; height:22px; accent-color:#3182ce; }
+  input[type=checkbox] { accent-color:#3182ce; }
+  .btnrow { display:flex; gap:6px; margin-bottom:8px; }
+  #stats, #bimStats, #synthInfo { font-size:11.5px; line-height:1.7; color:#9aa5b1; word-break:break-all; }
+  #stats b, #bimStats b, #synthInfo b { color:#d5dae2; font-weight:600; }
+
+  #dropOverlay {
+    position:absolute; inset:0; background:rgba(20,30,45,.75); display:none;
+    align-items:center; justify-content:center; z-index:50; pointer-events:none;
+    border:3px dashed #3182ce;
+  }
+  #dropOverlay div { font-size:22px; color:#cfe3f7; }
+
+  #progressWrap {
+    position:absolute; left:50%; bottom:28px; transform:translateX(-50%);
+    width:420px; max-width:80vw; background:rgba(22,26,33,.95); border:1px solid #2c333f;
+    border-radius:10px; padding:12px 14px; display:none; z-index:40;
+  }
+  #progressWrap .pl { display:flex; justify-content:space-between; margin-bottom:6px; font-size:12px; }
+  #progressBarOuter { height:6px; background:#1d232c; border-radius:3px; overflow:hidden; }
+  #progressBar { height:100%; width:0%; background:#3182ce; transition:width .15s; }
+  #cancelBtn { margin-top:8px; }
+
+  #hint {
+    position:absolute; bottom:12px; right:14px; font-size:11px; color:#5d6672;
+    text-align:right; line-height:1.6; pointer-events:none;
+  }
+  #toast {
+    position:absolute; top:16px; left:50%; transform:translateX(-50%);
+    background:#742a2a; color:#fed7d7; border-radius:8px; padding:9px 16px;
+    display:none; z-index:60; font-size:13px; max-width:70vw;
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="panel">
+  <h1>포인트클라우드 뷰어</h1>
+  <div class="sub">BIM + 포인트클라우드 · 독립 실행형</div>
+
+  <button id="openBtn">포인트클라우드 열기 (.xyz/.pts/.txt/.las)</button>
+  <input type="file" id="fileInput" accept=".xyz,.pts,.txt,.csv,.asc,.las,.laz" style="display:none">
+  <div style="height:6px"></div>
+  <button id="bimOpenBtn" class="secondary">BIM 열기 (.glb, 여러 개 선택 가능)</button>
+  <input type="file" id="bimInput" accept=".glb" multiple style="display:none">
+  <div style="height:6px"></div>
+  <button id="clearAllBtn" class="secondary">모두 지우기</button>
+
+  <div class="sec">
+    <div class="sec-title">불러오기 옵션</div>
+    <div class="row"><label>열 형식</label>
+      <select id="colFormat">
+        <option value="auto" selected>자동 감지</option>
+        <option value="xyz">X Y Z</option>
+        <option value="xyzi">X Y Z I</option>
+        <option value="xyzrgb">X Y Z R G B</option>
+        <option value="xyzirgb">X Y Z I R G B</option>
+        <option value="xyzrgbi">X Y Z R G B I</option>
+      </select>
+    </div>
+    <div class="row"><label>최대 포인트</label>
+      <select id="maxPoints">
+        <option value="1000000">100만</option>
+        <option value="2000000">200만</option>
+        <option value="4000000" selected>400만</option>
+        <option value="8000000">800만</option>
+        <option value="16000000">1600만</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-title">BIM</div>
+    <div class="row"><label>BIM 표시</label>
+      <input type="checkbox" id="bimVisibleChk" checked>
+    </div>
+    <div class="row"><label>불투명도</label>
+      <input type="range" id="bimOpacity" min="0.1" max="1" step="0.05" value="0.55">
+    </div>
+    <div id="bimStats">BIM이 로드되지 않았습니다.</div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-title">합성 스캔 생성 (테스트용 · gensynth와 동일 방법)</div>
+    <div class="row"><label>격자 간격(m)</label>
+      <input type="number" id="synthGrid" value="0.02" min="0.005" step="0.005">
+    </div>
+    <div class="row"><label>노이즈 σ(m)</label>
+      <input type="number" id="synthNoise" value="0" min="0" step="0.001">
+    </div>
+    <div class="row"><label>이동 X/Y/Z(m)</label></div>
+    <div class="btnrow">
+      <input type="number" id="synthShiftX" value="0" step="0.01">
+      <input type="number" id="synthShiftY" value="0" step="0.01">
+      <input type="number" id="synthShiftZ" value="0" step="0.01">
+    </div>
+    <div class="row"><label>회전(Z축, °)</label>
+      <input type="number" id="synthRot" value="0" step="0.5">
+    </div>
+    <button id="genSynthBtn" disabled>합성 스캔 생성</button>
+    <div id="synthInfo" style="margin-top:6px"></div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-title">표시</div>
+    <div class="row"><label>색상</label>
+      <select id="colorMode">
+        <option value="0">RGB (파일 색상)</option>
+        <option value="1">높이 (Z)</option>
+        <option value="2">강도 (Intensity)</option>
+        <option value="3">단색</option>
+      </select>
+    </div>
+    <div class="row"><label>포인트 크기</label>
+      <input type="range" id="ptSize" min="0.5" max="8" step="0.25" value="1.75">
+    </div>
+    <div class="row"><label>원근 크기 감쇠</label>
+      <input type="checkbox" id="attenChk" checked>
+    </div>
+    <div class="row"><label>원형 포인트</label>
+      <input type="checkbox" id="roundChk" checked>
+    </div>
+    <div class="row"><label>바닥 그리드</label>
+      <input type="checkbox" id="gridChk" checked>
+    </div>
+    <div class="row"><label>배경</label>
+      <select id="bgSel">
+        <option value="dark" selected>어두움</option>
+        <option value="black">검정</option>
+        <option value="light">밝음</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-title">시점</div>
+    <div class="btnrow">
+      <button class="secondary half" id="fitBtn">전체 보기</button>
+      <button class="secondary half" id="topBtn">위에서</button>
+    </div>
+    <div class="btnrow">
+      <button class="secondary half" id="frontBtn">정면</button>
+      <button class="secondary half" id="shotBtn">PNG 저장</button>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-title">포인트클라우드 정보</div>
+    <div id="stats">파일을 열거나 합성 스캔을 생성하세요.</div>
+    <div style="height:8px"></div>
+    <div class="row"><label>저장 형식</label>
+      <select id="saveFormat">
+        <option value="las" selected>.las (바이너리)</option>
+        <option value="xyz">.xyz (텍스트)</option>
+      </select>
+    </div>
+    <button id="saveCloudBtn" class="secondary" disabled>포인트클라우드 저장</button>
+  </div>
+</div>
+
+<div id="dropOverlay"><div>파일을 놓아서 열기 (.glb는 BIM으로, 나머지는 포인트클라우드로)</div></div>
+
+<div id="progressWrap">
+  <div class="pl"><span id="progressLabel">불러오는 중…</span><span id="progressPct">0%</span></div>
+  <div id="progressBarOuter"><div id="progressBar"></div></div>
+  <button id="cancelBtn" class="secondary">취소</button>
+</div>
+
+<div id="hint">
+  드래그: 회전 · 휠: 확대/축소 · 우클릭/Shift 드래그: 이동<br>
+  더블클릭: 전체 보기
+</div>
+<div id="toast"></div>
+
+<script>
+'use strict';
+/* ============================================================
+ * 독립 실행형 BIM + 포인트클라우드 뷰어
+ * - 외부 라이브러리 없음 (WebGL 직접 사용, GLTF/GLB 파서도 직접 구현)
+ * - ASCII(xyz/pts/txt/csv/asc) 스트리밍 파싱 + LAS 바이너리 파싱
+ * - GLB(BIM) 파싱: 노드 계층 순회 + 삼각형 메시 추출
+ * - 합성 스캔 생성: MasterApp의 gensynth(runGenerateSyntheticPointCloud)와
+ *   동일한 방법 -- 실제 BIM 메시 표면에 barycentric 격자로 가상점을 생성한 뒤,
+ *   BIM 전체 bbox 중심을 기준으로 알려진 Z축 회전 + 이동을 주입하고 선택적으로
+ *   가우시안 노이즈를 더한다 (PseudoPointGenerator.hpp / MasterApplication_ICP.cpp 참고).
+ * - 대용량 파일: 최대 포인트 예산 초과 시 자동 서브샘플링
+ * ============================================================ */
+
+const $ = id => document.getElementById(id);
+
+/* ---------------- 성장형 Float 배열 ---------------- */
+class FloatList {
+  constructor(cap = 1 << 20) { this.a = new Float32Array(cap); this.n = 0; }
+  _grow(need) {
+    let cap = this.a.length;
+    while (cap < need) cap *= 2;
+    const b = new Float32Array(cap); b.set(this.a.subarray(0, this.n)); this.a = b;
+  }
+  push3(x, y, z) {
+    if (this.n + 3 > this.a.length) this._grow(this.n + 3);
+    this.a[this.n++] = x; this.a[this.n++] = y; this.a[this.n++] = z;
+  }
+  push1(v) {
+    if (this.n + 1 > this.a.length) this._grow(this.n + 1);
+    this.a[this.n++] = v;
+  }
+  /* stride 방식 서브샘플링: 요소 그룹(groupSize) 단위로 절반만 남김 */
+  halve(groupSize) {
+    const groups = Math.floor(this.n / groupSize);
+    let w = 0;
+    for (let g = 0; g < groups; g += 2) {
+      const src = g * groupSize;
+      for (let k = 0; k < groupSize; k++) this.a[w++] = this.a[src + k];
+    }
+    this.n = w;
+  }
+  view() { return this.a.subarray(0, this.n); }
+}
+
+/* ---------------- 열 형식 ---------------- */
+const COL_FORMATS = {
+  xyz:     { x:0, y:1, z:2 },
+  xyzi:    { x:0, y:1, z:2, i:3 },
+  xyzrgb:  { x:0, y:1, z:2, r:3, g:4, b:5 },
+  xyzirgb: { x:0, y:1, z:2, i:3, r:4, g:5, b:6 },
+  xyzrgbi: { x:0, y:1, z:2, r:3, g:4, b:5, i:6 },
+};
+function autoFormat(nCols) {
+  if (nCols >= 7) return COL_FORMATS.xyzirgb;   // PTS 표준
+  if (nCols === 6) return COL_FORMATS.xyzrgb;
+  if (nCols >= 4) return COL_FORMATS.xyzi;
+  return COL_FORMATS.xyz;
+}
+
+/* ---------------- 파싱 결과 컨테이너 ---------------- */
+function newCloud() {
+  return {
+    pos: new FloatList(),      // 원점(app.origin) 대비 상대 좌표 (f32 정밀도 확보)
+    col: new FloatList(),      // 파싱 시점 원시 RGB 값
+    inten: new FloatList(),
+    origin: null,              // 이 클라우드가 사용하는 절대좌표 원점 (double) -- app.origin과 공유
+    hasColor: false, hasInten: false,
+    totalInFile: 0,            // 파일 내 전체 포인트 수(알 수 있으면)
+    stride: 1,
+    name: '',
+  };
+}
+
+/* ---------------- ASCII 스트리밍 파서 ---------------- */
+async function parseASCII(file, opts, onProgress) {
+  const cloud = newCloud();
+  cloud.name = file.name;
+  const budget = opts.budget;
+  const reader = file.stream().getReader();
+  const decoder = new TextDecoder();
+  let leftover = '';
+  let bytesDone = 0;
+  let fmt = opts.format;            // null이면 첫 데이터 라인에서 자동 감지
+  let dataLineIdx = 0;
+  let stride = 1;
+  let kept = 0;
+  let countLineChecked = false;
+  const splitRe = /[\s,;]+/;
+
+  const processLine = (line) => {
+    line = line.trim();
+    if (!line || line[0] === '#' || (line[0] === '/' && line[1] === '/')) return;
+    const tok = line.split(splitRe);
+
+    // .pts 등: 첫 줄이 포인트 개수 하나만 있는 경우
+    if (!countLineChecked) {
+      countLineChecked = true;
+      if (tok.length === 1 && /^\d+$/.test(tok[0])) {
+        cloud.totalInFile = parseInt(tok[0], 10);
+        if (cloud.totalInFile > budget) stride = Math.ceil(cloud.totalInFile / budget);
+        return;
+      }
+    }
+    if (tok.length < 3) return;
+    const x = parseFloat(tok[0]), y = parseFloat(tok[1]), z = parseFloat(tok[2]);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
+
+    if (!fmt) fmt = autoFormat(tok.length);
+    const li = dataLineIdx++;
+    if (li % stride !== 0) return;
+
+    /// 이미 확립된 공유 원점(app.origin, BIM/다른 클라우드에서 넘어온)이 있으면 그걸
+    /// 그대로 쓰고, 없으면 이 파일의 첫 포인트를 원점으로 삼는다 -- BIM/포인트클라우드를
+    /// 함께 보여줄 때 서로 다른 원점 때문에 좌표가 어긋나지 않도록 하기 위함이다.
+    if (!cloud.origin) cloud.origin = opts.presetOrigin ? opts.presetOrigin.slice() : [x, y, z];
+    cloud.pos.push3(x - cloud.origin[0], y - cloud.origin[1], z - cloud.origin[2]);
+
+    if (fmt.r !== undefined && tok.length > fmt.b) {
+      cloud.col.push3(parseFloat(tok[fmt.r]) || 0, parseFloat(tok[fmt.g]) || 0, parseFloat(tok[fmt.b]) || 0);
+      cloud.hasColor = true;
+    } else cloud.col.push3(200, 200, 200);
+
+    if (fmt.i !== undefined && tok.length > fmt.i) {
+      cloud.inten.push1(parseFloat(tok[fmt.i]) || 0);
+      cloud.hasInten = true;
+    } else cloud.inten.push1(0);
+
+    kept++;
+    // 개수를 모르는 파일: 예산 초과 시 절반 버리고 stride 2배 (점진적 데시메이션)
+    if (kept > budget) {
+      cloud.pos.halve(3); cloud.col.halve(3); cloud.inten.halve(1);
+      kept = Math.floor(kept / 2);
+      stride *= 2;
+    }
+  };
+
+  for (;;) {
+    if (opts.isAborted()) throw new Error('aborted');
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytesDone += value.byteLength;
+    const text = leftover + decoder.decode(value, { stream: true });
+    const lines = text.split('\n');
+    leftover = lines.pop();
+    for (const ln of lines) processLine(ln);
+    onProgress(bytesDone / file.size, kept);
+  }
+  if (leftover) processLine(leftover);
+
+  if (!cloud.totalInFile) cloud.totalInFile = dataLineIdx;
+  cloud.stride = stride;
+  return cloud;
+}
+
+/* ---------------- LAS 바이너리 파서 ---------------- */
+async function parseLAS(file, opts, onProgress) {
+  const cloud = newCloud();
+  cloud.name = file.name;
+  const head = new DataView(await file.slice(0, 375).arrayBuffer());
+  const sig = String.fromCharCode(head.getUint8(0), head.getUint8(1), head.getUint8(2), head.getUint8(3));
+  if (sig !== 'LASF') throw new Error('LAS 시그니처가 아닙니다.');
+  const verMin = head.getUint8(25);
+  const offToPoints = head.getUint32(96, true);
+  const fmtByte = head.getUint8(104);
+  if (fmtByte & 0x80) throw new Error('LAZ 압축 파일은 지원하지 않습니다. LAS로 변환 후 열어주세요.');
+  const fmt = fmtByte & 0x3f;
+  const recLen = head.getUint16(105, true);
+  let count = head.getUint32(107, true);
+  if (verMin >= 4) {
+    const c64 = head.getBigUint64(247, true);
+    if (c64 > 0n) count = Number(c64);
+  }
+  if (!count || !recLen) throw new Error('LAS 헤더가 손상되었거나 포인트가 없습니다.');
+
+  const sx = head.getFloat64(131, true), sy = head.getFloat64(139, true), sz = head.getFloat64(147, true);
+  const ox = head.getFloat64(155, true), oy = head.getFloat64(163, true), oz = head.getFloat64(171, true);
+  const RGB_OFF = { 2: 20, 3: 28, 5: 28, 7: 30, 8: 30 };
+  const rgbOff = RGB_OFF[fmt];
+
+  cloud.totalInFile = count;
+  const stride = Math.max(1, Math.ceil(count / opts.budget));
+  cloud.stride = stride;
+  cloud.hasInten = true;
+  cloud.hasColor = rgbOff !== undefined;
+
+  const CHUNK_RECS = 1 << 17; // 13만 레코드씩 읽기
+  let processed = 0;
+  for (let base = 0; base < count; base += CHUNK_RECS) {
+    if (opts.isAborted()) throw new Error('aborted');
+    const nRec = Math.min(CHUNK_RECS, count - base);
+    const byteStart = offToPoints + base * recLen;
+    const buf = await file.slice(byteStart, byteStart + nRec * recLen).arrayBuffer();
+    const dv = new DataView(buf);
+    const actualRecs = Math.floor(buf.byteLength / recLen);
+    for (let r = 0; r < actualRecs; r++) {
+      if ((base + r) % stride !== 0) continue;
+      const o = r * recLen;
+      const x = dv.getInt32(o, true) * sx + ox;
+      const y = dv.getInt32(o + 4, true) * sy + oy;
+      const z = dv.getInt32(o + 8, true) * sz + oz;
+      if (!cloud.origin) cloud.origin = opts.presetOrigin ? opts.presetOrigin.slice() : [x, y, z];
+      cloud.pos.push3(x - cloud.origin[0], y - cloud.origin[1], z - cloud.origin[2]);
+      cloud.inten.push1(dv.getUint16(o + 12, true));
+      if (rgbOff !== undefined)
+        cloud.col.push3(dv.getUint16(o + rgbOff, true), dv.getUint16(o + rgbOff + 2, true), dv.getUint16(o + rgbOff + 4, true));
+      else cloud.col.push3(200, 200, 200);
+    }
+    processed += actualRecs;
+    onProgress(processed / count, cloud.pos.n / 3);
+  }
+  return cloud;
+}
+
+/* ============================================================
+ * BIM(GLTF/GLB) 파서 -- 외부 라이브러리 없이 직접 구현
+ * MasterApp의 include/bim/gltf_mesh.h(ExtractMeshFromNode)와 동일한 방식:
+ * 노드 계층을 재귀 순회하며 matrix(또는 T*R*S)를 누적하고, mesh가 있는 노드마다
+ * 그 삼각형들을 월드 좌표로 변환해 하나의 BIM 부재(element)로 만든다. face normal은
+ * (버텍스 NORMAL 속성이 있어도) 항상 삼각형 자체의 외적으로 새로 계산하는데, 이는
+ * 실제 C++ 코드의 활성 경로(정점 법선 평균 폴백은 `if (false)`로 비활성화되어 있음)와
+ * 정확히 일치시키기 위함이다.
+ * ============================================================ */
+
+/* GLB 컨테이너 파싱: 12바이트 헤더 + JSON 청크 + BIN 청크. .glb(단일 파일, 내장
+   버퍼)만 지원한다 -- 외부 .bin을 참조하는 .gltf는 지원하지 않는다. */
+function parseGLB(arrayBuffer) {
+  const dv = new DataView(arrayBuffer);
+  const magic = dv.getUint32(0, true);
+  if (magic !== 0x46546c67) throw new Error('GLB 시그니처가 아닙니다.');
+  const totalLength = dv.getUint32(8, true);
+  let offset = 12;
+  let json = null, bin = null;
+  while (offset < totalLength) {
+    const chunkLen = dv.getUint32(offset, true);
+    const chunkType = dv.getUint32(offset + 4, true);
+    const chunkStart = offset + 8;
+    if (chunkType === 0x4e4f534a) {          // 'JSON'
+      const text = new TextDecoder('utf-8').decode(new Uint8Array(arrayBuffer, chunkStart, chunkLen));
+      json = JSON.parse(text);
+    } else if (chunkType === 0x004e4942) {   // 'BIN\0'
+      bin = new Uint8Array(arrayBuffer, chunkStart, chunkLen);
+    }
+    offset = chunkStart + chunkLen;
+  }
+  if (!json) throw new Error('GLB에서 JSON 청크를 찾지 못했습니다.');
+  return { json, bin };
+}
+
+/* accessor 인덱스로부터 실제 숫자 데이터를 읽어 Float64Array로 반환한다(인덱스
+   버퍼도 포함 -- 인덱스 값은 항상 정수라 double로도 정밀도 손실이 없다). */
+function readAccessor(json, bin, accessorIndex) {
+  const acc = json.accessors[accessorIndex];
+  const view = json.bufferViews[acc.bufferView];
+  const buffer = json.buffers[view.buffer];
+  if (buffer.uri) throw new Error('외부 .bin 참조 버퍼는 지원하지 않습니다 (.glb 단일 파일만 지원).');
+  const byteOffset = (view.byteOffset || 0) + (acc.byteOffset || 0);
+
+  const compInfo = {
+    5120: { size: 1, get: (dv, p) => dv.getInt8(p) },
+    5121: { size: 1, get: (dv, p) => dv.getUint8(p) },
+    5122: { size: 2, get: (dv, p) => dv.getInt16(p, true) },
+    5123: { size: 2, get: (dv, p) => dv.getUint16(p, true) },
+    5125: { size: 4, get: (dv, p) => dv.getUint32(p, true) },
+    5126: { size: 4, get: (dv, p) => dv.getFloat32(p, true) },
+  };
+  const typeCounts = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT4: 16 };
+  const numComp = typeCounts[acc.type];
+  const info = compInfo[acc.componentType];
+  if (!numComp || !info) throw new Error('지원하지 않는 accessor type/componentType입니다.');
+  const stride = view.byteStride || (numComp * info.size);
+
+  const dv = new DataView(bin.buffer, bin.byteOffset, bin.byteLength);
+  const out = new Float64Array(acc.count * numComp);
+  for (let i = 0; i < acc.count; i++) {
+    const base = byteOffset + i * stride;
+    for (let c = 0; c < numComp; c++) out[i * numComp + c] = info.get(dv, base + c * info.size);
+  }
+  return out;
+}
+
+/* glTF 쿼터니언(x,y,z,w) -> 4x4 회전 행렬(column-major, 회전만/이동 없음).
+   MasterApp의 gltf_mesh.h::Mat4FromQuaternion과 동일한 공식. */
+function mat4FromQuaternionD(x, y, z, w) {
+  const xx = x * x, yy = y * y, zz = z * z, xy = x * y, xz = x * z, yz = y * z, wx = w * x, wy = w * y, wz = w * z;
+  return [
+    1 - 2 * (yy + zz), 2 * (xy + wz), 2 * (xz - wy), 0,
+    2 * (xy - wz), 1 - 2 * (xx + zz), 2 * (yz + wx), 0,
+    2 * (xz + wy), 2 * (yz - wx), 1 - 2 * (xx + yy), 0,
+    0, 0, 0, 1,
+  ];
+}
+function mat4TranslationD(t) { return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, t[0], t[1], t[2], 1]; }
+function mat4ScaleD(s) { return [s[0], 0, 0, 0, 0, s[1], 0, 0, 0, 0, s[2], 0, 0, 0, 0, 1]; }
+/* double 정밀도 column-major 4x4 행렬 곱 (렌더용 mat4Mul과 별개 -- 노드 계층
+   누적은 실제 플랜트 절대좌표를 다루므로 카메라 행렬처럼 float32로 낮추지 않는다). */
+function mat4MulD(a, b) {
+  const o = new Array(16);
+  for (let c = 0; c < 4; c++)
+    for (let r = 0; r < 4; r++)
+      o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+  return o;
+}
+function mat4TransformPointD(m, x, y, z) {
+  return [
+    m[0] * x + m[4] * y + m[8] * z + m[12],
+    m[1] * x + m[5] * y + m[9] * z + m[13],
+    m[2] * x + m[6] * y + m[10] * z + m[14],
+  ];
+}
+/* 노드의 로컬 변환: matrix가 직접 있으면 그대로, 없으면 T*R*S로 구성한다
+   (glTF 규격의 합성 순서 M = T * R * S, gltf_mesh.h::Mat4FromTRS와 동일). */
+function nodeLocalMatrixD(node) {
+  if (node.matrix) return node.matrix.slice();
+  const t = node.translation || [0, 0, 0];
+  const r = node.rotation || [0, 0, 0, 1];
+  const s = node.scale || [1, 1, 1];
+  const T = mat4TranslationD(t);
+  const R = mat4FromQuaternionD(r[0], r[1], r[2], r[3]);
+  const S = mat4ScaleD(s);
+  return mat4MulD(mat4MulD(T, R), S);
+}
+
+/* GLB 파일 하나의 씬 그래프를 순회해, mesh를 가진 노드마다 하나의 BIM 부재(element)를
+   만들어 elements 배열에 push한다. 여러 파일을 불러오면(예: data/10glb의 개별 부재별
+   .glb 10개) 이 함수를 파일마다 호출해 같은 elements 배열에 계속 누적하면 된다. */
+function walkGLTFScene(json, bin, elements, fileLabel) {
+  const meshCache = new Map();
+  function getMeshTriangles(meshIndex) {
+    if (meshCache.has(meshIndex)) return meshCache.get(meshIndex);
+    const mesh = json.meshes[meshIndex];
+    const tris = [];
+    for (const prim of (mesh.primitives || [])) {
+      if (prim.mode !== undefined && prim.mode !== 4) continue; // TRIANGLES만 지원
+      const posIdx = prim.attributes && prim.attributes.POSITION;
+      if (posIdx === undefined) continue;
+      const posAcc = json.accessors[posIdx];
+      if (posAcc.type !== 'VEC3' || posAcc.componentType !== 5126) continue;
+      const positions = readAccessor(json, bin, posIdx);
+      let indices;
+      if (prim.indices !== undefined) {
+        indices = readAccessor(json, bin, prim.indices);
+      } else {
+        indices = new Float64Array(posAcc.count);
+        for (let i = 0; i < posAcc.count; i++) indices[i] = i;
+      }
+      for (let i = 0; i + 2 < indices.length; i += 3) {
+        const i0 = indices[i], i1 = indices[i + 1], i2 = indices[i + 2];
+        tris.push({
+          v0: [positions[i0 * 3], positions[i0 * 3 + 1], positions[i0 * 3 + 2]],
+          v1: [positions[i1 * 3], positions[i1 * 3 + 1], positions[i1 * 3 + 2]],
+          v2: [positions[i2 * 3], positions[i2 * 3 + 1], positions[i2 * 3 + 2]],
+        });
+      }
+    }
+    meshCache.set(meshIndex, tris);
+    return tris;
+  }
+
+  function visit(nodeIndex, parentWorld) {
+    const node = json.nodes[nodeIndex];
+    const world = mat4MulD(parentWorld, nodeLocalMatrixD(node));
+
+    if (node.mesh !== undefined) {
+      const localTris = getMeshTriangles(node.mesh);
+      const faces = [];
+      for (const t of localTris) {
+        const v0 = mat4TransformPointD(world, t.v0[0], t.v0[1], t.v0[2]);
+        const v1 = mat4TransformPointD(world, t.v1[0], t.v1[1], t.v1[2]);
+        const v2 = mat4TransformPointD(world, t.v2[0], t.v2[1], t.v2[2]);
+        // face normal: 정점 NORMAL 속성과 무관하게 항상 삼각형 외적으로 새로 계산
+        const ux = v1[0] - v0[0], uy = v1[1] - v0[1], uz = v1[2] - v0[2];
+        const vx = v2[0] - v0[0], vy = v2[1] - v0[1], vz = v2[2] - v0[2];
+        let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        const len = Math.hypot(nx, ny, nz);
+        if (len > 1e-12) { nx /= len; ny /= len; nz /= len; } else { nx = 0; ny = 0; nz = 1; }
+        faces.push({ v0, v1, v2, normal: [nx, ny, nz] });
+      }
+      if (faces.length) {
+        elements.push({ name: (node.name || ('node' + nodeIndex)) + ' @ ' + fileLabel, faces });
+      }
+    }
+    for (const childIdx of (node.children || [])) visit(childIdx, world);
+  }
+
+  const sceneIdx = (json.scene !== undefined) ? json.scene : 0;
+  const scene = json.scenes && json.scenes[sceneIdx];
+  const roots = scene ? scene.nodes : (json.nodes ? json.nodes.map((_, i) => i) : []);
+  const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  for (const rootIdx of (roots || [])) visit(rootIdx, identity);
+}
+
+function newBimModel() { return { elements: [], bboxAbs: null, triCount: 0 }; }
+
+function computeBimBBox(bim) {
+  let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (const el of bim.elements) {
+    for (const f of el.faces) {
+      for (const v of [f.v0, f.v1, f.v2]) {
+        if (v[0] < minX) minX = v[0]; if (v[0] > maxX) maxX = v[0];
+        if (v[1] < minY) minY = v[1]; if (v[1] > maxY) maxY = v[1];
+        if (v[2] < minZ) minZ = v[2]; if (v[2] > maxZ) maxZ = v[2];
+      }
+    }
+  }
+  bim.bboxAbs = { minX, minY, minZ, maxX, maxY, maxZ };
+}
+
+async function loadBimFiles(fileList) {
+  const files = Array.from(fileList).filter(f => /\.glb$/i.test(f.name));
+  if (!files.length) { showToast('.glb 파일을 선택해주세요 (외부 .bin을 쓰는 .gltf는 지원하지 않습니다).'); return; }
+  const bim = newBimModel();
+  let failCount = 0;
+  for (const file of files) {
+    try {
+      const buf = await file.arrayBuffer();
+      const { json, bin } = parseGLB(buf);
+      if (!bin) { failCount++; showToast(`${file.name}: 내장 BIN 청크가 없습니다 (.glb만 지원).`); continue; }
+      walkGLTFScene(json, bin, bim.elements, file.name);
+    } catch (err) {
+      failCount++;
+      showToast(`${file.name} 읽기 실패: ${err.message}`);
+    }
+  }
+  if (!bim.elements.length) { showToast('불러온 BIM 부재가 없습니다.'); return; }
+  for (const el of bim.elements) bim.triCount += el.faces.length;
+  computeBimBBox(bim);
+  setBim(bim);
+  if (!failCount) showToast(`BIM ${bim.elements.length}개 부재(파일 ${files.length}개) 불러오기 완료`);
+}
+
+/* ============================================================
+ * 가상점(pseudo point) 생성 + 합성 스캔 -- MasterApp의
+ * include/bimtree/PseudoPointGenerator.hpp(triangleArea/generatePseudoPointsFromMesh)와
+ * MasterApplication_ICP.cpp(runGenerateSyntheticPointCloud, gensynth CLI 명령)에서
+ * 쓰는 것과 동일한 알고리즘을 그대로 옮긴 것이다.
+ * ============================================================ */
+function triangleAreaJS(v0, v1, v2) {
+  const e1x = v1[0] - v0[0], e1y = v1[1] - v0[1], e1z = v1[2] - v0[2];
+  const e2x = v2[0] - v0[0], e2y = v2[1] - v0[1], e2z = v2[2] - v0[2];
+  const cx = e1y * e2z - e1z * e2y, cy = e1z * e2x - e1x * e2z, cz = e1x * e2y - e1y * e2x;
+  return 0.5 * Math.sqrt(cx * cx + cy * cy + cz * cz);
+}
+
+/* 삼각형 면적에 비례하는 개수만큼 barycentric 격자 점을 생성한다.
+   (numPoints = ceil(area/gridSize^2), 1~1000으로 제한, gridDim x gridDim 격자에서
+   u+v<=1인 점만 채택) -- generatePseudoPointsFromMesh()와 한 줄 한 줄 동일하다. */
+function generatePseudoPointsForBim(bim, gridSize) {
+  const gridSizeSq = gridSize * gridSize;
+  const points = [];
+  for (const el of bim.elements) {
+    for (const face of el.faces) {
+      const { v0, v1, v2 } = face;
+      const area = triangleAreaJS(v0, v1, v2);
+      if (area < 1e-10) continue; // 퇴화 삼각형은 건너뜀
+      let numPoints = Math.ceil(area / gridSizeSq);
+      numPoints = Math.max(1, Math.min(numPoints, 1000));
+      const gridDim = Math.ceil(Math.sqrt(numPoints));
+      for (let i = 0; i < gridDim; i++) {
+        for (let j = 0; j < gridDim - i; j++) {
+          const u = (i + 0.5) / gridDim, v = (j + 0.5) / gridDim, w = 1 - u - v;
+          if (w < 0) continue;
+          points.push([
+            u * v0[0] + v * v1[0] + w * v2[0],
+            u * v0[1] + v * v1[1] + w * v2[1],
+            u * v0[2] + v * v1[2] + w * v2[2],
+          ]);
+        }
+      }
+    }
+  }
+  return points;
+}
+
+/* 표준정규분포 난수 (Box-Muller 변환) -- gensynth의 std::normal_distribution과 동등 */
+function gaussianRandom() {
+  let u = 0, v = 0;
+  while (u === 0) u = Math.random();
+  while (v === 0) v = Math.random();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+/* 합성 스캔 생성: BIM 부재 전체의 bbox 중심을 회전축으로 삼아 Z축 회전(rotDeg) +
+   이동(shiftX/Y/Z)을 주입하고, 선택적으로 가우시안 노이즈(noiseSigma)를 더한다 --
+   runGenerateSyntheticPointCloud()와 완전히 동일한 방법(회전 중심, 합성 순서,
+   노이즈 방식)이다. */
+function generateSyntheticScan(bim, opts) {
+  const pts = generatePseudoPointsForBim(bim, opts.gridSize);
+  const b = bim.bboxAbs;
+  const center = [(b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, (b.minZ + b.maxZ) / 2];
+
+  const rad = opts.rotDeg * Math.PI / 180;
+  const cosA = Math.cos(rad), sinA = Math.sin(rad);
+
+  const cloud = newCloud();
+  cloud.name = `합성 스캔 (${bim.elements.length}부재, 회전 ${opts.rotDeg}°, shift ${opts.shiftX}/${opts.shiftY}/${opts.shiftZ}, σ=${opts.noiseSigma})`;
+  cloud.origin = (app.origin || center).slice();
+  cloud.hasColor = true;
+  cloud.hasInten = true;
+
+  for (const p of pts) {
+    const cx = p[0] - center[0], cy = p[1] - center[1], cz = p[2] - center[2];
+    // Z축 회전 (gensynth와 동일: 회전 중심으로 이동 -> 회전 -> 원위치 -> 이동(shift) -> 노이즈)
+    const rx = cosA * cx - sinA * cy;
+    const ry = sinA * cx + cosA * cy;
+    const rz = cz;
+    let x = rx + center[0] + opts.shiftX;
+    let y = ry + center[1] + opts.shiftY;
+    let z = rz + center[2] + opts.shiftZ;
+    if (opts.noiseSigma > 0) {
+      x += gaussianRandom() * opts.noiseSigma;
+      y += gaussianRandom() * opts.noiseSigma;
+      z += gaussianRandom() * opts.noiseSigma;
+    }
+    cloud.pos.push3(x - cloud.origin[0], y - cloud.origin[1], z - cloud.origin[2]);
+    cloud.col.push3(120, 190, 255); // 스캔 포인트는 하늘색 계열(BIM의 주황과 시각적으로 구분)
+    cloud.inten.push1(100 + Math.random() * 100);
+  }
+  cloud.totalInFile = cloud.pos.n / 3;
+
+  return { cloud, groundTruth: { center, rotDeg: opts.rotDeg, shift: [opts.shiftX, opts.shiftY, opts.shiftZ], noiseSigma: opts.noiseSigma, numPoints: pts.length } };
+}
+
+/* ============================================================
+ * WebGL 렌더러
+ * ============================================================ */
+const canvas = $('gl');
+const gl = canvas.getContext('webgl', { antialias: true, preserveDrawingBuffer: true });
+if (!gl) { showToast('이 브라우저에서 WebGL을 사용할 수 없습니다.'); }
+
+const VS = `
+attribute vec3 aPos;
+attribute vec3 aCol;
+attribute float aInt;
+uniform mat4 uMVP;
+uniform float uPtSize;
+uniform float uRefDist;
+uniform int uMode;      // 0 RGB, 1 height, 2 intensity, 3 single
+uniform int uAtten;
+uniform vec2 uZRange;
+uniform vec2 uIRange;
+varying vec3 vCol;
+
+vec3 turbo(float t) {
+  t = clamp(t, 0.0, 1.0);
+  float t2 = t*t; float t3 = t2*t; float t4 = t3*t; float t5 = t4*t;
+  return vec3(
+    0.13572138 + 4.61539260*t - 42.66032258*t2 + 132.13108234*t3 - 152.94239396*t4 + 59.28637943*t5,
+    0.09140261 + 2.19418839*t + 4.84296658*t2 - 14.18503333*t3 + 4.27729857*t4 + 2.82956604*t5,
+    0.10667330 + 12.64194608*t - 60.58204836*t2 + 110.36276771*t3 - 89.90310912*t4 + 27.34824973*t5
+  );
+}
+
+void main() {
+  vec4 clip = uMVP * vec4(aPos, 1.0);
+  gl_Position = clip;
+  float sz = uPtSize;
+  if (uAtten == 1) sz = uPtSize * clamp(uRefDist / max(clip.w, 0.001), 0.15, 12.0);
+  gl_PointSize = clamp(sz, 1.0, 128.0);
+
+  if (uMode == 0) {
+    vCol = aCol;
+  } else if (uMode == 1) {
+    float t = (aPos.z - uZRange.x) / max(uZRange.y - uZRange.x, 1e-6);
+    vCol = turbo(t);
+  } else if (uMode == 2) {
+    float t = (aInt - uIRange.x) / max(uIRange.y - uIRange.x, 1e-6);
+    vCol = vec3(t * 0.95 + 0.05);
+  } else {
+    vCol = vec3(0.55, 0.75, 1.0);
+  }
+}`;
+
+const FS = `
+precision mediump float;
+varying vec3 vCol;
+uniform int uRound;
+void main() {
+  if (uRound == 1) {
+    vec2 d = gl_PointCoord - vec2(0.5);
+    if (dot(d, d) > 0.25) discard;
+  }
+  gl_FragColor = vec4(vCol, 1.0);
+}`;
+
+const LINE_VS = `
+attribute vec3 aPos;
+uniform mat4 uMVP;
+void main() { gl_Position = uMVP * vec4(aPos, 1.0); }`;
+const LINE_FS = `
+precision mediump float;
+uniform vec4 uColor;
+void main() { gl_FragColor = uColor; }`;
+
+/* BIM 메시용 셰이더: face normal 기반 단순 플랫 셰이딩(고정 광원 방향) + 반투명 */
+const MESH_VS = `
+attribute vec3 aPos;
+attribute vec3 aNormal;
+uniform mat4 uMVP;
+varying vec3 vNormal;
+void main() {
+  gl_Position = uMVP * vec4(aPos, 1.0);
+  vNormal = aNormal;
+}`;
+const MESH_FS = `
+precision mediump float;
+varying vec3 vNormal;
+uniform vec3 uBaseColor;
+uniform float uOpacity;
+void main() {
+  vec3 lightDir = normalize(vec3(0.4, 0.5, 0.8));
+  float ndotl = max(dot(normalize(vNormal), lightDir), 0.0);
+  float shade = 0.35 + 0.65 * ndotl;
+  gl_FragColor = vec4(uBaseColor * shade, uOpacity);
+}`;
+
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+    throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+function makeProgram(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS))
+    throw new Error(gl.getProgramInfoLog(p));
+  return p;
+}
+
+const prog = makeProgram(VS, FS);
+const lineProg = makeProgram(LINE_VS, LINE_FS);
+const meshProg = makeProgram(MESH_VS, MESH_FS);
+const loc = {
+  aPos: gl.getAttribLocation(prog, 'aPos'),
+  aCol: gl.getAttribLocation(prog, 'aCol'),
+  aInt: gl.getAttribLocation(prog, 'aInt'),
+  uMVP: gl.getUniformLocation(prog, 'uMVP'),
+  uPtSize: gl.getUniformLocation(prog, 'uPtSize'),
+  uRefDist: gl.getUniformLocation(prog, 'uRefDist'),
+  uMode: gl.getUniformLocation(prog, 'uMode'),
+  uAtten: gl.getUniformLocation(prog, 'uAtten'),
+  uRound: gl.getUniformLocation(prog, 'uRound'),
+  uZRange: gl.getUniformLocation(prog, 'uZRange'),
+  uIRange: gl.getUniformLocation(prog, 'uIRange'),
+};
+const lloc = {
+  aPos: gl.getAttribLocation(lineProg, 'aPos'),
+  uMVP: gl.getUniformLocation(lineProg, 'uMVP'),
+  uColor: gl.getUniformLocation(lineProg, 'uColor'),
+};
+const mloc = {
+  aPos: gl.getAttribLocation(meshProg, 'aPos'),
+  aNormal: gl.getAttribLocation(meshProg, 'aNormal'),
+  uMVP: gl.getUniformLocation(meshProg, 'uMVP'),
+  uBaseColor: gl.getUniformLocation(meshProg, 'uBaseColor'),
+  uOpacity: gl.getUniformLocation(meshProg, 'uOpacity'),
+};
+
+const bufPos = gl.createBuffer();
+const bufCol = gl.createBuffer();
+const bufInt = gl.createBuffer();
+const bufGrid = gl.createBuffer();
+const bufAxes = gl.createBuffer();
+const bufBimPos = gl.createBuffer();
+const bufBimNormal = gl.createBuffer();
+
+/* ---------------- 행렬 유틸 (카메라/투영용, float32 -- 렌더링 전용이라 double 정밀도가
+   필요 없다. BIM 노드 계층 누적에는 위의 *D 접미사 double 버전을 별도로 쓴다.) ---------------- */
+function mat4Perspective(fovY, aspect, near, far) {
+  const f = 1 / Math.tan(fovY / 2), nf = 1 / (near - far);
+  return new Float32Array([
+    f / aspect, 0, 0, 0,
+    0, f, 0, 0,
+    0, 0, (far + near) * nf, -1,
+    0, 0, 2 * far * near * nf, 0,
+  ]);
+}
+function mat4LookAt(eye, target, up) {
+  const zx = eye[0] - target[0], zy = eye[1] - target[1], zz = eye[2] - target[2];
+  let zl = Math.hypot(zx, zy, zz) || 1;
+  const z = [zx / zl, zy / zl, zz / zl];
+  const x = [up[1] * z[2] - up[2] * z[1], up[2] * z[0] - up[0] * z[2], up[0] * z[1] - up[1] * z[0]];
+  const xl = Math.hypot(...x) || 1; x[0] /= xl; x[1] /= xl; x[2] /= xl;
+  const y = [z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]];
+  return new Float32Array([
+    x[0], y[0], z[0], 0,
+    x[1], y[1], z[1], 0,
+    x[2], y[2], z[2], 0,
+    -(x[0] * eye[0] + x[1] * eye[1] + x[2] * eye[2]),
+    -(y[0] * eye[0] + y[1] * eye[1] + y[2] * eye[2]),
+    -(z[0] * eye[0] + z[1] * eye[1] + z[2] * eye[2]), 1,
+  ]);
+}
+function mat4Mul(a, b) {
+  const o = new Float32Array(16);
+  for (let c = 0; c < 4; c++)
+    for (let r = 0; r < 4; r++)
+      o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+  return o;
+}
+
+/* ---------------- 앱 상태 ---------------- */
+const app = {
+  nPoints: 0,
+  cloud: null,
+  bim: null,
+  bimVertexCount: 0,
+  origin: null,              // BIM/포인트클라우드가 공유하는 절대좌표 원점 (double)
+  bbox: null,                // 상대좌표 결합 bbox (cloud + bim)
+  cloudBBoxRelative: null,   // 포인트클라우드만의 상대좌표 bbox (recomputeCombinedBBox용)
+  iRange: [0, 1],
+  cam: { target: [0, 0, 0], dist: 50, azim: -Math.PI / 4, elev: Math.PI / 7, fitDist: 50 },
+  gridCount: 0,
+  bgColors: { dark: [0.078, 0.09, 0.11], black: [0, 0, 0], light: [0.91, 0.925, 0.945] },
+  abortFlag: false,
+  loading: false,
+  needRender: true,
+};
+
+function computeBBoxAndRanges(cloud) {
+  const p = cloud.pos.view(), n = p.length;
+  let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let k = 0; k < n; k += 3) {
+    const x = p[k], y = p[k + 1], z = p[k + 2];
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+  }
+  app.cloudBBoxRelative = { minX, minY, minZ, maxX, maxY, maxZ };
+
+  const iv = cloud.inten.view();
+  let iMin = Infinity, iMax = -Infinity;
+  for (let k = 0; k < iv.length; k++) {
+    if (iv[k] < iMin) iMin = iv[k];
+    if (iv[k] > iMax) iMax = iv[k];
+  }
+  if (!Number.isFinite(iMin) || iMin === iMax) { iMin = 0; iMax = 1; }
+  app.iRange = [iMin, iMax];
+}
+
+/* 포인트클라우드 bbox(상대좌표)와 BIM bbox(절대좌표 -- app.origin만큼 이동해 상대화)를
+   합쳐서 app.bbox를 만든다. 그리드/카메라 fit/높이색상 범위가 전부 이 값을 쓰므로,
+   BIM만 있든 포인트클라우드만 있든 둘 다 있든 항상 로드된 모든 것을 포괄한다. */
+function recomputeCombinedBBox() {
+  const boxes = [];
+  if (app.cloud && app.cloudBBoxRelative) boxes.push(app.cloudBBoxRelative);
+  if (app.bim && app.bim.bboxAbs) {
+    const o = app.origin || [0, 0, 0];
+    const b = app.bim.bboxAbs;
+    boxes.push({
+      minX: b.minX - o[0], minY: b.minY - o[1], minZ: b.minZ - o[2],
+      maxX: b.maxX - o[0], maxY: b.maxY - o[1], maxZ: b.maxZ - o[2],
+    });
+  }
+  if (!boxes.length) { app.bbox = null; return; }
+  const r = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity };
+  for (const b of boxes) {
+    r.minX = Math.min(r.minX, b.minX); r.maxX = Math.max(r.maxX, b.maxX);
+    r.minY = Math.min(r.minY, b.minY); r.maxY = Math.max(r.maxY, b.maxY);
+    r.minZ = Math.min(r.minZ, b.minZ); r.maxZ = Math.max(r.maxZ, b.maxZ);
+  }
+  app.bbox = r;
+}
+
+function uploadCloud(cloud) {
+  /// 공유 원점이 아직 없으면 이 클라우드의 원점으로 확립한다 (BIM이 먼저 로드되어 있었다면
+  /// parseASCII/parseLAS/generateSyntheticScan이 이미 app.origin을 그대로 재사용했을 것이다).
+  if (!app.origin && cloud.origin) app.origin = cloud.origin.slice();
+
+  const n = cloud.pos.n / 3;
+  app.nPoints = n;
+  app.cloud = cloud;
+  computeBBoxAndRanges(cloud);
+  recomputeCombinedBBox();
+  $('saveCloudBtn').disabled = (n === 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, bufPos);
+  gl.bufferData(gl.ARRAY_BUFFER, cloud.pos.view(), gl.STATIC_DRAW);
+
+  // 색상 스케일 결정: 0~1 / 0~255 / 16비트
+  const cv = cloud.col.view();
+  let cMax = 0;
+  for (let k = 0; k < Math.min(cv.length, 300000); k++) if (cv[k] > cMax) cMax = cv[k];
+  let scale = 1;
+  if (cMax <= 1.001) scale = 255;
+  else if (cMax > 255.5) scale = 1 / 256;
+  const u8 = new Uint8Array(cv.length);
+  for (let k = 0; k < cv.length; k++) {
+    const v = cv[k] * scale;
+    u8[k] = v < 0 ? 0 : v > 255 ? 255 : v;
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, bufCol);
+  gl.bufferData(gl.ARRAY_BUFFER, u8, gl.STATIC_DRAW);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, bufInt);
+  gl.bufferData(gl.ARRAY_BUFFER, cloud.inten.view(), gl.STATIC_DRAW);
+
+  buildGridAndAxes();
+
+  // 색상 모드 자동 선택
+  $('colorMode').value = cloud.hasColor ? '0' : (cloud.hasInten ? '2' : '1');
+  fitView();
+  updateStats();
+}
+
+/* BIM 모델을 확정하고 GPU 버퍼에 업로드한다. */
+function setBim(bim) {
+  const b = bim.bboxAbs;
+  const center = [(b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, (b.minZ + b.maxZ) / 2];
+  if (!app.origin) app.origin = center.slice();
+
+  app.bim = bim;
+  uploadBimBuffers();
+  recomputeCombinedBBox();
+  buildGridAndAxes();
+  updateBimStats();
+  $('genSynthBtn').disabled = false;
+  fitView();
+  requestRender();
+}
+
+function uploadBimBuffers() {
+  const bim = app.bim;
+  if (!bim) return;
+  const o = app.origin || [0, 0, 0];
+  const nVerts = bim.triCount * 3;
+  const pos = new Float32Array(nVerts * 3);
+  const nrm = new Float32Array(nVerts * 3);
+  let w = 0;
+  for (const el of bim.elements) {
+    for (const f of el.faces) {
+      for (const v of [f.v0, f.v1, f.v2]) {
+        pos[w * 3] = v[0] - o[0];
+        pos[w * 3 + 1] = v[1] - o[1];
+        pos[w * 3 + 2] = v[2] - o[2];
+        nrm[w * 3] = f.normal[0];
+        nrm[w * 3 + 1] = f.normal[1];
+        nrm[w * 3 + 2] = f.normal[2];
+        w++;
+      }
+    }
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, bufBimPos);
+  gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, bufBimNormal);
+  gl.bufferData(gl.ARRAY_BUFFER, nrm, gl.STATIC_DRAW);
+  app.bimVertexCount = w;
+}
+
+function clearAll() {
+  app.cloud = null; app.nPoints = 0;
+  app.bim = null; app.bimVertexCount = 0;
+  app.origin = null;
+  app.cloudBBoxRelative = null;
+  app.bbox = null;
+  app.gridCount = 0;
+  gl.bindBuffer(gl.ARRAY_BUFFER, bufPos); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(0), gl.STATIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, bufBimPos); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(0), gl.STATIC_DRAW);
+  $('stats').textContent = '파일을 열거나 합성 스캔을 생성하세요.';
+  $('bimStats').textContent = 'BIM이 로드되지 않았습니다.';
+  $('synthInfo').textContent = '';
+  $('genSynthBtn').disabled = true;
+  $('saveCloudBtn').disabled = true;
+  requestRender();
+}
+
+function buildGridAndAxes() {
+  const b = app.bbox;
+  if (!b) { app.gridCount = 0; return; }
+  const cx = (b.minX + b.maxX) / 2, cy = (b.minY + b.maxY) / 2;
+  const ext = Math.max(b.maxX - b.minX, b.maxY - b.minY, 1) * 0.75;
+  const step = niceStep(ext / 5);
+  const lines = [];
+  const nHalf = Math.ceil(ext / step);
+  const z = b.minZ;
+  for (let k = -nHalf; k <= nHalf; k++) {
+    lines.push(cx - nHalf * step, cy + k * step, z, cx + nHalf * step, cy + k * step, z);
+    lines.push(cx + k * step, cy - nHalf * step, z, cx + k * step, cy + nHalf * step, z);
+  }
+  app.gridCount = lines.length / 3;
+  gl.bindBuffer(gl.ARRAY_BUFFER, bufGrid);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(lines), gl.STATIC_DRAW);
+
+  const al = Math.max(ext * 0.18, step);
+  const axes = [
+    cx, cy, z, cx + al, cy, z,   // X
+    cx, cy, z, cx, cy + al, z,   // Y
+    cx, cy, z, cx, cy, z + al,   // Z
+  ];
+  gl.bindBuffer(gl.ARRAY_BUFFER, bufAxes);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(axes), gl.STATIC_DRAW);
+}
+function niceStep(raw) {
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const r = raw / mag;
+  return (r < 1.5 ? 1 : r < 3.5 ? 2 : r < 7.5 ? 5 : 10) * mag;
+}
+
+/* ---------------- 카메라 ---------------- */
+function fitView() {
+  const b = app.bbox; if (!b) return;
+  const c = app.cam;
+  c.target = [(b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, (b.minZ + b.maxZ) / 2];
+  const diag = Math.hypot(b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ) || 10;
+  c.dist = diag * 1.1;
+  c.fitDist = c.dist;
+  requestRender();
+}
+function cameraEye() {
+  const c = app.cam;
+  const cp = Math.cos(c.elev), sp = Math.sin(c.elev);
+  return [
+    c.target[0] + c.dist * cp * Math.cos(c.azim),
+    c.target[1] + c.dist * cp * Math.sin(c.azim),
+    c.target[2] + c.dist * sp,
+  ];
+}
+
+/* ---------------- 렌더링 ---------------- */
+function requestRender() { app.needRender = true; }
+
+function render() {
+  requestAnimationFrame(render);
+  if (!app.needRender) return;
+  app.needRender = false;
+
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.floor(canvas.clientWidth * dpr), h = Math.floor(canvas.clientHeight * dpr);
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  gl.viewport(0, 0, w, h);
+
+  const bg = app.bgColors[$('bgSel').value];
+  gl.clearColor(bg[0], bg[1], bg[2], 1);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST);
+
+  if (!app.bbox) return; // 아무 것도 로드되지 않음
+
+  const c = app.cam;
+  const near = Math.max(c.dist * 0.001, 0.01);
+  const far = c.dist * 50 + 1000;
+  const proj = mat4Perspective(Math.PI / 4, w / h, near, far);
+  const view = mat4LookAt(cameraEye(), c.target, [0, 0, 1]);
+  const mvp = mat4Mul(proj, view);
+
+  // 그리드 + 축
+  if ($('gridChk').checked && app.gridCount) {
+    gl.useProgram(lineProg);
+    gl.uniformMatrix4fv(lloc.uMVP, false, mvp);
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufGrid);
+    gl.enableVertexAttribArray(lloc.aPos);
+    gl.vertexAttribPointer(lloc.aPos, 3, gl.FLOAT, false, 0, 0);
+    const light = $('bgSel').value === 'light';
+    gl.uniform4f(lloc.uColor, light ? 0.65 : 0.22, light ? 0.68 : 0.25, light ? 0.72 : 0.3, 1);
+    gl.drawArrays(gl.LINES, 0, app.gridCount);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufAxes);
+    gl.vertexAttribPointer(lloc.aPos, 3, gl.FLOAT, false, 0, 0);
+    gl.uniform4f(lloc.uColor, 0.9, 0.25, 0.25, 1); gl.drawArrays(gl.LINES, 0, 2);
+    gl.uniform4f(lloc.uColor, 0.25, 0.8, 0.3, 1); gl.drawArrays(gl.LINES, 2, 2);
+    gl.uniform4f(lloc.uColor, 0.3, 0.5, 0.95, 1); gl.drawArrays(gl.LINES, 4, 2);
+  }
+
+  // BIM 메시 (반투명 플랫 셰이딩)
+  if (app.bim && app.bimVertexCount && $('bimVisibleChk').checked) {
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.depthMask(false);
+    gl.useProgram(meshProg);
+    gl.uniformMatrix4fv(mloc.uMVP, false, mvp);
+    gl.uniform1f(mloc.uOpacity, parseFloat($('bimOpacity').value));
+    gl.uniform3f(mloc.uBaseColor, 0.85, 0.55, 0.25); // BIM 강조색(주황 계열)
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufBimPos);
+    gl.enableVertexAttribArray(mloc.aPos);
+    gl.vertexAttribPointer(mloc.aPos, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufBimNormal);
+    gl.enableVertexAttribArray(mloc.aNormal);
+    gl.vertexAttribPointer(mloc.aNormal, 3, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, app.bimVertexCount);
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
+  }
+
+  // 포인트
+  if (app.nPoints) {
+    gl.useProgram(prog);
+    gl.uniformMatrix4fv(loc.uMVP, false, mvp);
+    gl.uniform1f(loc.uPtSize, parseFloat($('ptSize').value) * dpr);
+    gl.uniform1f(loc.uRefDist, c.fitDist * 0.5);
+    gl.uniform1i(loc.uMode, parseInt($('colorMode').value, 10));
+    gl.uniform1i(loc.uAtten, $('attenChk').checked ? 1 : 0);
+    gl.uniform1i(loc.uRound, $('roundChk').checked ? 1 : 0);
+    gl.uniform2f(loc.uZRange, app.bbox.minZ, app.bbox.maxZ);
+    gl.uniform2f(loc.uIRange, app.iRange[0], app.iRange[1]);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufPos);
+    gl.enableVertexAttribArray(loc.aPos);
+    gl.vertexAttribPointer(loc.aPos, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufCol);
+    gl.enableVertexAttribArray(loc.aCol);
+    gl.vertexAttribPointer(loc.aCol, 3, gl.UNSIGNED_BYTE, true, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufInt);
+    gl.enableVertexAttribArray(loc.aInt);
+    gl.vertexAttribPointer(loc.aInt, 1, gl.FLOAT, false, 0, 0);
+
+    gl.drawArrays(gl.POINTS, 0, app.nPoints);
+  }
+}
+requestAnimationFrame(render);
+
+/* ---------------- 마우스 조작 ---------------- */
+let drag = null;
+canvas.addEventListener('mousedown', e => {
+  drag = { x: e.clientX, y: e.clientY, btn: e.button, shift: e.shiftKey };
+});
+window.addEventListener('mousemove', e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  drag.x = e.clientX; drag.y = e.clientY;
+  const c = app.cam;
+  if (drag.btn === 0 && !drag.shift) {
+    c.azim -= dx * 0.006;
+    c.elev = Math.min(Math.PI / 2 - 0.01, Math.max(-Math.PI / 2 + 0.01, c.elev + dy * 0.006));
+  } else {
+    // 팬: 카메라 기준 우/상 벡터로 이동
+    const eye = cameraEye();
+    const f = [c.target[0] - eye[0], c.target[1] - eye[1], c.target[2] - eye[2]];
+    const fl = Math.hypot(...f); f[0] /= fl; f[1] /= fl; f[2] /= fl;
+    const up = [0, 0, 1];
+    const right = [f[1] * up[2] - f[2] * up[1], f[2] * up[0] - f[0] * up[2], f[0] * up[1] - f[1] * up[0]];
+    const rl = Math.hypot(...right) || 1; right[0] /= rl; right[1] /= rl; right[2] /= rl;
+    const upv = [right[1] * f[2] - right[2] * f[1], right[2] * f[0] - right[0] * f[2], right[0] * f[1] - right[1] * f[0]];
+    const k = c.dist * 0.0016;
+    c.target[0] += (-dx * right[0] + dy * upv[0]) * k;
+    c.target[1] += (-dx * right[1] + dy * upv[1]) * k;
+    c.target[2] += (-dx * right[2] + dy * upv[2]) * k;
+  }
+  requestRender();
+});
+window.addEventListener('mouseup', () => drag = null);
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  app.cam.dist *= Math.exp(e.deltaY * 0.0012);
+  app.cam.dist = Math.max(app.cam.fitDist * 0.002, Math.min(app.cam.fitDist * 40, app.cam.dist));
+  requestRender();
+}, { passive: false });
+canvas.addEventListener('dblclick', fitView);
+window.addEventListener('resize', requestRender);
+
+/* ---------------- UI 연결 ---------------- */
+function showToast(msg) {
+  const t = $('toast');
+  t.textContent = msg; t.style.display = 'block';
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.style.display = 'none', 5000);
+}
+function fmtNum(n) { return n.toLocaleString('ko-KR'); }
+
+function updateStats() {
+  const c = app.cloud, b = app.cloudBBoxRelative;
+  if (!c || !b) return;
+  const o = c.origin || [0, 0, 0];
+  const dims = [b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ].map(v => v.toFixed(2));
+  const absMin = [b.minX + o[0], b.minY + o[1], b.minZ + o[2]].map(v => v.toFixed(3));
+  const absMax = [b.maxX + o[0], b.maxY + o[1], b.maxZ + o[2]].map(v => v.toFixed(3));
+  $('stats').innerHTML =
+    `<b>${c.name}</b><br>` +
+    `표시 포인트: <b>${fmtNum(app.nPoints)}</b>` +
+    (c.totalInFile > app.nPoints ? ` / 원본 ${fmtNum(c.totalInFile)} (1/${c.stride} 샘플링)` : '') + `<br>` +
+    `크기(m): ${dims[0]} × ${dims[1]} × ${dims[2]}<br>` +
+    `최소: ${absMin.join(', ')}<br>최대: ${absMax.join(', ')}<br>` +
+    `색상: ${c.hasColor ? '있음' : '없음'} · 강도: ${c.hasInten ? '있음' : '없음'}`;
+}
+
+function updateBimStats() {
+  const bim = app.bim;
+  if (!bim) { $('bimStats').textContent = 'BIM이 로드되지 않았습니다.'; return; }
+  const b = bim.bboxAbs;
+  const dims = [b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ].map(v => v.toFixed(2));
+  $('bimStats').innerHTML =
+    `부재(요소) 수: <b>${bim.elements.length}</b><br>` +
+    `삼각형 수: <b>${fmtNum(bim.triCount)}</b><br>` +
+    `크기(m): ${dims[0]} × ${dims[1]} × ${dims[2]}`;
+}
+
+function showGroundTruth(gt) {
+  $('synthInfo').innerHTML =
+    `주입한 정답(ground truth):<br>` +
+    `회전: <b>${gt.rotDeg}°</b> (Z축, 중심 ${gt.center.map(v => v.toFixed(2)).join(', ')})<br>` +
+    `이동: <b>${gt.shift.map(v => v.toFixed(3)).join(', ')}</b><br>` +
+    `노이즈 σ: ${gt.noiseSigma}<br>` +
+    `생성된 점: ${fmtNum(gt.numPoints)}개<br>` +
+    `※ ICP 결과의 twist_angle_deg/최종 변환이 이 값을 복원해야 합니다.`;
+}
+
+/* ============================================================
+ * 포인트클라우드 저장 (.las / .xyz)
+ * 로드된 실제 스캔이든 "합성 스캔 생성"으로 만든 데이터든 상관없이 app.cloud를
+ * 그대로 파일로 내보낸다 -- 특히 .las로 저장하면 실제 MasterApp의 분산 ICP
+ * 파이프라인(REST /api/icp/start)에 그대로 넣어 진짜로 정합 테스트를 해볼 수 있다.
+ * ============================================================ */
+
+/* 최소한의 LAS 1.2, Point Data Format 3(강도+RGB) 파일을 직접 인코딩한다.
+   헤더의 각 필드 바이트 오프셋은 위 parseLAS()가 읽는 오프셋과 정확히 대응시켜서,
+   이 도구가 저장한 파일을 이 도구 스스로도, 그리고 실제 LASlib 기반 C++ 리더도
+   문제없이 읽을 수 있게 했다 (ASPRS LAS 1.2 공개 헤더 스펙과 동일한 227바이트 레이아웃). */
+function encodeLAS(cloud) {
+  const posView = cloud.pos.view();
+  const n = posView.length / 3;
+  const o = cloud.origin || [0, 0, 0];
+  const scale = 0.001; // 1mm 정밀도
+
+  let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const x = posView[i * 3] + o[0], y = posView[i * 3 + 1] + o[1], z = posView[i * 3 + 2] + o[2];
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+  }
+  // LAS의 X/Y/Z offset으로 공유 원점을 그대로 써서, int32 좌표값이 작게 유지되도록 한다.
+  const ox = o[0], oy = o[1], oz = o[2];
+
+  const headerSize = 227;
+  const recLen = 34;
+  const buf = new ArrayBuffer(headerSize + n * recLen);
+  const dv = new DataView(buf);
+  const enc = new TextEncoder();
+
+  new Uint8Array(buf, 0, 4).set(enc.encode('LASF'));
+  dv.setUint16(4, 0, true);          // File Source ID
+  dv.setUint16(6, 0, true);          // Global Encoding
+  // Project ID GUID(8+2+2+8바이트, offset 8-23) -- 전부 0으로 둠(선택 필드)
+  dv.setUint8(24, 1);                // Version Major
+  dv.setUint8(25, 2);                // Version Minor
+  const sysId = enc.encode('OTHER').slice(0, 32);
+  new Uint8Array(buf, 26, sysId.length).set(sysId);
+  const genSw = enc.encode('pointcloud_viewer.html').slice(0, 32);
+  new Uint8Array(buf, 58, genSw.length).set(genSw);
+  const now = new Date();
+  dv.setUint16(90, 1, true);                       // File Creation Day of Year
+  dv.setUint16(92, now.getFullYear(), true);        // File Creation Year
+  dv.setUint16(94, headerSize, true);               // Header Size
+  dv.setUint32(96, headerSize, true);               // Offset to point data
+  dv.setUint32(100, 0, true);                       // Number of VLRs
+  dv.setUint8(104, 3);                              // Point Data Format ID = 3
+  dv.setUint16(105, recLen, true);                  // Point Data Record Length
+  dv.setUint32(107, n, true);                       // Number of point records
+  for (let i = 0; i < 5; i++) dv.setUint32(111 + i * 4, 0, true); // Number of points by return
+  dv.setFloat64(131, scale, true);
+  dv.setFloat64(139, scale, true);
+  dv.setFloat64(147, scale, true);
+  dv.setFloat64(155, ox, true);
+  dv.setFloat64(163, oy, true);
+  dv.setFloat64(171, oz, true);
+  dv.setFloat64(179, maxX, true);
+  dv.setFloat64(187, minX, true);
+  dv.setFloat64(195, maxY, true);
+  dv.setFloat64(203, minY, true);
+  dv.setFloat64(211, maxZ, true);
+  dv.setFloat64(219, minZ, true);
+
+  const colView = cloud.col.view();
+  const intView = cloud.inten.view();
+  // uploadCloud()와 동일한 방식으로 색상 스케일(0~1 / 0~255 / 16비트)을 판별해 16비트로 통일
+  let cMax = 0;
+  for (let k = 0; k < Math.min(colView.length, 300000); k++) if (colView[k] > cMax) cMax = colView[k];
+  let colScale = 257; // 0~255 -> 0~65535
+  if (cMax <= 1.001) colScale = 65535;
+  else if (cMax > 255.5) colScale = 1;
+
+  let off = headerSize;
+  for (let i = 0; i < n; i++) {
+    const x = posView[i * 3] + o[0], y = posView[i * 3 + 1] + o[1], z = posView[i * 3 + 2] + o[2];
+    dv.setInt32(off, Math.round((x - ox) / scale), true);
+    dv.setInt32(off + 4, Math.round((y - oy) / scale), true);
+    dv.setInt32(off + 8, Math.round((z - oz) / scale), true);
+    const inten = Math.max(0, Math.min(65535, Math.round(intView[i] || 0)));
+    dv.setUint16(off + 12, inten, true);
+    dv.setUint8(off + 14, 0x11); // return_number=1, number_of_returns=1
+    dv.setUint8(off + 15, 0);    // classification
+    dv.setInt8(off + 16, 0);     // scan angle rank
+    dv.setUint8(off + 17, 0);   // user data
+    dv.setUint16(off + 18, 0, true); // point source id
+    dv.setFloat64(off + 20, 0, true); // gps time
+    const r = Math.max(0, Math.min(65535, Math.round((colView[i * 3] || 0) * colScale)));
+    const g = Math.max(0, Math.min(65535, Math.round((colView[i * 3 + 1] || 0) * colScale)));
+    const b = Math.max(0, Math.min(65535, Math.round((colView[i * 3 + 2] || 0) * colScale)));
+    dv.setUint16(off + 28, r, true);
+    dv.setUint16(off + 30, g, true);
+    dv.setUint16(off + 32, b, true);
+    off += recLen;
+  }
+  return buf;
+}
+
+/* 단순 텍스트 XYZ(RGB 있으면 XYZRGB) 내보내기 -- CloudCompare 등 다른 도구와 호환 */
+function encodeXYZ(cloud) {
+  const posView = cloud.pos.view();
+  const n = posView.length / 3;
+  const o = cloud.origin || [0, 0, 0];
+  const colView = cloud.col.view();
+  const hasColor = cloud.hasColor;
+  const lines = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = (posView[i * 3] + o[0]).toFixed(4);
+    const y = (posView[i * 3 + 1] + o[1]).toFixed(4);
+    const z = (posView[i * 3 + 2] + o[2]).toFixed(4);
+    lines[i] = hasColor
+      ? `${x} ${y} ${z} ${Math.round(colView[i * 3])} ${Math.round(colView[i * 3 + 1])} ${Math.round(colView[i * 3 + 2])}`
+      : `${x} ${y} ${z}`;
+  }
+  return lines.join('\n') + '\n';
+}
+
+function downloadBlob(blob, filename) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+function sanitizeFilename(s) {
+  return (s || 'pointcloud').replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, '_').slice(0, 80) || 'pointcloud';
+}
+
+function saveCurrentCloud() {
+  if (!app.cloud || !app.nPoints) { showToast('저장할 포인트클라우드가 없습니다.'); return; }
+  const fmt = $('saveFormat').value;
+  const baseName = sanitizeFilename(app.cloud.name);
+  if (fmt === 'las') {
+    const buf = encodeLAS(app.cloud);
+    downloadBlob(new Blob([buf], { type: 'application/octet-stream' }), baseName + '.las');
+  } else {
+    const text = encodeXYZ(app.cloud);
+    downloadBlob(new Blob([text], { type: 'text/plain' }), baseName + '.xyz');
+  }
+  showToast(`${baseName}.${fmt} 저장됨 (${fmtNum(app.nPoints)}점)`);
+}
+
+async function loadFile(file) {
+  if (app.loading) { showToast('이미 불러오는 중입니다.'); return; }
+  app.loading = true; app.abortFlag = false;
+  $('progressWrap').style.display = 'block';
+  $('progressLabel').textContent = `${file.name} 불러오는 중…`;
+  const setProgress = (frac, kept) => {
+    const pct = Math.min(100, frac * 100);
+    $('progressBar').style.width = pct + '%';
+    $('progressPct').textContent = pct.toFixed(0) + '% · ' + fmtNum(Math.round(kept)) + '점';
+  };
+  const opts = {
+    budget: parseInt($('maxPoints').value, 10),
+    format: $('colFormat').value === 'auto' ? null : COL_FORMATS[$('colFormat').value],
+    isAborted: () => app.abortFlag,
+    presetOrigin: app.origin,
+  };
+  try {
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    let cloud;
+    if (ext === 'laz') throw new Error('LAZ 압축 파일은 지원하지 않습니다. LAS로 변환 후 열어주세요.');
+    if (ext === 'las') cloud = await parseLAS(file, opts, setProgress);
+    else cloud = await parseASCII(file, opts, setProgress);
+    if (!cloud.pos.n) throw new Error('포인트를 읽지 못했습니다. 열 형식을 확인하세요.');
+    uploadCloud(cloud);
+  } catch (err) {
+    if (err.message !== 'aborted') showToast('불러오기 실패: ' + err.message);
+  } finally {
+    app.loading = false;
+    $('progressWrap').style.display = 'none';
+    requestRender();
+  }
+}
+
+$('openBtn').onclick = () => $('fileInput').click();
+$('fileInput').onchange = e => { if (e.target.files[0]) loadFile(e.target.files[0]); e.target.value = ''; };
+$('bimOpenBtn').onclick = () => $('bimInput').click();
+$('bimInput').onchange = e => { if (e.target.files.length) loadBimFiles(e.target.files); e.target.value = ''; };
+$('clearAllBtn').onclick = clearAll;
+$('genSynthBtn').onclick = () => {
+  if (!app.bim) { showToast('먼저 BIM을 불러오세요.'); return; }
+  const opts = {
+    gridSize: parseFloat($('synthGrid').value) || 0.02,
+    noiseSigma: parseFloat($('synthNoise').value) || 0,
+    shiftX: parseFloat($('synthShiftX').value) || 0,
+    shiftY: parseFloat($('synthShiftY').value) || 0,
+    shiftZ: parseFloat($('synthShiftZ').value) || 0,
+    rotDeg: parseFloat($('synthRot').value) || 0,
+  };
+  const { cloud, groundTruth } = generateSyntheticScan(app.bim, opts);
+  if (!cloud.pos.n) { showToast('가상점이 생성되지 않았습니다 (격자 간격을 확인하세요).'); return; }
+  uploadCloud(cloud);
+  showGroundTruth(groundTruth);
+};
+$('cancelBtn').onclick = () => { app.abortFlag = true; };
+$('saveCloudBtn').onclick = saveCurrentCloud;
+$('fitBtn').onclick = fitView;
+$('topBtn').onclick = () => { app.cam.azim = -Math.PI / 2; app.cam.elev = Math.PI / 2 - 0.02; requestRender(); };
+$('frontBtn').onclick = () => { app.cam.azim = -Math.PI / 2; app.cam.elev = 0.05; requestRender(); };
+$('shotBtn').onclick = () => {
+  const a = document.createElement('a');
+  a.download = 'pointcloud_view.png';
+  a.href = canvas.toDataURL('image/png');
+  a.click();
+};
+for (const id of ['colorMode', 'ptSize', 'attenChk', 'roundChk', 'gridChk', 'bgSel', 'bimVisibleChk', 'bimOpacity'])
+  $(id).addEventListener('input', requestRender);
+
+/* 드래그 앤 드롭: .glb는 BIM으로, 그 외 하나는 포인트클라우드로 */
+let dragDepth = 0;
+window.addEventListener('dragenter', e => { e.preventDefault(); dragDepth++; $('dropOverlay').style.display = 'flex'; });
+window.addEventListener('dragleave', e => { e.preventDefault(); if (--dragDepth <= 0) { dragDepth = 0; $('dropOverlay').style.display = 'none'; } });
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('drop', e => {
+  e.preventDefault(); dragDepth = 0; $('dropOverlay').style.display = 'none';
+  const files = Array.from(e.dataTransfer.files || []);
+  if (!files.length) return;
+  const glbFiles = files.filter(f => /\.glb$/i.test(f.name));
+  const otherFiles = files.filter(f => !/\.glb$/i.test(f.name));
+  if (glbFiles.length) loadBimFiles(glbFiles);
+  if (otherFiles.length) loadFile(otherFiles[0]);
+});
+
+/* 테스트/자동화 훅 */
+window.viewerApp = {
+  app, loadFile, loadBimFiles, uploadCloud, setBim, clearAll, render,
+  parseGLB, walkGLTFScene, generatePseudoPointsForBim, generateSyntheticScan, triangleAreaJS,
+  encodeLAS, encodeXYZ, saveCurrentCloud, parseLAS,
+};
+</script>
+</body>
+</html>
