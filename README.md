@@ -19,6 +19,7 @@ DPApp_II/
 ├── Test/                단위 테스트 (Google Test 기반, 4개 프로젝트)
 ├── config/              설정 파일 예시 (현재 코드에서 읽지 않는 미사용 상태 — doc/handover/05 참고)
 ├── data/                테스트/예제 데이터
+├── tools/               보조 도구 (BIM+포인트클라우드 뷰어 — tools/README.md 참고)
 ├── vendors/             외부 라이브러리 (Eigen3, LAStools, gltf)
 ├── bin/                 빌드 결과물(.exe/.dll)이 모이는 곳
 └── DPApp.sln            Visual Studio 솔루션 파일 (유일하게 지원되는 빌드 방법)
@@ -58,4 +59,5 @@ Master 콘솔에서 `help`를 입력하면 사용 가능한 명령어 목록을 
 
 - [doc/handover/00_인수인계_시작하기.md](doc/handover/00_인수인계_시작하기.md) — 전체 문서 목록 및 읽는 순서
 - [doc/handover/06_상세_테스트_절차서_비전문가용.md](doc/handover/06_상세_테스트_절차서_비전문가용.md) — 그대로 따라 할 수 있는 테스트 절차
+- [tools/README.md](tools/README.md) — BIM+포인트클라우드 뷰어 사용법 (브라우저로 열기만 하면 됨, 합성 테스트 데이터 생성/저장 가능)
 - [CHANGELOG_2026-07-10.md](CHANGELOG_2026-07-10.md), [CHANGELOG_2026-07-11.md](CHANGELOG_2026-07-11.md) — 최근 변경 이력
